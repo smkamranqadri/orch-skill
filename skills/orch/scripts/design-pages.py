@@ -3,7 +3,9 @@
 
   design-pages.py review <dir>       <dir>/review.json  -> <dir>/review.html
   design-pages.py prototype <dir>    <dir>/inventory.json + <dir>/links.json -> <dir>/prototype.html
-  design-pages.py check <dir>        report missing images, dangling links, hotspots off the frame
+  design-pages.py check <dir> [--previous <dir>]
+                                     report missing images, dangling links, hotspots off the frame,
+                                     and frames the previous round's inventory had that are gone
 
 Both pages are plain files that open from disk; images are referenced by relative path, nothing
 is uploaded. Open them with `open <dir>/review.html`. `prototype.html?hot#<frame>` opens a frame
@@ -213,11 +215,15 @@ render();
     return path, len(frames), sum(len(v) for v in hot.values())
 
 
-def check(d):
+def check(d, previous=None):
     problems = []
     if os.path.exists(os.path.join(d, "inventory.json")):
         frames = norm_frames(d, load(d, "inventory.json"))
         ids = {f["id"] for f in frames}
+        if previous and os.path.exists(os.path.join(previous, "inventory.json")):
+            for f in load(previous, "inventory.json"):
+                if f["id"] not in ids:
+                    problems.append(f"frame {f['id']} ({f.get('name', '')}) was in the previous round and is gone: the prototype no longer reaches it")
         for f in frames:
             if not f["exists"]:
                 problems.append(f"frame {f['id']}: image missing: {f['image']}")
@@ -264,7 +270,8 @@ def main(argv):
     if cmd == "prototype":
         p, n, h = build_prototype(d); print(f"wrote {p} ({n} frames, {h} hotspots)"); return 0
     if cmd == "check":
-        ps = check(d)
+        prev = argv[argv.index("--previous") + 1] if "--previous" in argv else None
+        ps = check(d, prev)
         print("\n".join(ps) if ps else "ok"); return 1 if ps else 0
     print(__doc__); return 2
 

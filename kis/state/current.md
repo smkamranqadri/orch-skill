@@ -55,6 +55,14 @@
   could otherwise start on a CLI at 88% with exit 2); `--sub worker` uses the Agent tool's
   `isolation: "worktree"`; `references/brief-rules.md` ships the standing rules so briefs stand
   without a lessons space; SKILL.md no longer names the installer.
+- 0.7.1 (review fixes): the `designer` sub-agent definition now says "design only through the
+  Pencil MCP" and names Bash, Read and Write for exports, JSON and pages (its opening line
+  had forbidden them); `design-pages.py check --previous` names frames reachable last round
+  and gone now; design.md says the inventory must reach every frame across .pen files and
+  records that the last tartib round's before frames were reconstructions, not captures.
+- Known limit: the Claude usage number is as fresh as the last Claude turn on this machine;
+  after a window reset with no Claude session answering, the board shows the old figure and
+  an ASK that may not apply. No second source without the OAuth token, which stays unread.
 - Next: the agent-memory repo (its own plan: the lessons skill with a pluggable notes
   backend). Also open: the three unproved items above, and the tartib run's legacy ledger
   (migrate only at the owner's word). The tartib run still uses its legacy
