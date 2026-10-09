@@ -5,11 +5,20 @@ argument-hint: <the event text the watcher sent>
 
 # Orch: event
 
+Owner is your orchestrator pane id. One run and watcher serve all owners. Edit only rows
+owned by you and exact-match `Next action (<owner>):` when updating it; preserve every other
+owner's line. Legacy rows without an owner fall back to `<dir>/orchestrator`; claim them only
+when that default is you: pin them with `move <dir> <agent>... --from <your pane id>
+--orch <your pane id>` and record the owner in their ledger rows.
+
 The watcher sends "orch event: <agent> finished (08:24); ..." when the orchestrator is idle with
 an empty input box. It batches events that happened while the orchestrator was busy, so one
 prompt can carry several agents.
 
-1. `tail -20 <dir>/events.log` if the prompt says "and N more"; otherwise the prompt is enough.
+1. If the prompt says "and N more", read events.log and filter agents by your current owner
+   registrations. Read only your `orch=<owner>` entries in wake.md (legacy entries belong to
+   the default owner). Preserve other owners' entries; process only your owned agents.
+   Recheck ownership before acting: a handoff may have moved an agent since the prompt.
 2. For each agent named, read its verdict, not its output (rule 3): `herdr agent read <agent>
    --source recent-unwrapped --lines 15 | tail -10`, or the handoff's `## Result` section.
    - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
@@ -29,12 +38,12 @@ prompt can carry several agents.
      work only; with unmerged commits, keep the worktree and say so), and `git branch -d <branch>`
      (never `-D`).
    - Ledger: row status "closed", with the merge commit; events.log one line.
-   Before ending any event turn, check the ledger: a row that is "done" or "merged" but neither
+   Before ending any event turn, check your ledger rows: a row that is "done" or "merged" but neither
    "closed" nor "open: next cycle ..." is a missed step.
-4. Update the ledger rows and Next action. When the repo has `kis/` and this event merged or
+4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/` and this event merged or
    closed work, rewrite `kis/state/current.md` in the same turn, inline (it is a few lines, not
    a sub-agent job): Task, Status, Proof as recorded in the ledger, and Next equal to the
-   ledger's Next action. The ledger and State must never disagree about what is merged; a
+   ledger's Next action for this owner. Preserve other owners' current State entries. The ledger and State must never disagree about what is merged; a
    handoff is too late to fix it. When the status space exists, give its task a one-line thought
    through a sub-agent (rule 49).
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.

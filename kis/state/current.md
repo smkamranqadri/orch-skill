@@ -1,6 +1,6 @@
 # Current
 
-- Branch: `main`, tracking `origin/main` at `https://github.com/smkamranqadri/orch-skill`
+- Branch: `orchwatch` (worker worktree; inherited main state below), tracking `origin/main` at `https://github.com/smkamranqadri/orch-skill`
   (public, like kis-skill). Pushed 2026-10-09 through edf5105; 22c965e and this sync are local.
 - Task: orchestration handed from Codex to Claude Opus at the owner's request; lore's 0.4.1
   0.4.1 items 1-2 verified by orch-3, items 3-4 back with lore. New task (owner, 2026-10-09):
@@ -10,6 +10,12 @@
   from this repo (`bootstrap.sh check --source .` current).
 - Command: `tests/run.sh` (eight test files, all pass as of 22c965e);
   `./bootstrap.sh check --source .`; `./bootstrap.sh doctor`.
+- Worker task: approved multi-orch plan in `../intent/plan-2026-10-09-multi-orch.md`;
+  Standard mode; tasks 1–2 proved on branch, awaiting orchestrator review/merge. Full suite
+  passed; eight watcher tests and eight mutation checks. Own-pane capture: one board after
+  60 redraws, five Recent lines; SIGTERM restored shell; own tab closed. Live install/restart
+  reserved for orch-3. Next worker action: commit tasks 1–2, then read added task 4 and implement
+  cmd statusline usage as a separate commit at 0.9.0.
 - Blocker: none.
 - Proof: per phase under its entry in the plan file. 0.8.0 (b7fe302): suite pass, the
   never-clobber guard mutation-checked. 0.8.1 (0a285d4): suite pass (seven files), the

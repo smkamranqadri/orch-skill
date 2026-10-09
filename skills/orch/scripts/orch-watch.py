@@ -4,11 +4,13 @@
   orch-watch.py watch <dir> [agent...] [--orch <target>]
       Runs until killed (start it with: herdr pane run <pane> "python3 <this> watch <dir> ...").
       Watches every agent in <dir>/agents.txt (the agents given here are added to it), redraws a
-      plain board in its pane, appends one line per status change to <dir>/events.log, shows a
+      board in an alternate terminal buffer, appends one line per status change to <dir>/events.log, shows a
       Herdr notification when an agent finishes, needs you, or closes, and wakes the
-      orchestrator named in <dir>/orchestrator with one batched prompt when it is idle and its
+      owner in agents.txt (bare names fall back to <dir>/orchestrator), batching per owner
+      when it is idle and its
       input box is empty. Writes its pid to <dir>/watcher.pid.
-  orch-watch.py add <dir> <agent>...      watch more agents; the running watcher picks them up
+  orch-watch.py add <dir> <agent>... [--orch <target>]  register agents with an owner
+  orch-watch.py move <dir> <agent>... --from <old> --orch <new>  transfer only owned agents
   orch-watch.py remove <dir> <agent>...   stop watching agents
   orch-watch.py orch <dir> <target>       set the orchestrator to wake (agent name or pane id);
                                           "none" turns waking off
@@ -21,6 +23,8 @@
                                           prints the new lines, exit 3 on timeout
 """
 import datetime as dt
+import fcntl
+from contextlib import contextmanager
 import json
 import os
 import re
@@ -166,11 +170,14 @@ class Watcher:
         self.since = {}       # agent -> iso time of last change
         self.info = {}        # agent -> (title, ctx)
         self.pending = []     # (iso, agent, state) waiting to be told to the orchestrator
-        self.held_since = None
-        self.held_noticed = False
-        self.next_try = 0
+        self.held_since = {}
+        self.held_noticed = {}
+        self.next_try = {}
         self.recent = self.seed_recent()
         self.orch_note = ""
+        self.owners = {}
+        self.owner_notes = {}
+        self.last_board = None
         self.usage = ""       # one line from orch-usage.py, refreshed every USAGE_EVERY seconds
         self.usage_at = 0
 
@@ -182,7 +189,7 @@ class Watcher:
                 recent.append(f"{local(m.group(1))}  {m.group(2)}  {PLAIN[m.group(3)]}")
             elif m and m.group(2) == "orchestrator":
                 recent.append(f"{local(m.group(1))}  → orchestrator told")
-        return recent[-8:]
+        return recent[-5:]
 
     def append(self, line):
         with open(self.log, "a") as f:
@@ -211,7 +218,8 @@ class Watcher:
         if live is None:
             return False
         changed = self.refresh_usage()
-        names = read_lines(os.path.join(self.dir, "agents.txt"))
+        self.owners = registrations(self.dir)
+        names = self.owners
         for name in names:
             entry = live.get(name)
             state = entry.get("agent_status", "unknown") if entry else "gone"
@@ -237,7 +245,7 @@ class Watcher:
             changed = True
             self.append(f"{now} {name} {state} | {title} | ctx {ctx or '-'}")
             if {before, state} != {"done", "idle"}:  # done <-> idle is only the user looking at the pane
-                self.recent = (self.recent + [f"{local(now)}  {name}  {PLAIN.get(state, state)}"])[-8:]
+                self.recent = (self.recent + [f"{local(now)}  {name}  {PLAIN.get(state, state)}"])[-5:]
             if first:
                 continue
             wake = state in WAKE_STATES or (state == "idle" and before in ("working", "blocked"))
@@ -247,33 +255,55 @@ class Watcher:
         for name in list(self.prev):
             if name not in names:
                 del self.prev[name]
+                self.seq.pop(name, None)
+                self.info.pop(name, None)
+                self.since.pop(name, None)
                 changed = True
         if self.pending:
             changed |= self.try_wake(live)
+        elif self.orch_note:
+            self.orch_note = ""
+            changed = True
         return changed
 
     def try_wake(self, live):
-        target = (read_lines(os.path.join(self.dir, "orchestrator")) or ["none"])[0]
+        # Resolve at delivery time: pending events follow agents through a handoff.
+        self.owners = registrations(self.dir)
+        self.pending = [e for e in self.pending if e[1] in self.owners]
+        changed = False
+        notes = []
+        for target in dict.fromkeys(self.owners[a] for _, a, _ in self.pending):
+            batch = [e for e in self.pending if self.owners[e[1]] == target]
+            changed |= self.wake_owner(live, target, batch)
+            self.owner_notes[target] = self.owner_note
+            notes.append(self.owner_note)
+        note = "; ".join(notes)
+        changed |= note != self.orch_note
+        self.orch_note = note
+        return changed
+
+    def wake_owner(self, live, target, batch):
+        self.owner_note = self.owner_notes.get(target, f"wakes {target}")
         if target == "none":
-            self.orch_note = "waking off"
+            self.owner_note = "waking off"
             return False
-        if time.time() < self.next_try:
+        if time.time() < self.next_try.get(target, 0):
             return False
-        self.next_try = time.time() + RETRY
+        self.next_try[target] = time.time() + RETRY
         entry = live.get(target)
         if not entry:
-            note = f"orchestrator {target} not found; {len(self.pending)} event(s) held"
+            note = f"orchestrator {target} not found; {len(batch)} event(s) held"
         else:
             st = entry.get("agent_status")
             empty = input_empty(target)
             safe = empty is True or (empty is None and not entry.get("focused"))
             if st not in ("idle", "done"):
-                note = f"orchestrator {st}; {len(self.pending)} event(s) held until it is idle"
+                note = f"orchestrator {target} {st}; {len(batch)} event(s) held until it is idle"
             elif not safe:
-                note = f"orchestrator has typed input or is focused; {len(self.pending)} event(s) held"
+                note = f"orchestrator {target} has typed input or is focused; {len(batch)} event(s) held"
             else:
-                parts = [f"{a} {PLAIN.get(s, s)} ({local(t)})" for t, a, s in self.pending[-6:]]
-                more = len(self.pending) - 6
+                parts = [f"{a} {PLAIN.get(s, s)} ({local(t)})" for t, a, s in batch[-6:]]
+                more = len(batch) - 6
                 text = "orch event: " + "; ".join(parts) + (f"; and {more} more" if more > 0 else "")
                 text += ". Follow ~/.agents/skills/orch/commands/event.md."
                 code, _ = herdr("agent", "prompt", target, text, "--wait", "--until", "working",
@@ -283,34 +313,39 @@ class Watcher:
                     # refuses it ("not an active named agent") and a prompt typed into its composer
                     # is never submitted, so put the wake where the orchestrator will read it at
                     # the start of its next turn instead of typing it into the pane.
-                    who = ", ".join(sorted({a for _, a, _ in self.pending}))
+                    who = ", ".join(sorted({a for _, a, _ in batch}))
                     try:
                         with open(os.path.join(self.dir, "wake.md"), "a") as f:
-                            f.write(f"- {iso()}  {text}\n")
+                            f.write(f"- {iso()} orch={target}  {text}\n")
                     except OSError as exc:
-                        self.orch_note = f"could not write wake.md: {exc}"
+                        self.owner_note = f"could not write wake.md: {exc}"
                         return True
-                    self.append(f"{iso()} orchestrator woken (file) | {who}")
-                    self.pending, self.held_since, self.held_noticed = [], None, False
-                    self.orch_note = f"wake written to wake.md for {target}"
+                    self.append(f"{iso()} orchestrator woken (file) orch={target} | {who}")
+                    self.delivered(target, batch)
+                    self.owner_note = f"wake written to wake.md for {target}"
                     return True
                 if code == 0:
                     now = iso()
-                    who = ", ".join(sorted({a for _, a, _ in self.pending}))
-                    self.append(f"{now} orchestrator woken | {who}")
-                    self.recent = (self.recent + [f"{local(now)}  → orchestrator told: {who}"])[-8:]
-                    self.pending, self.held_since, self.held_noticed = [], None, False
-                    self.orch_note = f"wakes {target}"
+                    who = ", ".join(sorted({a for _, a, _ in batch}))
+                    self.append(f"{now} orchestrator woken orch={target} | {who}")
+                    self.recent = (self.recent + [f"{local(now)}  → {target} told: {who}"])[-5:]
+                    self.delivered(target, batch)
+                    self.owner_note = f"wakes {target}"
                     return True
                 note = f"prompt to {target} failed; retrying in {RETRY}s"
-        if self.held_since is None:
-            self.held_since = time.time()
-        if not self.held_noticed and time.time() - self.held_since > HOLD_NOTICE:
+        if target not in self.held_since:
+            self.held_since[target] = time.time()
+        if not self.held_noticed.get(target) and time.time() - self.held_since[target] > HOLD_NOTICE:
             self.notify("orchestrator: events waiting", note)
-            self.held_noticed = True
-        changed = note != self.orch_note
-        self.orch_note = note
+            self.held_noticed[target] = True
+        changed = note != self.owner_note
+        self.owner_note = note
         return changed
+
+    def delivered(self, target, batch):
+        self.pending = [e for e in self.pending if e not in batch]
+        self.held_since.pop(target, None)
+        self.held_noticed.pop(target, None)
 
     def board(self):
         width = shutil.get_terminal_size((100, 20)).columns
@@ -319,10 +354,10 @@ class Watcher:
                f" · {dt.datetime.now().strftime('%H:%M')} · {self.orch_note or 'orchestrator: ' + orch}"]
         if self.usage:
             out.append(self.usage[:width])
-        out.append(f"{'AGENT':<22} {'STATE':<12} {'SINCE':<6} {'CONTEXT':<10} TASK")
+        out.append(f"{'AGENT':<18} {'OWNER':<14} {'STATE':<12} {'SINCE':<6} {'CONTEXT':<10} TASK")
         for name, state in self.prev.items():
             title, ctx = self.info.get(name, ("", ""))
-            row = f"{name[:22]:<22} {WORDS.get(state, state):<12} {local(self.since[name]):<6} {(ctx or '-')[:10]:<10} {title}"
+            row = f"{name[:18]:<18} {self.owners.get(name, "none")[:14]:<14} {WORDS.get(state, state):<12} {local(self.since[name]):<6} {(ctx or '-')[:10]:<10} {title}"
             out.append(row[:width])
         if not self.prev:
             out.append("(no agents; add with: orch-watch.py add <dir> <agent>)")
@@ -332,7 +367,11 @@ class Watcher:
         return "\n".join(out)
 
     def draw(self):
-        sys.stdout.write("\033[H\033[2J" + self.board() + "\n")
+        board = self.board()
+        if board == self.last_board:
+            return
+        self.last_board = board
+        sys.stdout.write("\033[H\033[2J" + board + "\n")
         sys.stdout.flush()
 
 
@@ -344,33 +383,104 @@ def cmd_watch(d, args):
         args = args[:i] + args[i + 2:]
     os.makedirs(d, exist_ok=True)
     if args:
-        cmd_add(d, args)
-    if orch:
+        cmd_add(d, args + (["--orch", orch] if orch else []))
+    if orch and not read_lines(os.path.join(d, "orchestrator")):
         cmd_orch(d, orch)
     with open(os.path.join(d, "watcher.pid"), "w") as f:
         f.write(f"{os.getpid()}\n")
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     w = Watcher(d)
     w.append(f"{iso()} watcher start pid {os.getpid()} agents: {' '.join(read_lines(os.path.join(d, 'agents.txt')))}")
-    minute = None
-    while True:
-        changed = w.poll()
-        now_min = dt.datetime.now().strftime("%H:%M")
-        if changed or now_min != minute:
+    terminal = sys.stdout.isatty()
+    try:
+        if terminal:
+            sys.stdout.write("\033[?1049h\033[?25l")
+            sys.stdout.flush()
+        while True:
+            w.poll()
             w.draw()
-            minute = now_min
-        time.sleep(POLL)
+            time.sleep(POLL)
+    finally:
+        if terminal:
+            sys.stdout.write("\033[?25h\033[?1049l")
+            sys.stdout.flush()
 
 
-def cmd_add(d, names):
+@contextmanager
+def registration_lock(d):
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "agents.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def default_owner(d):
+    return (read_lines(os.path.join(d, "orchestrator")) or ["none"])[0]
+
+
+def registrations(d):
+    default = default_owner(d)
+    result = {}
+    for line in read_lines(os.path.join(d, "agents.txt")):
+        fields = line.split()
+        if len(fields) not in (1, 2) or (len(fields) == 2 and not fields[1].startswith("orch=")):
+            raise ValueError(f"invalid agent registration: {line}")
+        result[fields[0]] = fields[1][5:] if len(fields) == 2 else default
+    return result
+
+
+def owner_option(args):
+    args = list(args)
+    owner = None
+    if "--orch" in args:
+        i = args.index("--orch")
+        owner = args[i + 1]
+        if not owner or len(owner.split()) != 1 or owner.startswith("--"):
+            raise ValueError("expected a single owner target")
+        del args[i:i + 2]
+    if not args or any(n.startswith("--") or len(n.split()) != 1 for n in args):
+        raise ValueError("expected agent names")
+    return args, owner
+
+
+def save_registrations(d, lines):
     path = os.path.join(d, "agents.txt")
-    have = read_lines(path)
-    write_lines(path, have + [n for n in names if n not in have])
+    temporary = path + ".tmp"
+    write_lines(temporary, lines)
+    os.replace(temporary, path)
+
+
+def cmd_add(d, args):
+    names, owner = owner_option(args)
+    with registration_lock(d):
+        have = read_lines(os.path.join(d, "agents.txt"))
+        existing = {line.split()[0] for line in have}
+        # Existing registrations retain their owner; use guarded move for reassignment.
+        save_registrations(d, have + [n + (f" orch={owner}" if owner else "")
+                                     for n in dict.fromkeys(names) if n not in existing])
 
 
 def cmd_remove(d, names):
-    path = os.path.join(d, "agents.txt")
-    write_lines(path, [n for n in read_lines(path) if n not in names])
+    with registration_lock(d):
+        save_registrations(d, [line for line in read_lines(os.path.join(d, "agents.txt"))
+                               if line.split()[0] not in names])
+
+
+def cmd_move(d, args):
+    args = list(args)
+    i = args.index("--from")
+    old = args[i + 1]
+    del args[i:i + 2]
+    names, owner = owner_option(args)
+    if not owner:
+        raise ValueError("move requires --orch <new>")
+    with registration_lock(d):
+        have = registrations(d)
+        if any(n not in have or have[n] != old for n in names):
+            raise ValueError("move refused: missing agent or owner differs from --from")
+        lines = read_lines(os.path.join(d, "agents.txt"))
+        save_registrations(d, [f"{line.split()[0]} orch={owner}"
+                               if line.split()[0] in names else line for line in lines])
 
 
 def cmd_orch(d, target):
@@ -380,7 +490,8 @@ def cmd_orch(d, target):
 def cmd_board(d):
     w = Watcher(d)
     live = agent_list() or {}
-    for name in read_lines(os.path.join(d, "agents.txt")):
+    w.owners = registrations(d)
+    for name in w.owners:
         entry = live.get(name)
         w.prev[name] = entry.get("agent_status", "unknown") if entry else "gone"
         w.since[name] = iso()
@@ -422,6 +533,8 @@ def main(argv):
         cmd_add(d, rest)
     elif cmd == "remove" and rest:
         cmd_remove(d, rest)
+    elif cmd == "move" and rest:
+        cmd_move(d, rest)
     elif cmd == "orch" and rest:
         cmd_orch(d, rest[0])
     elif cmd == "board":
@@ -437,5 +550,8 @@ def main(argv):
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
+    except (ValueError, IndexError) as exc:
+        print(f"orch-watch: {exc}", file=sys.stderr)
+        sys.exit(2)
     except KeyboardInterrupt:
         sys.exit(0)

@@ -64,3 +64,14 @@ orchestrator kind; ask when no candidate is clearly available, and never choose 
 `designer` sub-agent in `~/.claude/agents/designer.md` points at `references/design.md` and
 `scripts/design-pages.py`. The tartib run (ledger at `../tartib.reports/orch`, Command Code
 orchestrator) still uses the legacy layout; `orch-dir.sh --migrate` moves it when the owner says.
+
+## Watcher owners (orch 0.9.0)
+
+One repo run has one watcher. agents.txt may store `agent orch=<owner>`; bare names use
+`orchestrator` as their default. Registration writes lock agents.lock and replace agents.txt
+atomically. Guarded `move --from <old> --orch <new>` validates every named agent before writing.
+Pending events resolve owners at delivery time; wake queues, retries and held notices are
+independent per owner. wake.md fallback entries name their owner. Each ledger row has an owner
+and each orchestrator exact-matches its own `Next action (<owner>):` line. The watcher uses
+an alternate terminal buffer, restores it on exit, redraws changed text only and keeps five
+Recent entries.

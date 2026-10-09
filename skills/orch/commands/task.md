@@ -5,6 +5,12 @@ argument-hint: <agent> <task: KIS backlog item | status-space task id or title |
 
 # Orch: task
 
+Owner is your orchestrator pane id. One run and watcher serve all owners. Edit only rows
+owned by you and exact-match `Next action (<owner>):` when updating it; preserve every other
+owner's line. Legacy rows without an owner fall back to `<dir>/orchestrator`; claim them only
+when that default is you: pin them with `move <dir> <agent>... --from <your pane id>
+--orch <your pane id>` and record the owner in their ledger rows.
+
 One task, one agent. The agent plans, then acts (the KIS loop), in its worktree. The
 orchestrator never plans or codes it; it carries questions and decisions between agent and user.
 
@@ -21,7 +27,7 @@ then: call the `Agent` tool with that type, in the background, for `worker` with
 checkout; an Agent-tool sub-agent otherwise starts where the orchestrator sits), with the same
 pointer prompt as step 6 plus "reply with the report and, if you changed files, your worktree
 path and branch; do not wait for anything"; add a row to the ledger's **Sub-agents** table
-(name, type, started, report path, status); end the turn. The harness notifies you when it
+(name, owner, type, started, report path, status); end the turn. The harness notifies you when it
 finishes: verify its report like any other (coordination rule 35), commit from its worktree
 yourself when it changed files, remove that worktree, update the row. A read-only type cannot write the
 report file: save its reply under `.orch/<agent>/report.md` yourself.
@@ -75,10 +81,10 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
 6. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
    <path>. Read it in full and follow it. Load lore first if the lore skill is
    installed, then continue straight into the plan."` Confirm the status is working (rule 22).
-7. Ledger: add or update the row (name, kind/model as `orch-model.sh` reported it, pane,
+7. Ledger: add or update the row (name, owner as your pane id, kind/model as `orch-model.sh` reported it, pane,
    worktree and branch, brief, handoff, status working, last event "prompted: plan <slug>").
    Set Next action.
-8. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>` (the running
+8. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent> --orch <your pane id>` (the running
    watcher picks it up; no restart). No watcher running: `commands/watch.md`.
 9. Plan questions: on an "orch event" saying the agent finished with questions, read `tail -15` of
    its pane, ask the user one question at a time with a recommended option (core rule 60),

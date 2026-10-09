@@ -5,6 +5,12 @@ argument-hint: [optional ledger dir; default from scripts/orch-dir.sh]
 
 # Orch: start (also resume)
 
+Owner is your orchestrator pane id. One run and watcher serve all owners. Edit only rows
+owned by you and exact-match `Next action (<owner>):` when updating it; preserve every other
+owner's line. Legacy rows without an owner fall back to `<dir>/orchestrator`; claim them only
+when that default is you: pin them with `move <dir> <agent>... --from <your pane id>
+--orch <your pane id>` and record the owner in their ledger rows.
+
 Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger holds the decisions.
 
 1. Load lore once, if the lore skill is installed (`/lore:load`, or its notes
@@ -17,20 +23,23 @@ Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger ho
    (`orch-dir.sh --migrate`). Then read the ledger `$D/ledger.md`, and `kis/state/current.md`
    (head 60) when the repo has `kis/` (no `kis/`: one line, "no KIS in this repo").
    No ledger: copy `~/.agents/skills/orch/ledger-template.md` there, fill it from State (if
-   any) and `herdr agent list`, and set Next action from State's Next. No State or no Next: set
+   any) and `herdr agent list`, and set your Next action from State's Next. No State or no Next: set
    Next action to "ask the user for the first assignment", print the board, and ask in one
    line; then `/orch:task` does the rest.
-3. Reconcile: `herdr agent list` and `git worktree list` against the ledger rows. Fix the rows;
-   a ledger row with no live agent is "gone", a live agent with no row gets one.
+3. Reconcile your owned rows with `herdr agent list` and `git worktree list`. Fix only yours.
+   Do not claim live agents owned elsewhere or adopt every agent with no row. Joining an
+   existing run adds your Next action line; it never resets the ledger or wake default.
 4. Check the watcher: `kill -0 $(cat <dir>/watcher.pid)`. Dead or missing: run `commands/watch.md`.
-   Alive and not started by a handoff: point it at yourself,
-   `python3 ~/.agents/skills/orch/scripts/orch-watch.py orch <dir> <your pane id>`.
+   Alive: leave its default unchanged. Register only your agents with
+   `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>... --orch <your pane id>`.
+   Already registered agents retain their owner; use guarded `move` to transfer them.
 5. Print the board (`commands/status.md`).
-6. For every agent whose status is stopped by a limit or gone with a resume brief, re-prompt it
+6. For each of your agents whose status is stopped by a limit or gone with a resume brief, re-prompt it
    from that brief: "The user asked for this: resume. Your brief is <handoff or resume brief>.
    Read it in full and continue." Record the prompt as its last event.
 7. Do the Next action. Then update the ledger, including the new Next action, and end the turn;
    the watcher prompts you on the next event.
 
-Started by a handoff: stop after step 5, reply with the board and the Next action, and act only
-on "go". Until then two orchestrators are live and only the old one may act.
+Started by a handoff: use the packet's source-owner Next action until transfer; do not claim
+its agents or add a competing Next action. Stop after step 5, reply with the board and the Next action, and act only
+on "go". Until then only the old owner may act on the transferred stream; other owners continue.

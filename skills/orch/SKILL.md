@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lore notes and the project's status space when they are present."
 metadata:
-  version: "0.8.4"
+  version: "0.9.0"
 ---
 
 # Orchestrator (orch)
@@ -30,8 +30,9 @@ Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orc
    of git through `.git/info/exclude` (one entry serves every worktree; nothing is committed), and
    it keeps using an old `../<repo>.reports/orch/` while one exists, so a running run is never
    given a second ledger (`--migrate` moves it). Briefs, reports and handoffs live beside it in
-   `.orch/<agent>/`. `Next action` is line one and never empty. Update it after every action that
-   changes it. A fresh orchestrator orients from it alone. Agent-tool sub-agents die with the
+   `.orch/<agent>/`. `Next action (<owner>):` has one line per orchestrator pane, never empty. Each
+   orchestrator edits only its own rows and exact-matches its own Next action line; preserve
+   other owners. Claim unowned legacy rows explicitly before acting. A fresh orchestrator orients from it alone. Agent-tool sub-agents die with the
    session, so long builds go in panes and sub-agents do one-message checks.
 3. **Read verdicts, not output.** Pane reads `tail -10` at most. Reports and briefs by section
    (`sed -n '/## Result/,$p' | head -40`) or through a cheap sub-agent that returns one line.
@@ -107,10 +108,14 @@ summary, then continue straight into the plan."
   agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
   user when no candidate is clearly available. The watcher shows usage on the board and the
   ledger header carries the line.
-- `scripts/orch-watch.py` (`orch-watch.sh` is a wrapper for old ledgers): `watch <dir> [agent...]
-  --orch <pane>` runs forever in its pane and draws a plain board; `add`/`remove <dir> <agent>`
-  change `<dir>/agents.txt`, which the running watcher rereads; `orch <dir> <pane>` sets whom to
-  wake (`<dir>/orchestrator`, rewritten at handoff); `board <dir>` prints the board once;
+- `scripts/orch-watch.py` (`orch-watch.sh` wraps old ledgers): one watcher per repo run.
+  `add <dir> <agent>... --orch <owner>` registers agents; bare lines fall back to
+  `<dir>/orchestrator`. `move <dir> <agent>... --from <old> --orch <new>` transfers only
+  the named owner's agents; pending events follow them. Each owner gets its own wake batch
+  and retry timer, so a busy owner does not hold another's events. `orch <dir> <pane>` changes
+  only the legacy default; never use it for multi-owner handoff. `remove` stops watching named
+  agents. The board shows owners and five Recent lines, redraws only when text changes in an
+  alternate buffer and restores the terminal on exit. `board <dir>` prints once;
   `--next <dir> [seconds]` is the old blocking wait, only when the user asks to wait.
 - `<dir>/events.log`: one line per change, `<UTC> <agent> <state> | <task title> | ctx <use>`, and
   `<UTC> orchestrator woken | <agents>` per delivered prompt.
