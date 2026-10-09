@@ -13,7 +13,15 @@ out="$(python3 "$U" collect --cached)"
 grep -q "^claude unknown" <<<"$out" || fail "claude should be unknown: $out"
 grep -q "^codex  unknown" <<<"$out" || fail "codex should be unknown: $out"
 grep -q "^cmd    unknown.*CMD_API_KEY" <<<"$out" || fail "cmd should ask for the key: $out"
-set +e; python3 "$U" check claude >/dev/null; rc=$?; set -e; [[ $rc -eq 2 ]] || fail "check unknown should exit 2, got $rc"
+set +e; python3 "$U" check claude --cached >/dev/null; rc=$?; set -e; [[ $rc -eq 2 ]] || fail "check unknown should exit 2, got $rc"
+
+# 1b. check refreshes on its own: a claude cache at 85% and no usage.json must still exit 3
+mkdir -p "$tmp/cache"
+cat > "$tmp/cache/usage-claude.json" <<J
+{"cli":"claude","fetched_at":$((now-30)),"model":"Sonnet 5.5","rate_limits":{"five_hour":{"used_percentage":12,"resets_at":$((now+3600))},"seven_day":{"used_percentage":85,"resets_at":$((now+86400))}}}
+J
+rm -f "$tmp/cache/usage.json"
+set +e; python3 "$U" check claude --cached >/dev/null; rc=$?; set -e; [[ $rc -eq 3 ]] || fail "check must refresh and exit 3, got $rc"
 
 # 2. claude cache from the statusline shape; codex cached reading; thresholds
 mkdir -p "$tmp/cache"
@@ -30,8 +38,8 @@ grep -q "^codex  5h 23% (resets .*)  7d 28%" <<<"$out" || fail "codex line: $out
 grep -q "ASK the user before starting a task on codex" <<<"$out" && fail "codex should not warn" || true
 line="$(python3 "$U" line)"
 [[ "$line" == "usage claude 42%/83% ASK · codex 23%/28% · cmd ?" ]] || fail "line: $line"
-set +e; python3 "$U" check claude >/dev/null; rc=$?; set -e; [[ $rc -eq 3 ]] || fail "claude check should exit 3, got $rc"
-python3 "$U" check codex >/dev/null || fail "codex check should exit 0"
+set +e; python3 "$U" check claude --cached >/dev/null; rc=$?; set -e; [[ $rc -eq 3 ]] || fail "claude check should exit 3, got $rc"
+python3 "$U" check codex --cached >/dev/null || fail "codex check should exit 0"
 test -f "$tmp/cache/usage.json" || fail "combined cache not written"
 
 # 3. a fresh codex reading is reused (no app-server start) even without --cached

@@ -5,8 +5,9 @@
                                      no CLI is started); writes <cache>/usage.json
   orch-usage.py show                 one line per CLI from the last collect, plus warnings
   orch-usage.py line                 one compact line for the ledger header and the watcher board
-  orch-usage.py check <kind>         exit 0 when <kind> is under the ask threshold, 3 when at or
-                                     above it (the orchestrator then asks the user first), 2 unknown
+  orch-usage.py check <kind>         refresh, then exit 0 when <kind> is under the ask threshold,
+                                     3 when at or above it (the orchestrator asks the user
+                                     first), 2 unknown (``--cached``: files only)
 
 Sources (policy: report only, never switch CLIs on its own):
   claude  ~/.cache/orch/usage-claude.json, written by the owner's Claude Code statusline command
@@ -239,7 +240,10 @@ def main(argv):
     if cmd == "line":
         print(line(last())); return 0
     if cmd == "check" and rest:
-        e = (last().get(rest[0]) or {})
+        # Refresh first: claude is a file read and codex reuses a reading under five minutes
+        # old, so a fresh orchestrator cannot start a task on a CLI at 88% because no watcher
+        # has collected yet.
+        e = (collect(cached="--cached" in rest).get(rest[0]) or {})
         w = worst(e)
         if w is None:
             print(f"{rest[0]}: usage unknown"); return 2
