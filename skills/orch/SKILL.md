@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lessons space and the project's status space when they are present."
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # Orchestrator (orch)
@@ -82,6 +82,11 @@ summary, then continue straight into the plan."
 ## Files
 
 - `ledger-template.md`: the ledger's shape. Copy it on the first start.
+- `references/runtimes.md`: one row per agent kind (claude, codex, cmd, agy): how to start and
+  prompt it, where its live model shows, default, allowed and avoided models. `task` follows it.
+- `scripts/orch-model.sh <agent> [model]`: the kind and model an agent really runs (Herdr's
+  list for cmd, pane text for Claude and Codex); exit 1 on a mismatch, 2 when not visible.
+  Run it after every `agent start`, before the first prompt.
 - `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see rule 2).
 - `scripts/orch-watch.py` (`orch-watch.sh` is a wrapper for old ledgers): `watch <dir> [agent...]
   --orch <pane>` runs forever in its pane and draws a plain board; `add`/`remove <dir> <agent>`

@@ -28,14 +28,23 @@ orchestrator never plans or codes it; it carries questions and decisions between
 3. Worktree: if the agent has no row with a worktree, `herdr worktree create --cwd "$PWD"
    --branch <slug> --base main --path ../<repo>.wt/<slug> --label <agent> --no-focus`; keep the
    workspace and pane ids from the JSON.
-4. Pane and agent: if the agent is not in `herdr agent list`, `herdr agent start <agent> --kind
-   <kind> --pane <id> -- --model <model>` (default claude, sonnet; preference 29). Expect the
-   trust-folder prompt in a new worktree (Gotchas: Herdr).
+4. Pane and agent: if the agent is not in `herdr agent list`, start it by its row in
+   `~/.agents/skills/orch/references/runtimes.md`: the kind decides the start command, the
+   prompt method and the default model (claude: sonnet; codex: gpt-6.1-sol medium; cmd:
+   deepseek/deepseek-v4-flash); a model outside the row's Allowed column, or in its Avoid
+   column, needs the user's word first. Expect the trust-folder prompt in a new worktree
+   (Gotchas: Herdr). Then, before any prompt:
+   `~/.agents/skills/orch/scripts/orch-model.sh <agent> <model>`. Exit 1 is a mismatch (wrong
+   kind or model came up): exit the agent, start it again with the right flags, check again,
+   and say so in the ledger's last event. Exit 2 means the model is not visible: read the last
+   ten lines of the pane and decide. Never prompt an agent whose model you have not confirmed:
+   a wrong model is cheapest to fix before it has read anything.
 5. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
    <path>. Read it in full and follow it. Load the lessons first if the lessons skill is
    installed, then continue straight into the plan."` Confirm the status is working (rule 22).
-6. Ledger: add or update the row (name, kind/model, pane, worktree and branch, brief, handoff,
-   status working, last event "prompted: plan <slug>"). Set Next action.
+6. Ledger: add or update the row (name, kind/model as `orch-model.sh` reported it, pane,
+   worktree and branch, brief, handoff, status working, last event "prompted: plan <slug>").
+   Set Next action.
 7. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>` (the running
    watcher picks it up; no restart). No watcher running: `commands/watch.md`.
 8. Plan questions: on an "orch event" saying the agent finished with questions, read `tail -15` of
