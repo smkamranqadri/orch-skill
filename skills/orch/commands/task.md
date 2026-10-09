@@ -16,12 +16,14 @@ on the same branch that never runs at the same time), or a helper pane (`--place
 agent). Say the home in the ledger row.
 
 **Sub-agent route (`--sub`).** Steps 1 to 3 as below (source, brief, usage check for claude),
-then: for `worker`, `git worktree add ../<repo>.wt/<slug> -b <slug> main` (no pane); call the
-`Agent` tool with that type, in the background, with the same pointer prompt as step 6 plus
-"reply with the report, do not wait for anything"; add a row to the ledger's **Sub-agents**
-table (name, type, started, report path, status); end the turn. The harness notifies you when
-it finishes: verify its report like any other (coordination rule 35), commit from it yourself
-when it changed files, remove the worktree, update the row. A read-only type cannot write the
+then: call the `Agent` tool with that type, in the background, for `worker` with
+`isolation: "worktree"` (its working directory is then its own worktree, never main's
+checkout; an Agent-tool sub-agent otherwise starts where the orchestrator sits), with the same
+pointer prompt as step 6 plus "reply with the report and, if you changed files, your worktree
+path and branch; do not wait for anything"; add a row to the ledger's **Sub-agents** table
+(name, type, started, report path, status); end the turn. The harness notifies you when it
+finishes: verify its report like any other (coordination rule 35), commit from its worktree
+yourself when it changed files, remove that worktree, update the row. A read-only type cannot write the
 report file: save its reply under `.orch/<agent>/report.md` yourself.
 
 1. Source: find the task. A KIS item (`kis/intent/backlog.md` or a plan file) when the repo has
@@ -33,14 +35,15 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
 2. Brief: write `$D/<agent>/brief-<slug>.md` (`D` from `scripts/orch-dir.sh`), one page: the task and its source,
    out of scope, the files or worktree the agent owns, where the design or plan lives, how to
    prove it, where to write report and handoff (`handoff.md` beside the brief), and the standing
-   rules from coordination rule 2 (disk, daemons, format only edited files, log files, no git
-   checkout or reset in main, no CPU stress). Point at files, paste nothing. Then the loop the
+   rules (`references/brief-rules.md`: disk, daemons, format only edited files, log files, no
+   git checkout or reset in main, no CPU stress, report to a file, default permission mode). Point at files, paste nothing. Then the loop the
    agent runs. With KIS: "/kis:plan this task; put every question for the user in one message
    and stop; on the answers, /kis:act, prove it, sync your own KIS on your branch (coordination
    rule 38), write the handoff, reply with a short summary." Without KIS: "plan it in one reply
    (scope, files, acceptance checks, questions for the user) and stop; on the answers, build it,
    prove it, write the handoff, reply with a short summary." Without a lessons space, the brief
-   also carries the standing rules in full, since the agent cannot load them.
+   also carries the standing rules in full, copied from
+   `~/.agents/skills/orch/references/brief-rules.md`, since the agent cannot load them.
 3. Usage: `python3 ~/.agents/skills/orch/scripts/orch-usage.py check <kind>`. Exit 3 means
    that CLI's 5-hour or weekly window is at or above 80% used: show the user
    `orch-usage.py show` and ask, with a recommendation, whether to start here anyway, use

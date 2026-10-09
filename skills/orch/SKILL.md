@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lessons space and the project's status space when they are present."
 metadata:
-  version: "0.6.0"
+  version: "0.6.1"
 ---
 
 # Orchestrator (orch)
@@ -11,7 +11,7 @@ Experiment from 2026-10-06. The orchestrator sessions it replaces ran at 300k to
 most of their turns, held 346 background watchers as children, needed 61 TaskStops, and lost a
 next action in one compact. Rules 46 to 51 of `Agents: coordinating parallel agents` in the
 lessons space hold the method; this skill is the mechanics. Agents run in Herdr panes
-(`herdr` CLI, HERDR_ENV=1); install it with the repo's `bootstrap.sh doctor --with-herdr`.
+(`herdr` CLI, HERDR_ENV=1). Herdr missing: say so and stop; the user installs it.
 
 Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orch:watch`, `/orch:event`. Codex and others:
 "run the orch start step" and follow `commands/<name>.md`.
@@ -86,6 +86,8 @@ summary, then continue straight into the plan."
   changes; Claude only), pane agent in a new worktree and workspace (anything on its own branch,
   anything long, other kinds), a new tab on the same worktree (a second stream on the same
   branch, never at the same time), a helper pane (servers, watchers). `task` decides from it.
+- `references/brief-rules.md`: the standing rules every brief carries (by pointer with a
+  lessons space, in full without one).
 - `references/runtimes.md`: one row per agent kind (claude, codex, cmd, agy): how to start and
   prompt it, where its live model shows, default, allowed and avoided models. `task` follows it.
 - `scripts/orch-model.sh <agent> [model]`: the kind and model an agent really runs (Herdr's

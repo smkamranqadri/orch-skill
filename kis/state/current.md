@@ -7,7 +7,10 @@
   (sub-agent; pane agent in a new worktree and workspace; new tab on the same worktree; helper
   pane; replacement; successor) with the Herdr commands for each, and `task` gained `--place`
   and `--sub` (the four named sub-agents, Claude orchestrators only, ledger Sub-agents table,
-  lost at handoff). Text only, no script; proved by reading back and by the install tests.
+  lost at handoff). Text only, no script. **Not proved**: the plan's acceptance (every case in
+  the two research reports answered by the table without a judgment call) was not walked; the
+  `--sub` route has not been run once. Also not proved: Phase 2's KIS-present event path (State
+  rewritten after a merge), which only a real merge event in a run can show.
   Phase 4 **done** earlier (orch 0.5.0): `scripts/orch-usage.py`
   (claude from the statusline cache the owner's `~/.claude/statusline-command.sh` now writes
   to `~/.cache/orch/usage-claude.json`, backup `.bak-2026-10-09`; codex over the app-server
@@ -38,6 +41,10 @@
   mutant failed the test and was restored by hash.
 - Done today besides: advisor experiment reverted (settings keys removed, backup
   `~/.claude/settings.json.bak-2026-10-09`; preference 27 rewritten; ai-lab note 335 annotated).
+- 0.6.1 (review fixes): `orch-usage.py check` refreshes before deciding (a fresh orchestrator
+  could otherwise start on a CLI at 88% with exit 2); `--sub worker` uses the Agent tool's
+  `isolation: "worktree"`; `references/brief-rules.md` ships the standing rules so briefs stand
+  without a lessons space; SKILL.md no longer names the installer.
 - Next: Phase 6, the design workflow in two paths (with and without pen.dev) and a better
   review presentation; starts with a short interview with the owner. After it: the
   agent-memory repo (its own plan). The tartib run still uses its legacy
