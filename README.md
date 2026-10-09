@@ -14,8 +14,8 @@ and links `~/.claude/commands/orch`, which is where Claude Code, Codex and other
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/orch-skill/main/bootstrap.sh \
-  | bash -s -- install --repo https://github.com/OWNER/orch-skill.git
+curl -fsSL https://raw.githubusercontent.com/smkamranqadri/orch-skill/main/bootstrap.sh \
+  | bash -s -- install --repo https://github.com/smkamranqadri/orch-skill.git
 ```
 
 From a local clone: `./bootstrap.sh install --source .`. Flags: `--force` to replace an existing
