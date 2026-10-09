@@ -40,3 +40,23 @@ kis/                   this repo's own project memory
   per skill. Release tags, when they start, are `v<orch version>`.
 - Rules from kis-skill apply: SKILL.md short, detail in references, one owner per fact,
   commands stand alone but SKILL.md wins when they disagree.
+
+## How orch reads plan usage (and its limits)
+
+`skills/orch/scripts/orch-usage.py`. Claude Code: the owner's `~/.claude/statusline-command.sh`
+writes the statusline JSON's `rate_limits` to `~/.cache/orch/usage-claude.json` on every
+statusline refresh, so the number is as fresh as the last Claude turn on this machine; after a
+window reset with no Claude session answering, the board shows the old figure and an ASK that
+may not apply (no second source without the OAuth token, which is never read). Codex: the
+app-server `account/rateLimits/read` over stdio after `initialize`, windows told apart by
+`windowDurationMins` (300, 10080), reused for five minutes. Command Code: only the unofficial
+`api.commandcode.ai/alpha/billing/credits` with `CMD_API_KEY` from the environment, unverified;
+`auth.json` is never read. Policy is the owner's: report only, ask at 80%, never switch.
+
+## Live install
+
+`~/.agents/skills/orch` and `~/.agents/skills/session-close` come from this repo
+(`bootstrap.sh update --source .`); `~/.claude/commands/orch` links to the orch commands. The
+`designer` sub-agent in `~/.claude/agents/designer.md` points at `references/design.md` and
+`scripts/design-pages.py`. The tartib run (ledger at `../tartib.reports/orch`, Command Code
+orchestrator) still uses the legacy layout; `orch-dir.sh --migrate` moves it when the owner says.
