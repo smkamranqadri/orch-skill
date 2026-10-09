@@ -1,8 +1,8 @@
 ---
 name: session-close
-description: "Close a working session in the user's fixed order: sync and check project memory (KIS), apply the check, close agent workspaces and remove merged worktrees and branches, update the project's Tartib space, run the lessons retrospective, confirm no handoffs are left, then commit and push. Use when the user says close the session, wrap up, end of session, or asks for the closing routine. Each step runs without asking; only the KIS cleanup waits for a yes unless the user said apply."
+description: "Close a working session in the user's fixed order: sync and check project memory (KIS), apply the check, close agent workspaces and remove merged worktrees and branches, update the project's Tartib space, run the lore retrospective, confirm no handoffs are left, then commit and push. Use when the user says close the session, wrap up, end of session, or asks for the closing routine. Each step runs without asking; only the KIS cleanup waits for a yes unless the user said apply."
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Session close
@@ -35,8 +35,8 @@ follow this file.
    plain-language thought for each feature that moved this session (merged, released, paused),
    and decisions waiting on the user starred (preference 33). Tartib tools absent: skip and
    say so.
-7. **Retrospective.** Run the lessons retro (`/lessons:retro`, or the Retrospective step of
-   `~/.agents/skills/agent-lessons/SKILL.md`). Do this before any compact (core rule 66).
+7. **Retrospective.** Run the lore retro (`/lore:retro`, or the Retrospective step of
+   `~/.agents/skills/lore/SKILL.md`). Do this before any compact (core rule 66).
 8. **Confirm no handoffs are left.** If work is unfinished and a fresh session must pick it up,
    write a handoff note in the project's memory now.
 9. **Commit and push.** Read `git status`, stage explicit paths, read the commit message back

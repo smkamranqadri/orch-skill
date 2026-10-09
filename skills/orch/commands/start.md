@@ -7,10 +7,10 @@ argument-hint: [optional ledger dir; default from scripts/orch-dir.sh]
 
 Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger holds the decisions.
 
-1. Load the lessons once, if the lessons skill is installed (`/lessons:load`, or its notes
+1. Load lore once, if the lore skill is installed (`/lore:load`, or its notes
    over the notes MCP): `Agents: preferences`, `Agents: core rules`, `Agents: coordinating
-   parallel agents`. No gotchas notes; agents load their own. Not installed: say "no lessons
-   space in this session" once and go on.
+   parallel agents`. No gotchas notes; agents load their own. Not installed: say "no lore
+   in this session" once and go on.
 2. Run dir: `$ARGUMENTS`, or `D=$(~/.agents/skills/orch/scripts/orch-dir.sh)` from the repo
    root. It creates `.orch/` (excluded from git) or, while an old `../<repo>.reports/orch/`
    run exists, names that one and creates nothing; migrate only when the user asks

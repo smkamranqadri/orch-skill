@@ -7,7 +7,7 @@ argument-hint: [optional note for the successor]
 
 Agents keep running. Nothing is closed, removed or committed beyond the memory sync.
 
-1. Retro first (`/lessons:retro`, core rule 66) when the lessons skill is installed: a compact
+1. Retro first (`/lore:retro`, core rule 66) when the lore skill is installed: a compact
    or close loses the detail. Not installed: skip in one line.
 2. Session-close steps 1 to 3 and 6 (`~/.agents/skills/session-close/SKILL.md`): KIS sync, KIS
    check, apply (when the repo has `kis/`), the project's status space (when the notes MCP is

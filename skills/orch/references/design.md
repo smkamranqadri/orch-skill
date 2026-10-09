@@ -19,7 +19,7 @@ the session, or the `pen` CLI answers `pen --version`, or `/Applications/Pen.app
 ## The Pencil path
 
 1. The design agent (the `designer` sub-agent, or a pane agent on Opus for new design and Sonnet
-   for edits, preference 29) reads `Gotchas: Pencil MCP` first when the lessons space is present.
+   for edits, preference 29) reads `Gotchas: Pencil MCP` first when lore notes are present.
    Every screen group gets a desktop frame and a phone frame at 390 wide; copy is true to what the
    product does and carries no placeholders (preferences 1 and 2).
 2. Frames are named `<Layout> · <state>` (`Desktop 1280 · editor`, `Viewport 390 × 844 · editor`).

@@ -41,7 +41,7 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    and stop; on the answers, /kis:act, prove it, sync your own KIS on your branch (coordination
    rule 38), write the handoff, reply with a short summary." Without KIS: "plan it in one reply
    (scope, files, acceptance checks, questions for the user) and stop; on the answers, build it,
-   prove it, write the handoff, reply with a short summary." Without a lessons space, the brief
+   prove it, write the handoff, reply with a short summary." Without lore notes, the brief
    also carries the standing rules in full, copied from
    `~/.agents/skills/orch/references/brief-rules.md`, since the agent cannot load them.
 3. Usage: `python3 ~/.agents/skills/orch/scripts/orch-usage.py check <kind>`. Exit 3 means
@@ -68,7 +68,7 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    ten lines of the pane and decide. Never prompt an agent whose model you have not confirmed:
    a wrong model is cheapest to fix before it has read anything.
 6. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
-   <path>. Read it in full and follow it. Load the lessons first if the lessons skill is
+   <path>. Read it in full and follow it. Load lore first if the lore skill is
    installed, then continue straight into the plan."` Confirm the status is working (rule 22).
 7. Ledger: add or update the row (name, kind/model as `orch-model.sh` reported it, pane,
    worktree and branch, brief, handoff, status working, last event "prompted: plan <slug>").
