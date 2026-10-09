@@ -1,6 +1,6 @@
 # Standing rules for every brief
 
-Every brief an orchestrator writes carries these, by pointer when the lessons space is present
+Every brief an orchestrator writes carries these, by pointer when lore notes are present
 (coordination rules 2, 10, 11, 12) and in full when it is not. They exist because each one was
 paid for by a broken machine, a lost edit or a wasted run.
 
