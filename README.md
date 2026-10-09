@@ -9,7 +9,9 @@ Source repository for two user-scope agent skills:
   agents, update the project's Tartib space, retrospective, commit and push).
 
 Nothing here is a live install. The installer copies `skills/<name>/` to `~/.agents/skills/<name>`
-and links `~/.claude/commands/orch`, which is where Claude Code, Codex and other hosts look.
+and links `~/.claude/commands/orch`, which is where Claude Code, Codex and other hosts look. It also
+copies orch's four sub-agent definitions (`worker`, `explorer`, `researcher`, `designer`) to
+`~/.claude/agents/`; a file of yours with the same name is kept, never overwritten.
 
 ## Install
 
@@ -19,8 +21,8 @@ curl -fsSL https://raw.githubusercontent.com/smkamranqadri/orch-skill/main/boots
 ```
 
 From a local clone: `./bootstrap.sh install --source .`. Flags: `--force` to replace an existing
-install (a `.tgz` backup is written to `~/.agents/`), `--only orch` or `--only session-close`,
-`--no-claude-link`, `--home <dir>` to install somewhere other than `$HOME`.
+install (a `.tgz` backup is written to `~/.agents/`; it also replaces a different sub-agent file, keeping a copy there), `--only orch` or `--only session-close`,
+`--no-claude-link` (also skips the sub-agents), `--home <dir>` to install somewhere other than `$HOME`.
 
 ## Check and update
 
