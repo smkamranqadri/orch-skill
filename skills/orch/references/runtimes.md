@@ -30,7 +30,12 @@ Rules that apply to every kind:
 - Context use is pane text for every kind: `herdr agent read <name> --source recent-unwrapped
   --lines 8 | grep -o 'ctx [^·]*'` (Claude); Codex and cmd show their own counters.
 - Plan usage (5-hour and weekly windows) is read per CLI by `scripts/orch-usage.py`: claude
-  from the statusline cache, codex from its app-server, cmd only with `CMD_API_KEY`. The watcher
+  from the statusline cache, codex from its app-server, cmd from `usage-cmd.json` written by
+  its statusline mod (Claude-shaped rate_limits). Cmd snapshots under five minutes old
+  take precedence over `CMD_API_KEY`; at five minutes, after a window reset, or when absent,
+  usage is unknown unless the optional key fallback supplies a reading. Its separate
+  `usage-cmd-api.json` never overwrites the statusline cache. The insertion block for the
+  Command Code statusline is in `cmd-statusline-cache.sh`; apply it only when authorized. The watcher
   shows it on the board. `task` chooses the kind by usage first: a kind with usage available for
   the task, never one at or above 80%, and the user is asked when that is not clear.
 

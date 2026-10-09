@@ -15,10 +15,10 @@ Sources (this script only reads; `task` chooses the kind with usage available, a
           to have answered since the window changed; the file's age is shown.
   codex   `codex app-server` over stdio: initialize, then account/rateLimits/read
           (windowDurationMins 300 = 5-hour, 10080 = weekly). Refreshed at most every 5 minutes.
-  cmd     Command Code has no official usage command. With CMD_API_KEY in the environment the
-          unofficial https://api.commandcode.ai/alpha/billing/credits is read (field names from
-          the cmd-usage crate, unverified here); the key is never printed and auth.json is never
-          read. Without the key: unknown.
+  cmd     ~/.cache/orch/usage-cmd.json from Command Code's statusline (Claude-shaped
+          rate_limits), preferred while under five minutes old. Otherwise CMD_API_KEY enables
+          the existing unofficial billing API fallback, cached separately in usage-cmd-api.json.
+          Without a fresh statusline or key fallback: unknown. auth.json is never read.
 Cache dir: $ORCH_USAGE_CACHE_DIR, else $XDG_CACHE_HOME/orch, else ~/.cache/orch.
 """
 import datetime as dt
@@ -31,6 +31,7 @@ import time
 import urllib.request
 
 ASK_AT = 80            # percent used in either window: the orchestrator asks before a new task
+CMD_MAX_AGE = 300      # statusline snapshots at this age are unknown
 CODEX_MAX_AGE = 300    # seconds a codex reading is reused before the app-server is asked again
 CLIS = ("claude", "codex", "cmd")
 
@@ -127,12 +128,45 @@ def read_codex(d, cached):
     return out
 
 
+def cmd_statusline(d):
+    raw = load(os.path.join(d, "usage-cmd.json"))
+    if not isinstance(raw, dict):
+        return None
+    fetched = raw.get("fetched_at")
+    if not isinstance(fetched, (int, float)) or not 0 <= time.time() - fetched < CMD_MAX_AGE:
+        return None
+    rl = raw.get("rate_limits")
+    if not isinstance(rl, dict):
+        return None
+    out = {"cli": "cmd", "status": "ok", "fetched_at": fetched}
+    try:
+        for slot in ("five_hour", "seven_day"):
+            w = rl.get(slot)
+            if not isinstance(w, dict) or w.get("used_percentage") is None:
+                continue
+            used = float(w["used_percentage"])
+            if not 0 <= used <= 100:
+                return None
+            reset = w.get("resets_at")
+            if reset is not None:
+                reset = int(reset)
+                if reset <= time.time():
+                    return None
+            out[slot] = window(used, reset)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return out if "five_hour" in out or "seven_day" in out else None
+
+
 def read_cmd(d, cached):
+    statusline = cmd_statusline(d)
+    if statusline is not None:
+        return statusline
     key = os.environ.get("CMD_API_KEY")
-    path = os.path.join(d, "usage-cmd.json")
+    path = os.path.join(d, "usage-cmd-api.json")
     old = load(path)
     if not key:
-        return {"cli": "cmd", "status": "unknown", "note": "set CMD_API_KEY to read Command Code usage (unofficial API)"}
+        return {"cli": "cmd", "status": "unknown", "note": "no fresh statusline cache (needs a cmd session); optional CMD_API_KEY fallback"}
     if cached:
         return old or {"cli": "cmd", "status": "unknown", "note": "no cached reading"}
     req = urllib.request.Request("https://api.commandcode.ai/alpha/billing/credits",

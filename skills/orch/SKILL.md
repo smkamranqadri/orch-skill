@@ -104,7 +104,8 @@ summary, then continue straight into the plan."
 - `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see rule 2).
 - `scripts/orch-usage.py collect|show|line|check <kind>`: each CLI's 5-hour and weekly plan
   usage with reset times (claude from the Claude Code statusline cache, codex from its
-  app-server, cmd only with `CMD_API_KEY` set). Usage decides the kind first: `task` starts the
+  app-server, cmd from its statusline cache while under five minutes old, with optional
+  `CMD_API_KEY` fallback). Usage decides the kind first: `task` starts the
   agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
   user when no candidate is clearly available. The watcher shows usage on the board and the
   ledger header carries the line.
