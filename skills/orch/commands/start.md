@@ -1,17 +1,23 @@
 ---
 description: Orient a fresh orchestrator from the run ledger, reconcile with live state, print the board, re-prompt agents stopped by a limit, then do the Next action.
-argument-hint: [optional ledger dir; default ../<repo>.reports/orch]
+argument-hint: [optional ledger dir; default from scripts/orch-dir.sh]
 ---
 
 # Orch: start (also resume)
 
 Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger holds the decisions.
 
-1. Load the lessons once: `Agents: preferences`, `Agents: core rules`, `Agents: coordinating
-   parallel agents`. No gotchas notes; agents load their own.
-2. Read `kis/state/current.md` (head 60) and the ledger `$ARGUMENTS` or `../<repo>.reports/orch/ledger.md`.
-   No ledger: copy `~/.agents/skills/orch/ledger-template.md` there, fill it from State and
-   `herdr agent list`, and set Next action from State's Next. No KIS or no Next either: set
+1. Load the lessons once, if the lessons skill is installed (`/lessons:load`, or its notes
+   over the notes MCP): `Agents: preferences`, `Agents: core rules`, `Agents: coordinating
+   parallel agents`. No gotchas notes; agents load their own. Not installed: say "no lessons
+   space in this session" once and go on.
+2. Run dir: `$ARGUMENTS`, or `D=$(~/.agents/skills/orch/scripts/orch-dir.sh)` from the repo
+   root. It creates `.orch/` (excluded from git) or, while an old `../<repo>.reports/orch/`
+   run exists, names that one and creates nothing; migrate only when the user asks
+   (`orch-dir.sh --migrate`). Then read the ledger `$D/ledger.md`, and `kis/state/current.md`
+   (head 60) when the repo has `kis/` (no `kis/`: one line, "no KIS in this repo").
+   No ledger: copy `~/.agents/skills/orch/ledger-template.md` there, fill it from State (if
+   any) and `herdr agent list`, and set Next action from State's Next. No State or no Next: set
    Next action to "ask the user for the first assignment", print the board, and ask in one
    line; then `/orch:task` does the rest.
 3. Reconcile: `herdr agent list` and `git worktree list` against the ledger rows. Fix the rows;

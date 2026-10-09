@@ -31,7 +31,12 @@ prompt can carry several agents.
    - Ledger: row status "closed", with the merge commit; events.log one line.
    Before ending any event turn, check the ledger: a row that is "done" or "merged" but neither
    "closed" nor "open: next cycle ..." is a missed step.
-4. Update the ledger rows and Next action.
+4. Update the ledger rows and Next action. When the repo has `kis/` and this event merged or
+   closed work, rewrite `kis/state/current.md` in the same turn, inline (it is a few lines, not
+   a sub-agent job): Task, Status, Proof as recorded in the ledger, and Next equal to the
+   ledger's Next action. The ledger and State must never disagree about what is merged; a
+   handoff is too late to fix it. When the status space exists, give its task a one-line thought
+   through a sub-agent (rule 49).
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.
    Then end the turn. Never wait in the foreground for the next event: the watcher will
    prompt again.
