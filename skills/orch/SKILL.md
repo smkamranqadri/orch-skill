@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lore notes and the project's status space when they are present."
 metadata:
-  version: "0.8.3"
+  version: "0.8.4"
 ---
 
 # Orchestrator (orch)
@@ -103,9 +103,10 @@ summary, then continue straight into the plan."
 - `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see rule 2).
 - `scripts/orch-usage.py collect|show|line|check <kind>`: each CLI's 5-hour and weekly plan
   usage with reset times (claude from the Claude Code statusline cache, codex from its
-  app-server, cmd only with `CMD_API_KEY` set). Report only: the watcher shows it on the
-  board, the ledger header carries the line, and `task` asks the user before starting on a CLI
-  at or above 80%. Orch never switches CLIs on its own.
+  app-server, cmd only with `CMD_API_KEY` set). Usage decides the kind first: `task` starts the
+  agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
+  user when no candidate is clearly available. The watcher shows usage on the board and the
+  ledger header carries the line.
 - `scripts/orch-watch.py` (`orch-watch.sh` is a wrapper for old ledgers): `watch <dir> [agent...]
   --orch <pane>` runs forever in its pane and draws a plain board; `add`/`remove <dir> <agent>`
   change `<dir>/agents.txt`, which the running watcher rereads; `orch <dir> <pane>` sets whom to
