@@ -13,6 +13,11 @@ Phase. One phase is proved and checked before the next begins (preference 21).
 - Advisor experiment: first "revert the advisor, keep the four named sub-agents, bring them into orch"; then, the same day, after the advisor caught four real defects in a review pass, "ok maybe we keep advisor if it's helping". Final: advisor kept, sub-agents kept and in orch.
 - Usage: report only. The board and ledger show each CLI's remaining usage with reset times, and
   orch asks before starting a task on a CLI above 80% used. No automatic switching.
+  Superseded later the same day (owner): "when choose agent the first rule is where usage
+  available for the task then choose that, if not clear then ask user", and "claude can call
+  codex or cmd and codex can call claude or cmd and cmd can call claude and codex". Orch 0.8.4
+  chooses the kind by usage first, from any orchestrator kind, and asks only when no candidate
+  is clearly available.
 - Added mid-session (owner, 2026-10-09): orch's bootstrap must also set up Herdr, since orch
   depends on it (the binary and the Herdr agent skill). Independence is the rule for all
   three: KIS works alone; orch works with or without KIS; the memory skill, to be named
@@ -127,3 +132,5 @@ worktree.
 Follow-up found in use: `scripts/orch-model.sh` reports a false MISMATCH for a fresh cmd agent
 (Herdr has no `tokens.model` before its first turn, and the pane text drops the `deepseek/`
 prefix); seen 2026-10-09 starting the lore agent.
+Fixed in 0.8.2 (22c965e), with the installer now creating `~/.claude/skills/<name>` links.
+Known limit: `bootstrap.sh update` does not repair a missing link for a skill already current.
