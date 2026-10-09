@@ -79,6 +79,9 @@ if command -v herdr >/dev/null 2>&1; then
 else
   echo "(herdr binary absent on this machine: with-herdr path not exercised)"
 fi
+# update also runs the Herdr check
+"$repo_root/bootstrap.sh" update --source "$repo_root" --home "$home" >"$log" 2>&1 || fail "update with Herdr check exited non-zero"
+grep -q "Herdr binary:" "$log" || fail "update did not run the Herdr check"
 # install without --no-herdr prints the Herdr check and still exits 0
 "$repo_root/bootstrap.sh" install --source "$repo_root" --home "$home" --force >"$log" 2>&1 || fail "install with Herdr check exited non-zero"
 grep -q "Herdr binary:" "$log" || fail "install did not run the Herdr check"
