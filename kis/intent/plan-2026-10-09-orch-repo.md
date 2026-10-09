@@ -52,6 +52,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    `~/.claude/commands/orch` link; `check` reports current; a modified install is detected and
    `update` restores it. Installing over the real HOME leaves `~/.agents/skills/orch` equal to
    today's content except the research folder.
+   **Done 2026-10-09 (orch 0.2.0 relocated, then 0.3.0+).** Proof: `tests/run.sh` install tests; the commands-link mutant failed the test and the original was restored by hash; live `bootstrap.sh check` current; Herdr skill refreshed from `herdr --skill`.
 2. **Standalone.** Ledger, briefs, reports, handoffs, events.log, agents.txt, watcher.pid and
    wake.md move to `<repo>/.orch/` (`<repo>/.orch/<agent>/` per agent), added to
    `.git/info/exclude` by `start`. KIS, lessons (Tartib) and the project status space each
@@ -62,6 +63,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    Acceptance: a fresh orchestrator in a temporary repo with neither `kis/` nor Tartib runs
    start, task (dry), status without error; in a repo with `kis/`, a merge event leaves State's
    Next equal to the ledger's.
+   **Done 2026-10-09 (0.3.0).** Proof: orch-dir tests (fresh repo, shared exclude from a worktree, legacy detection with `--check` creating nothing, migrate, plain dir); walkthrough in a temp repo without `kis/`: ledger from template, `board` prints, `git status` clean; `orch-dir.sh --check` on tartib names the legacy run. Not proved: the KIS-present event path (State rewritten after a real merge).
 3. **Runtime table.** One table per kind (claude, codex, cmd, agy): how to start it in a pane,
    how to prompt it, whether `herdr agent prompt` works, allowed and default models from
    preference 29 and the 2026-10-09 model thought, whether it can be an orchestrator and whether
@@ -69,6 +71,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    `herdr agent list` (`display_agent`, `tokens.model`) and refuse on mismatch. Fix the 150k
    self-check to read the orchestrator's own pane by id (thought 382).
    Acceptance: starting cmd with a Claude model name is refused with the live model shown.
+   **Done 2026-10-09 (0.4.0).** Proof: orch-model tests on fixtures (cmd from `tokens.model`, Claude and Codex from pane text, mismatch exit 1, not visible exit 2) and a live read-only check on a running cmd agent: deepseek passes, sonnet refused.
 4. **Usage board.** Per CLI: 5-hour and 7-day used percentage and reset time on the board and in
    the ledger header, with the fetch time. Claude: the owner's `~/.claude/statusline-command.sh`
    also writes the `rate_limits` fields to a cache file. Codex: a one-call spike of the
@@ -77,6 +80,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    `auth.json` and never prints the key. Policy: report only; `task` asks before starting on a
    CLI above 80%.
    Acceptance: the board shows real, dated numbers for claude and codex.
+   **Done 2026-10-09 (0.5.0, `check` refreshes since 0.6.1).** Proof: orch-usage tests including one live Codex app-server read (plan plus, 5h 23%, 7d 28% at the time); the statusline cache appeared at `~/.cache/orch/usage-claude.json` within minutes (5h 25%, 7d 88%).
 5. **Placement rules and the sub-agent route.** One table in SKILL.md decides where work runs:
    sub-agent (one-message checks, research, short tasks that need no pane; Claude orchestrators
    only; dies with the orchestrator) versus pane agent (anything long, anything the user should
@@ -89,6 +93,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    running ones as lost.
    Acceptance: a `--sub` task returns a report and a ledger row; the table answers every case
    in the two run reports under `docs/research/` without a judgment call.
+   **Done 2026-10-09 (0.6.0, worker isolation fixed in 0.6.1).** Text only. Not proved: the table against every case in the research reports; one real `--sub` run.
 6. **Design workflow, two paths.** Interviewed 2026-10-09. Without pen.dev: ask the user to
    install it or to skip the design step for the task; nothing else is invented (no mockups, no
    wireframes). With pen.dev: the Pencil flow, with three JSON files beside the exports. Every
@@ -100,6 +105,7 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    at both.
    Acceptance: from the real tartib exports, `check` is clean, both pages render headless and
    read correctly, and the hotspots sit where `links.json` says.
+   **Done 2026-10-09 (0.7.0, `check --previous` in 0.7.1).** Proof: design-pages tests; both pages built from six real tartib exports, rendered headless and read by eye, hotspots drawn where `links.json` put them.
 
 Independent fast task, done and then undone the same day: the advisor was reverted, then kept
 at the owner's word. Settings are as before the revert; preference 27 says the advisor stays.
