@@ -27,6 +27,11 @@ brief's specified main-checkout report path. Orchestrator reviews, merges and in
 
 ## Status
 
+**Done 2026-10-09:** merged to main (fast-forward to 2465eb0) by orch-3 after a clean detached
+suite run and one extra mutation, installed live (0.9.0, `check` current), live watcher restarted
+on it, cmd statusline block applied (live reading proved: `77% used`), pushed through 3432eab.
+The worker's notes below are kept as history.
+
 Tasks 1–2 complete on branch, 2026-10-09. Full suite passed (nine shell test files,
 eight watcher cases); eight mutation checks killed and original restored. Throwaway Herdr
 pane wP:p2 showed one board after 60 redraws, five Recent lines; SIGTERM restored the shell.

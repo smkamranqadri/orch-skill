@@ -1,7 +1,7 @@
 # Current
 
 - Branch: `main`, tracking `origin/main` at `https://github.com/smkamranqadri/orch-skill`
-  (public). Pushed through 8029872; f5ea953, 2465eb0 (orch 0.9.0) and this sync are local.
+  (public). Pushed through 3432eab (orch 0.9.0); later session-close syncs pushed with them.
 - Task: none in progress. The plan `../intent/plan-2026-10-09-multi-orch.md` (one watcher, many
   orchestrators; readable watcher pane; cmd usage from its statusline) is merged as orch 0.9.0
   (fast-forward to 2465eb0, 2026-10-09), installed live (`bootstrap.sh check --source .` current,
@@ -17,12 +17,12 @@
   Recent lines. The cmd block is in `~/.commandcode/statusline.sh` (backup
   `statusline.sh.bak-2026-10-09-orch`); a sample payload through it wrote `usage-cmd.json` and
   `orch-usage.py check cmd` read `40% used`.
-- Not proved: a real multi-owner run and a successor wake by owner; a real cmd statusline write
-  into `~/.cache/orch/usage-cmd.json` (needs a live cmd repaint). Cache freshness is the write
+- Live cmd usage proved 2026-10-09 20:53: a live cmd repaint wrote `~/.cache/orch/usage-cmd.json`
+  and `orch-usage.py check cmd` read `77% used`.
+- Not proved: a real multi-owner run and a successor wake by owner. Cache freshness is the write
   time; the mod keeps its last reading after a failed fetch. Prior plan
-  `../intent/plan-2026-10-09-orch-repo.md` keeps two open acceptances (the KIS-present merge
-  event, first exercised by this merge; the placement table against research cases).
+  `../intent/plan-2026-10-09-orch-repo.md` keeps one open acceptance (the placement table against
+  research cases); its KIS-present merge event was proved by this merge.
 - Next: full-permission agent starts are approved by the owner in words but held: Claude Code's
   auto-mode check refused relaying them to a worker ([Create Unsafe Agents]); the owner applies it
-  (permission rule, or directly in a pane), brief `.orch/yolo/brief-full-permissions.md`. Push
-  orch-skill at the owner's word. Tartib run migration stays parked.
+  (permission rule, or directly in a pane), brief `.orch/yolo/brief-full-permissions.md`. Tartib run migration stays parked.

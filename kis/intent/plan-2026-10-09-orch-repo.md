@@ -121,7 +121,8 @@ Complete 2026-10-09: all six phases done, orch at 0.7.1, session-close at 1.0.0.
 
 Open acceptances, to prove in the first real run that uses this version:
 
-- Phase 2: the KIS-present event path (State rewritten after a real merge).
+- Phase 2: the KIS-present event path (State rewritten after a real merge). **Proved
+  2026-10-09**: orch-3 rewrote `kis/state/current.md` inline right after merging 0.9.0 (3432eab).
 - Phase 5: the placement table against every case in `docs/research/`.
 
 Proved since: phase 5's real `--sub` run, 2026-10-09: a `worker` sub-agent with
