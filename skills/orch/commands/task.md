@@ -1,12 +1,28 @@
 ---
 description: Give one task (from KIS, from the status space, or in the user's words) to a named agent, which then plans and acts on it in its own worktree; brief file, worktree and pane if missing, pointer prompt, ledger row, watcher updated.
-argument-hint: <agent> <task: KIS backlog item | status-space task id or title | one line of your words> [--model <model>] [--kind claude|codex|cmd|agy]
+argument-hint: <agent> <task: KIS backlog item | status-space task id or title | one line of your words> [--kind claude|codex|cmd|agy] [--model <model>] [--place worktree|tab|pane] [--sub explorer|researcher|worker|designer]
 ---
 
 # Orch: task
 
 One task, one agent. The agent plans, then acts (the KIS loop), in its worktree. The
 orchestrator never plans or codes it; it carries questions and decisions between agent and user.
+
+Where it runs is decided first, from `~/.agents/skills/orch/references/placement.md`: a
+sub-agent (`--sub <type>`, Claude orchestrators only) for one-message work and small, fully
+briefed changes; otherwise a pane agent in a new worktree and workspace (`--place worktree`,
+the default), in a new tab on an existing worktree (`--place tab <workspace>`, a second stream
+on the same branch that never runs at the same time), or a helper pane (`--place pane`, not an
+agent). Say the home in the ledger row.
+
+**Sub-agent route (`--sub`).** Steps 1 to 3 as below (source, brief, usage check for claude),
+then: for `worker`, `git worktree add ../<repo>.wt/<slug> -b <slug> main` (no pane); call the
+`Agent` tool with that type, in the background, with the same pointer prompt as step 6 plus
+"reply with the report, do not wait for anything"; add a row to the ledger's **Sub-agents**
+table (name, type, started, report path, status); end the turn. The harness notifies you when
+it finishes: verify its report like any other (coordination rule 35), commit from it yourself
+when it changed files, remove the worktree, update the row. A read-only type cannot write the
+report file: save its reply under `.orch/<agent>/report.md` yourself.
 
 1. Source: find the task. A KIS item (`kis/intent/backlog.md` or a plan file) when the repo has
    `kis/`, a task in the project's status space (`search`, then `get_item`) when the notes MCP
@@ -30,9 +46,13 @@ orchestrator never plans or codes it; it carries questions and decisions between
    `orch-usage.py show` and ask, with a recommendation, whether to start here anyway, use
    another kind, or wait for the reset; never switch on your own (owner's rule: report only).
    Exit 2 (unknown) is said in one line and does not block.
-4. Worktree: if the agent has no row with a worktree, `herdr worktree create --cwd "$PWD"
-   --branch <slug> --base main --path ../<repo>.wt/<slug> --label <agent> --no-focus`; keep the
-   workspace and pane ids from the JSON.
+4. Home: by `--place`. `worktree` (default), if the agent has no row with a worktree:
+   `herdr worktree create --cwd "$PWD" --branch <slug> --base main --path ../<repo>.wt/<slug>
+   --label <agent> --no-focus`; keep the workspace and pane ids from the JSON. `tab`: `herdr tab
+   create --workspace <ws> --cwd <that worktree> --label <agent> --no-focus`, only when no agent
+   is working in that worktree now. `pane`: `herdr pane split <pane> --direction down --ratio
+   0.25 --no-focus` and `herdr pane run <id> "<command>"`; no agent, no ledger row beyond a note
+   on the stream it serves; stop here.
 5. Pane and agent: if the agent is not in `herdr agent list`, start it by its row in
    `~/.agents/skills/orch/references/runtimes.md`: the kind decides the start command, the
    prompt method and the default model (claude: sonnet; codex: gpt-6.1-sol medium; cmd:

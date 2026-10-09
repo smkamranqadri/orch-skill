@@ -1,9 +1,14 @@
 # Current
 
 - Branch: `main`, no remote. Nothing pushed anywhere.
-- Task: Phase 4 of `../intent/plan-2026-10-09-orch-repo.md` (usage board), on top of Phases
-  1 to 3 (done).
-- Status: Phase 4 **done** 2026-10-09 and installed live (orch 0.5.0): `scripts/orch-usage.py`
+- Task: Phase 5 of `../intent/plan-2026-10-09-orch-repo.md` (placement rules and the
+  sub-agent route), on top of Phases 1 to 4 (done).
+- Status: Phase 5 **done** 2026-10-09 and installed live (orch 0.6.0): `references/placement.md`
+  (sub-agent; pane agent in a new worktree and workspace; new tab on the same worktree; helper
+  pane; replacement; successor) with the Herdr commands for each, and `task` gained `--place`
+  and `--sub` (the four named sub-agents, Claude orchestrators only, ledger Sub-agents table,
+  lost at handoff). Text only, no script; proved by reading back and by the install tests.
+  Phase 4 **done** earlier (orch 0.5.0): `scripts/orch-usage.py`
   (claude from the statusline cache the owner's `~/.claude/statusline-command.sh` now writes
   to `~/.cache/orch/usage-claude.json`, backup `.bak-2026-10-09`; codex over the app-server
   `account/rateLimits/read`, spiked live: plan plus, 5h 23%, 7d 28%; cmd unknown without
@@ -33,8 +38,8 @@
   mutant failed the test and was restored by hash.
 - Done today besides: advisor experiment reverted (settings keys removed, backup
   `~/.claude/settings.json.bak-2026-10-09`; preference 27 rewritten; ai-lab note 335 annotated).
-- Next: Phase 5, placement rules (sub-agent vs pane agent; new worktree in a new workspace vs
-  same worktree in a new tab or pane) and the `--sub` route. Then Phase 6, the design workflow
-  in two paths, which starts with a short interview. The tartib run still uses its legacy
+- Next: Phase 6, the design workflow in two paths (with and without pen.dev) and a better
+  review presentation; starts with a short interview with the owner. After it: the
+  agent-memory repo (its own plan). The tartib run still uses its legacy
   ledger; migrate only at the owner's word. The Claude usage cache appears once a Claude
   session's statusline runs after this change.

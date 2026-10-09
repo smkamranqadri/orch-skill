@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lessons space and the project's status space when they are present."
 metadata:
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # Orchestrator (orch)
@@ -53,8 +53,8 @@ with one line when absent; never ask the user to install them:
 
 When the project has `kis/`, `/kis:start` first; then `/orch:start` (creates the ledger on a
 project that has none). `/orch:task <agent> <task>` per task, where the task is a KIS backlog
-item, a task in the status space, or the user's words: brief file, worktree, pane, pointer
-prompt, ledger row, watcher. The agent plans then acts in its worktree; the orchestrator relays
+item, a task in the status space, or the user's words: home (`references/placement.md`), brief
+file, worktree, pane, pointer prompt, ledger row, watcher. The agent plans then acts in its worktree; the orchestrator relays
 the plan's questions to the user one at a time and records the answers in the ledger. A whole
 new module gets a requirements interview first (coordination rule 5). End the turn after each
 step; on an "orch event" prompt, verify (coordination rule 35), merge, **close a finished
@@ -82,6 +82,10 @@ summary, then continue straight into the plan."
 ## Files
 
 - `ledger-template.md`: the ledger's shape. Copy it on the first start.
+- `references/placement.md`: where work runs: sub-agent (one-message work, small fully briefed
+  changes; Claude only), pane agent in a new worktree and workspace (anything on its own branch,
+  anything long, other kinds), a new tab on the same worktree (a second stream on the same
+  branch, never at the same time), a helper pane (servers, watchers). `task` decides from it.
 - `references/runtimes.md`: one row per agent kind (claude, codex, cmd, agy): how to start and
   prompt it, where its live model shows, default, allowed and avoided models. `task` follows it.
 - `scripts/orch-model.sh <agent> [model]`: the kind and model an agent really runs (Herdr's
