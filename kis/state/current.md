@@ -1,31 +1,28 @@
 # Current
 
-- Branch: `orchwatch`, worker worktree based on main 8029872; never pushed.
-- Task: one watcher, many orchestrators; readable watcher pane; cmd statusline usage.
-  Standard mode, implementation complete at orch 0.9.0; receiving orchestrator review/merge
-  pending. Tasks 1–2 are f5ea953; task 4 is a separate commit containing this sync.
-- Command: `ORCH_TEST_NO_LIVE=1 tests/run.sh` (optional live Codex usage probe disabled).
+- Branch: `main`, tracking `origin/main` at `https://github.com/smkamranqadri/orch-skill`
+  (public). Pushed through 8029872; f5ea953, 2465eb0 (orch 0.9.0) and this sync are local.
+- Task: none in progress. The plan `../intent/plan-2026-10-09-multi-orch.md` (one watcher, many
+  orchestrators; readable watcher pane; cmd usage from its statusline) is merged as orch 0.9.0
+  (fast-forward to 2465eb0, 2026-10-09), installed live (`bootstrap.sh check --source .` current,
+  exit 0), and the live watcher restarted on it (pane wG:p2).
+- Command: `tests/run.sh` (ten test files; `ORCH_TEST_NO_LIVE=1` skips the live Codex probe);
+  `./bootstrap.sh check --source .`; `./bootstrap.sh doctor`.
 - Blocker: none.
-- Proof: full suite passed all ten shell test files, including 15 watcher/cmd unittest cases.
-  Fourteen mutations killed and saved originals restored. Own-pane wP:p2 capture: one board
-  after 60 redraws, five Recent entries; SIGTERM restored shell; own tab closed.
-  Exact cmd statusline insertion block ran successfully with a temporary cache directory.
-  Logs and pane captures: main checkout `.orch/orchwatch/proof/`.
-- Not verified: live multi-owner orchestration/installation/restart and real cmd cache write;
-  reserved for orch-3 after merge. No changes to ~/.commandcode or ~/.cache. No lore snapshot
-  writes after the owner's correction. Cache freshness measures statusline write time; mod
-  retains its last upstream reading after a failed fetch.
-- Next: receiving orchestrator reviews/merges both worker commits, applies the handoff's cmd
-  statusline block with a backup, installs/checks 0.9.0 and restarts its live watcher.
-- Plan: `../intent/plan-2026-10-09-multi-orch.md`.
-
-## Carried open work from the main orchestrator
-
-- Lore 0.4.1: items 1–2 verified by orch-3; items 3–4 back with lore. Verify its completed
-  report (suite, mutation, `/lore:backend show`), commit/install/check, refresh its snapshot,
-  sync lore phase 5. Live versions at worker start: orch 0.8.4, session-close 1.0.1.
-- Prior plan `../intent/plan-2026-10-09-orch-repo.md`: two open acceptances (KIS-present merge
-  event; placement table against research cases). Six implementation phases complete.
-- Decisions pending with owner: full-permission starts, unknown Command Code usage policy,
-  pushing both repos. Tartib run migration remains parked.
-- Run references: main checkout `.orch/ledger.md`, `.orch/handoff-2026-10-09-2.md`.
+- Proof: worker suite and 14 mutations (`.orch/orchwatch/handoff.md`, logs in
+  `.orch/orchwatch/proof/`). The orchestrator re-ran the full suite in a clean detached checkout
+  at 2465eb0 (all ten files pass, 15 new unittest cases) and killed one more mutant (move without
+  the owner check: test_move and test_cli_registration fail; original restored, cmp identical).
+  Live: restarted watcher shows one board in its scrollback (header count 1), owner column, five
+  Recent lines. The cmd block is in `~/.commandcode/statusline.sh` (backup
+  `statusline.sh.bak-2026-10-09-orch`); a sample payload through it wrote `usage-cmd.json` and
+  `orch-usage.py check cmd` read `40% used`.
+- Not proved: a real multi-owner run and a successor wake by owner; a real cmd statusline write
+  into `~/.cache/orch/usage-cmd.json` (needs a live cmd repaint). Cache freshness is the write
+  time; the mod keeps its last reading after a failed fetch. Prior plan
+  `../intent/plan-2026-10-09-orch-repo.md` keeps two open acceptances (the KIS-present merge
+  event, first exercised by this merge; the placement table against research cases).
+- Next: full-permission agent starts are approved by the owner in words but held: Claude Code's
+  auto-mode check refused relaying them to a worker ([Create Unsafe Agents]); the owner applies it
+  (permission rule, or directly in a pane), brief `.orch/yolo/brief-full-permissions.md`. Push
+  orch-skill at the owner's word. Tartib run migration stays parked.
