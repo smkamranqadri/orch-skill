@@ -10,7 +10,7 @@ Phase. One phase is proved and checked before the next begins (preference 21).
 - "I want orch to work with and without KIS." So the ledger cannot live in `kis/state`.
 - The ledger folder: no more sibling `<repo>.reports` at the top level; keep it in the repo,
   KIS-style. Resolution: `<repo>/.orch/`, excluded through `.git/info/exclude`, nothing committed.
-- Advisor experiment: revert the advisor, keep the four named sub-agents, bring them into orch.
+- Advisor experiment: first "revert the advisor, keep the four named sub-agents, bring them into orch"; then, the same day, after the advisor caught four real defects in a review pass, "ok maybe we keep advisor if it's helping". Final: advisor kept, sub-agents kept and in orch.
 - Usage: report only. The board and ledger show each CLI's remaining usage with reset times, and
   orch asks before starting a task on a CLI above 80% used. No automatic switching.
 - Added mid-session (owner, 2026-10-09): orch's bootstrap must also set up Herdr, since orch
@@ -89,19 +89,20 @@ New repo `~/Repositores/side-projects/orch-skill`, shaped like kis-skill: `skill
    running ones as lost.
    Acceptance: a `--sub` task returns a report and a ledger row; the table answers every case
    in the two run reports under `docs/research/` without a judgment call.
-6. **Design workflow, two paths.** Starts with a short interview. Without pen.dev: how a screen
-   is designed and approved before code (candidates: static HTML or SVG mockups rendered to
-   PNG, or an existing tool the owner names). With pen.dev: the current Pencil flow. Both end in
-   the same review presentation, which must improve: before/after of only the changed screens,
-   one sentence per change with the owner's original feedback above it, a "review these first"
-   list, published as a private link when the owner reviews remotely (preferences 1, 3, 7, 8;
-   coordination rule 3). Lives in this repo as a reference the design brief points at.
-   Acceptance: a design brief for a machine without pen.dev produces an approved review page
-   through the same steps as one with it.
+6. **Design workflow, two paths.** Interviewed 2026-10-09. Without pen.dev: ask the user to
+   install it or to skip the design step for the task; nothing else is invented (no mockups, no
+   wireframes). With pen.dev: the Pencil flow, with three JSON files beside the exports. Every
+   round ends in two local HTML pages, never published unless the user is away and asks: a
+   review page (only the changed screens, before and after, the user's feedback above each, a
+   review-first list, answers by id in chat) and a prototype page that loads every exported
+   frame and makes regions clickable so the whole app can be walked at once. Built by
+   `scripts/design-pages.py`; method in `references/design.md`; the `designer` sub-agent points
+   at both.
+   Acceptance: from the real tartib exports, `check` is clean, both pages render headless and
+   read correctly, and the hotspots sit where `links.json` says.
 
-Independent fast task: revert the advisor. Remove `advisorModel` and `effortLevel` from
-`~/.claude/settings.json` (leave `model`), keep `~/.claude/agents/`, edit preference 27 (and
-28's mention) in the Tartib ai-agents space, mark the ai-lab note 335 done.
+Independent fast task, done and then undone the same day: the advisor was reverted, then kept
+at the owner's word. Settings are as before the revert; preference 27 says the advisor stays.
 
 ## Status
 

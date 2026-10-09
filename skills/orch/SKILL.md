@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lessons space and the project's status space when they are present."
 metadata:
-  version: "0.6.1"
+  version: "0.7.0"
 ---
 
 # Orchestrator (orch)
@@ -86,6 +86,11 @@ summary, then continue straight into the plan."
   changes; Claude only), pane agent in a new worktree and workspace (anything on its own branch,
   anything long, other kinds), a new tab on the same worktree (a second stream on the same
   branch, never at the same time), a helper pane (servers, watchers). `task` decides from it.
+- `references/design.md`: the design stream. With pen.dev: Pencil frames, exports, three JSON
+  files, then `scripts/design-pages.py` builds the round's local `review.html` (changed screens,
+  before and after, the user's feedback above each, review-first list) and `prototype.html`
+  (every frame, clickable regions, the whole app at once). Without pen.dev: ask the user to
+  install it or to skip the design step; nothing else is invented.
 - `references/brief-rules.md`: the standing rules every brief carries (by pointer with a
   lessons space, in full without one).
 - `references/runtimes.md`: one row per agent kind (claude, codex, cmd, agy): how to start and
