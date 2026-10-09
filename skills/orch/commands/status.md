@@ -9,7 +9,9 @@ Answer "what is pending, what is building, are the agents working" from one file
 
 1. `D=$(~/.agents/skills/orch/scripts/orch-dir.sh --check 2>/dev/null)` unless given; then
    `sed -n '1,8p' $D/ledger.md` (header, Next action, Waiting on user, Parked).
-2. `python3 ~/.agents/skills/orch/scripts/orch-watch.py board <dir>`: each agent's live state,
-   since when, context use and task, and the last eight events.
+2. `python3 ~/.agents/skills/orch/scripts/orch-watch.py board <dir>`: the usage line, each
+   agent's live state, since when, context use and task, and the last eight events. When the
+   user asks about usage or limits, add `orch-usage.py show` (one line per CLI with reset times
+   and the ASK warnings).
 3. Print those two blocks as the board and nothing else. Do not read panes, reports or KIS.
    If a row's live status differs from the ledger, fix the ledger row and say so in one line.

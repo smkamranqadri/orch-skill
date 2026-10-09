@@ -24,5 +24,6 @@ Rules that apply to every kind:
   again. Both from `Gotchas: Herdr`.
 - Context use is pane text for every kind: `herdr agent read <name> --source recent-unwrapped
   --lines 8 | grep -o 'ctx [^·]*'` (Claude); Codex and cmd show their own counters.
-- Plan usage (5-hour and weekly windows) is read per CLI by the usage collector (Phase 4 of the
-  plan); until then, the owner's `/usage` or `/status` in the pane is the only source.
+- Plan usage (5-hour and weekly windows) is read per CLI by `scripts/orch-usage.py`: claude
+  from the statusline cache, codex from its app-server, cmd only with `CMD_API_KEY`. The watcher
+  shows it on the board; `task` asks the user before starting on a CLI at or above 80%.

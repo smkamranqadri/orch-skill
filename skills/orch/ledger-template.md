@@ -2,6 +2,7 @@
 Updated: <UTC time> by <orchestrator name>. Live truth: `herdr agent list`, `git worktree list`.
 
 Next action: <one line; never empty; what the orchestrator does next, with the agent and path>
+Usage: <paste of `orch-usage.py line` at the last update; ASK marks a CLI at or above 80%>
 Waiting on user: <decision, who asked, since when; or none>
 Parked: <item, until when, why; or none>
 
