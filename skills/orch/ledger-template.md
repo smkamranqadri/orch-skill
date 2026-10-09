@@ -11,8 +11,8 @@ Parked: <item, until when, why; or none>
 |---|---|---|---|---|---|---|---|
 | code | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions |
 
-## Sub-agents and background jobs (die with the orchestrator)
-| name | what | started | report | status |
+## Sub-agents and background jobs (die with the orchestrator; `--sub` route)
+| name | type | started | report | status |
 |---|---|---|---|---|
 
 ## Watcher
