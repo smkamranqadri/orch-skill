@@ -44,11 +44,16 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    prove it, write the handoff, reply with a short summary." Without lore notes, the brief
    also carries the standing rules in full, copied from
    `~/.agents/skills/orch/references/brief-rules.md`, since the agent cannot load them.
-3. Usage: `python3 ~/.agents/skills/orch/scripts/orch-usage.py check <kind>`. Exit 3 means
-   that CLI's 5-hour or weekly window is at or above 80% used: show the user
-   `orch-usage.py show` and ask, with a recommendation, whether to start here anyway, use
-   another kind, or wait for the reset; never switch on your own (owner's rule: report only).
-   Exit 2 (unknown) is said in one line and does not block.
+3. Kind, by usage first (owner's rule, 2026-10-09: "when choose agent the first rule is where
+   usage available for the task then choose that, if not clear then ask user"). Decide it
+   before the brief names the agent. For every kind that can do this task (its row in
+   `references/runtimes.md` has a model for it), run
+   `python3 ~/.agents/skills/orch/scripts/orch-usage.py check <kind>`: exit 0 is available,
+   exit 3 (5-hour or weekly window at or above 80%) rules the kind out, exit 2 is unknown.
+   Choose among the available kinds by the runtime table's model for the task. When none is
+   clearly available (every candidate is 3 or 2), show `orch-usage.py show` and ask the user,
+   with a recommendation. A kind the user named still gets the check; at exit 3, ask before
+   starting there.
 4. Home: by `--place`. `worktree` (default), if the agent has no row with a worktree:
    `herdr worktree create --cwd "$PWD" --branch <slug> --base main --path ../<repo>.wt/<slug>
    --label <agent> --no-focus`; keep the workspace and pane ids from the JSON. `tab`: `herdr tab

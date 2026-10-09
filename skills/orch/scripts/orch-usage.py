@@ -9,7 +9,7 @@
                                      3 when at or above it (the orchestrator asks the user
                                      first), 2 unknown (``--cached``: files only)
 
-Sources (policy: report only, never switch CLIs on its own):
+Sources (this script only reads; `task` chooses the kind with usage available, and asks the user when unclear):
   claude  ~/.cache/orch/usage-claude.json, written by the owner's Claude Code statusline command
           from the statusline JSON (rate_limits.five_hour / seven_day). Needs one Claude session
           to have answered since the window changed; the file's age is shown.
