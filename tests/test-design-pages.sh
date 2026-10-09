@@ -59,4 +59,10 @@ grep -q "link 0: rect .* is off frame A" <<<"$out" || fail "off-frame rect not c
 grep -q "link 1: to ZZ is not a frame" <<<"$out" || fail "dangling to not caught"
 grep -q "link 2: from QQ is not a frame" <<<"$out" || fail "dangling from not caught"
 grep -q "review 02: no sentence" <<<"$out" || fail "missing sentence not caught"
+
+# --previous names a frame that was reachable last round and is gone now
+prev="$tmp/prev"; mkdir -p "$prev"
+echo '[{"id":"A","name":"Desktop · home","width":1000,"height":500},{"id":"OLD","name":"Desktop · gone","width":1000,"height":500}]' > "$prev/inventory.json"
+set +e; out="$(python3 "$S" check "$d" --previous "$prev")"; set -e
+grep -q "frame OLD (Desktop · gone) was in the previous round and is gone" <<<"$out" || fail "gone frame not caught: $out"
 echo "design-pages tests: pass"

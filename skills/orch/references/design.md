@@ -24,7 +24,8 @@ the session, or the `pen` CLI answers `pen --version`, or `/Applications/Pen.app
    product does and carries no placeholders (preferences 1 and 2).
 2. Frames are named `<Layout> · <state>` (`Desktop 1280 · editor`, `Viewport 390 × 844 · editor`).
    Before frames come from a read-only snapshot of the real app, carried unchanged into the after
-   frames. Superseded frames are renamed `ARCHIVE …`, never exported over an approved image.
+   frames (the last tartib round fell short of this: its before frames were reconstructions, and
+   its handoff said so; the rule stands). Superseded frames are renamed `ARCHIVE …`, never exported over an approved image.
 3. Exports go to `<round dir>/exports/<frameId>.png` at scale 1, in a separate call from the
    edits, at most about five frames per call, and each one is opened and checked (size, bytes per
    pixel, matches the node tree). The .pen file is saved after every finished item and the save
@@ -50,12 +51,16 @@ user is away from the machine and asks for a link (coordination rule 30).
   phone next to the desktop, and a "review these first" list at the top. A module's first round
   shows every screen once; later rounds show only what changed. The user answers in chat by id:
   "03 approved", "05 needs change: the counter is too small".
-- **prototype.html** is the whole app as it stands: every exported frame listed by desktop and
-  phone, the current frame shown with clickable regions from `links.json`, back and hotspot
+- **prototype.html** is the whole app as it stands, as far as the inventory reaches: every
+  exported frame listed by desktop and phone, the current frame shown with clickable regions from `links.json`, back and hotspot
   toggles, and a hash per frame so a link can open any screen. It is rebuilt every round from the
   full inventory, so the user can walk the entire app at once whenever they want, not only the
   changed screens. `prototype.html?hot#<frameId>` shows the hotspots, which is how the agent
-  proves placement: render it headless and look at the picture before reporting.
+  proves placement: render it headless and look at the picture before reporting. The inventory
+  must cover every frame the user should be able to reach, across .pen files when a module has
+  more than one, and the previous round's frames stay in it until the user drops them:
+  `check <dir> --previous <last round dir>` names any frame that was reachable last round and
+  is not now.
 
 ## Reporting a round
 
