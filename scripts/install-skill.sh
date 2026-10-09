@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the skills in this repo (skills/*) into a user's home: ~/.agents/skills/<name>,
-# plus the Claude command link ~/.claude/commands/orch and orch's four named sub-agent
+# plus Claude discovery links ~/.claude/skills/<name>, the command link ~/.claude/commands/orch,
+# and orch's four named sub-agent
 # definitions ~/.claude/agents/<name>.md (copied, never overwritten). Run from a source clone only.
 set -euo pipefail
 
@@ -15,7 +16,7 @@ Options:
   --force            Replace an existing ~/.agents/skills/<name> (a .tgz backup is kept).
   --force-agents     Replace a different ~/.claude/agents/<name>.md (copy kept in ~/.agents/).
                      Without it a different file is kept and reported, never overwritten.
-  --no-claude-link   Do not create ~/.claude/commands/orch or install ~/.claude/agents/*.md.
+  --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
   --agents-only      Install only the sub-agent definitions; leave the skills alone.
   --only <name>      Install only this skill (orch or session-close). Repeatable.
   -h, --help         Show this help.
@@ -128,6 +129,19 @@ for src in "$source_root"/skills/*/; do
   rmdir "$tmp"
   echo "Installed $name $version -> $dest"
   installed_any="true"
+  if [[ "$claude_link" == "true" ]]; then
+    link="$home_dir/.claude/skills/$name"
+    target="../../.agents/skills/$name"
+    mkdir -p "$home_dir/.claude/skills"
+    if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "$target" ]]; then
+      echo "Claude skill link already current: $link"
+    elif [[ -e "$link" || -L "$link" ]]; then
+      echo "Kept your existing Claude skill path: $link (not overwritten)"
+    else
+      ln -s "$target" "$link"
+      echo "Claude skill link: $link -> $target"
+    fi
+  fi
 done
 
 [[ "$installed_any" == "true" || "$agents_only" == "true" ]] || die "nothing matched --only"

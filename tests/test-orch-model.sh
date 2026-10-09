@@ -8,6 +8,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 cat > "$tmp/list.json" <<'J'
 {"id":"cli:agent:list","result":{"agents":[
  {"name":"worker-cmd","agent":"cmd","pane_id":"w1:p1","display_agent":"cmd · deepseek/deepseek-v4-flash","tokens":{"model":"deepseek/deepseek-v4-flash"}},
+ {"name":"fresh-cmd","agent":"cmd","pane_id":"w1:p5","tokens":{}},
  {"name":"code","agent":"claude","pane_id":"w1:p2","display_agent":null,"tokens":{}},
  {"name":"review","agent":"codex","pane_id":"w1:p3","tokens":null},
  {"name":"blank","agent":"claude","pane_id":"w1:p4"}
@@ -24,6 +25,20 @@ ORCH_MODEL_FIXTURE_PANE="$tmp/empty.txt" "$S" worker-cmd deepseek/deepseek-v4-fl
 ORCH_MODEL_FIXTURE_PANE="$tmp/empty.txt" "$S" worker-cmd DEEPSEEK-v4-flash >/dev/null || fail "cmd match should be case-insensitive"
 if ORCH_MODEL_FIXTURE_PANE="$tmp/empty.txt" "$S" worker-cmd sonnet >"$tmp/o" 2>"$tmp/e"; then fail "cmd mismatch should exit 1"; fi
 grep -q MISMATCH "$tmp/e" || fail "mismatch not reported"
+
+# Before the first turn, Command Code shows the unqualified model with its latest suffix.
+printf 'deepseek-v4-flash-(latest)\n' > "$tmp/fresh.txt"
+out="$(ORCH_MODEL_FIXTURE_PANE="$tmp/fresh.txt" "$S" fresh-cmd)"
+[[ "$out" == "kind=cmd model=deepseek-v4-flash-(latest)" ]] || fail "fresh cmd read: $out"
+for expected in deepseek/deepseek-v4-flash deepseek-v4-flash deepseek/deepseek-v4-flash-\(latest\); do
+  ORCH_MODEL_FIXTURE_PANE="$tmp/fresh.txt" "$S" fresh-cmd "$expected" >/dev/null || fail "fresh cmd match: $expected"
+done
+ORCH_MODEL_FIXTURE_PANE="$tmp/empty.txt" "$S" worker-cmd deepseek-v4-flash-\(latest\) >/dev/null || fail "list model should ignore expected latest suffix"
+printf 'deepseek-v4-pro-(latest)\n' > "$tmp/pro.txt"
+if ORCH_MODEL_FIXTURE_PANE="$tmp/pro.txt" "$S" fresh-cmd deepseek/deepseek-v4-flash >"$tmp/o" 2>"$tmp/e"; then fail "fresh cmd pro must mismatch flash"; fi
+grep -q MISMATCH "$tmp/e" || fail "fresh mismatch not reported"
+if ORCH_MODEL_FIXTURE_PANE="$tmp/fresh.txt" "$S" fresh-cmd deepseek-v4-flash-extra >/dev/null 2>&1; then fail "different full model must mismatch"; fi
+if ORCH_MODEL_FIXTURE_PANE="$tmp/fresh.txt" "$S" fresh-cmd deepseek-v4 >/dev/null 2>&1; then fail "partial full model must mismatch"; fi
 
 # claude: model from pane text; pane id works as target too
 out="$(ORCH_MODEL_FIXTURE_PANE="$tmp/claude.txt" "$S" code)"; [[ "$out" == "kind=claude model=Sonnet 5.5" ]] || fail "claude read: $out"

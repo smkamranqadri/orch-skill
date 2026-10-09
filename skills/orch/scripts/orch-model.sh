@@ -3,7 +3,7 @@
 #
 #   orch-model.sh <agent-name-or-pane-id>            -> prints "kind=<kind> model=<model>"
 #   orch-model.sh <agent-name-or-pane-id> <expected>  -> same, then exit 0 when <expected> is
-#                                                        in the live model (case-insensitive),
+#                                                        matches the live model (case-insensitive),
 #                                                        1 on a mismatch, 2 when no model is visible
 #
 # Sources, in order: `herdr agent list` (Command Code reports tokens.model there; Claude Code and
@@ -11,6 +11,8 @@
 # "Haiku 5.5", "Fable 5.1"; Codex shows "GPT-6.1-Sol medium"). Run it after `herdr agent start`
 # and before the first prompt: a wrong model is cheapest to fix before the agent has read anything.
 # Tests set ORCH_MODEL_FIXTURE_LIST (agent list JSON file) and ORCH_MODEL_FIXTURE_PANE (pane text).
+# Command Code full identifiers compare without provider/ or -(latest); family shorthand,
+# and Claude/Codex expectations, retain substring matching.
 set -uo pipefail
 
 target="${1:-}"; expected="${2:-}"
@@ -49,6 +51,8 @@ if [[ "$model" == "-" ]]; then
       model="$(printf '%s\n' "$text" | grep -oiE '\b(Opus|Sonnet|Haiku|Fable|Mythos)\b( [0-9][0-9.]*)?' | tail -1)" ;;
     codex)
       model="$(printf '%s\n' "$text" | grep -oiE '\bgpt-[0-9][0-9a-z.-]*( (low|medium|high|xhigh|minimal))?' | tail -1)" ;;
+    cmd)
+      model="$(printf '%s\n' "$text" | grep -oiE '\b(gemini|gpt|claude|opus|sonnet|haiku|deepseek|kimi|glm|minimax|mimo|qwen)[-a-z0-9./]*([(]latest[)])?' | tail -1)" ;;
     *)
       model="$(printf '%s\n' "$text" | grep -oiE '\b(gemini|gpt|claude|opus|sonnet|haiku|deepseek|kimi|glm|minimax|mimo|qwen)[-a-z0-9./ ]*' | tail -1)" ;;
   esac
@@ -61,6 +65,13 @@ if [[ "$model" == "-" ]]; then
   echo "model not visible for $target ($kind, pane $pane); read the pane yourself before prompting" >&2; exit 2
 fi
 shopt -s nocasematch
-if [[ "$model" == *"$expected"* ]]; then exit 0; fi
+if [[ "$kind" == "cmd" ]]; then
+  # Command Code omits the provider in a fresh pane and may label the model -(latest).
+  actual_id="${model##*/}"; actual_id="${actual_id%-(latest)}"
+  expected_id="${expected##*/}"; expected_id="${expected_id%-(latest)}"
+  if [[ "$actual_id" == "$expected_id" ]]; then exit 0; fi
+  # Keep family shorthand (e.g. deepseek); full model identifiers must match exactly.
+  if [[ "$expected_id" != *-* && "$actual_id" == *"$expected_id"* ]]; then exit 0; fi
+elif [[ "$model" == *"$expected"* ]]; then exit 0; fi
 echo "MISMATCH: $target runs $kind $model, not $expected. Fix before the first prompt (see references/runtimes.md)." >&2
 exit 1
