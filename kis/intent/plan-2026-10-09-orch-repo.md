@@ -112,4 +112,18 @@ at the owner's word. Settings are as before the revert; preference 27 says the a
 
 ## Status
 
-See `../state/current.md`.
+Complete 2026-10-09: all six phases done, orch at 0.7.1, session-close at 1.0.0.
+
+Open acceptances, to prove in the first real run that uses this version:
+
+- Phase 2: the KIS-present event path (State rewritten after a real merge).
+- Phase 5: the placement table against every case in `docs/research/`.
+
+Proved since: phase 5's real `--sub` run, 2026-10-09: a `worker` sub-agent with
+`isolation: "worktree"` built the sub-agent shipping (0.8.0) in its own worktree; the
+orchestrator verified it (suite, one mutation), committed b7fe302 there, merged, removed the
+worktree.
+
+Follow-up found in use: `scripts/orch-model.sh` reports a false MISMATCH for a fresh cmd agent
+(Herdr has no `tokens.model` before its first turn, and the pane text drops the `deepseek/`
+prefix); seen 2026-10-09 starting the lore agent.
