@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lessons space and the project's status space when they are present."
 metadata:
-  version: "0.7.1"
+  version: "0.8.0"
 ---
 
 # Orchestrator (orch)
@@ -81,6 +81,8 @@ summary, then continue straight into the plan."
 
 ## Files
 
+- `agents/`: the four named sub-agents (`worker`, `explorer`, `researcher`, `designer`) that
+  `placement.md` and `task --sub` use; the installer copies them to `~/.claude/agents/`.
 - `ledger-template.md`: the ledger's shape. Copy it on the first start.
 - `references/placement.md`: where work runs: sub-agent (one-message work, small fully briefed
   changes; Claude only), pane agent in a new worktree and workspace (anything on its own branch,

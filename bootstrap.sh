@@ -18,8 +18,9 @@ Options:
   --ref <git-ref>    Git ref to install from. Defaults to main. Also ORCH_SKILL_REF.
   --source <path>    Local source repo root. Skips the clone.
   --home <dir>       Home directory to install into. Defaults to $HOME.
-  --force            install: replace an existing install.
-  --no-claude-link   Do not create ~/.claude/commands/orch.
+  --force            install: replace an existing install, and a different
+                     ~/.claude/agents/<name>.md (a copy is kept in ~/.agents/).
+  --no-claude-link   Do not create ~/.claude/commands/orch or install ~/.claude/agents/*.md.
   --only <name>      Act on one skill only (orch or session-close). Repeatable.
   --with-herdr       Install what the Herdr check finds missing: the binary with the official
                      installer (network), the skill from `herdr --skill` (no network).
@@ -160,10 +161,26 @@ compare() {
   done
 }
 
+# Prints one line per orch sub-agent: "<name> current|differs|missing". Nothing when orch is
+# not selected, the claude link is off, or the source ships no agents.
+compare_agents() {
+  local f name dest
+  selected orch && [[ "$claude_link" == "true" ]] || return 0
+  for f in "$source_root"/skills/orch/agents/*.md; do
+    [[ -f "$f" ]] || continue
+    name="$(basename "$f" .md)"
+    dest="$home_dir/.claude/agents/$name.md"
+    if [[ ! -e "$dest" ]]; then echo "$name missing"
+    elif cmp -s "$f" "$dest"; then echo "$name current"
+    else echo "$name differs"; fi
+  done
+}
+
 case "$command_name" in
   install)
     args=("${install_args[@]}")
     [[ "$force" == "true" ]] && args+=(--force)
+    [[ "$force" == "true" ]] && args+=(--force-agents)
     "$source_root/scripts/install-skill.sh" "${args[@]}"
     [[ "$herdr_check" == "true" ]] && herdr_doctor || true
     ;;
@@ -176,6 +193,13 @@ case "$command_name" in
         missing) echo "Not installed: $name"; rc=1 ;;
       esac
     done < <(compare)
+    while read -r name status; do
+      case "$status" in
+        current) echo "Agent already current: $name" ;;
+        differs) echo "Agent differs: $name (~/.claude/agents/$name.md is not the shipped one; install --force replaces it)"; rc=1 ;;
+        missing) echo "Agent not installed: $name"; rc=1 ;;
+      esac
+    done < <(compare_agents)
     if [[ "$herdr_check" == "true" ]]; then herdr_doctor || rc=1; fi
     exit $rc
     ;;
@@ -190,6 +214,12 @@ case "$command_name" in
           ;;
       esac
     done < <(compare)
+    # Agents: install the missing ones; a different file of the user's is kept and reported.
+    agent_state="$(compare_agents)"
+    if grep -q -E ' (missing|differs)$' <<<"$agent_state"; then
+      args=(--source "$source_root" --home "$home_dir" --only orch --agents-only)
+      "$source_root/scripts/install-skill.sh" "${args[@]}"
+    fi
     [[ "$herdr_check" == "true" ]] && herdr_doctor || true
     ;;
 esac
