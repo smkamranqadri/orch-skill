@@ -54,7 +54,8 @@ may not apply (no second source without the OAuth token, which is never read). C
 app-server `account/rateLimits/read` over stdio after `initialize`, windows told apart by
 `windowDurationMins` (300, 10080), reused for five minutes. Command Code: only the unofficial
 `api.commandcode.ai/alpha/billing/credits` with `CMD_API_KEY` from the environment, unverified;
-`auth.json` is never read. Policy is the owner's: report only, ask at 80%, never switch.
+`auth.json` is never read. Since orch 0.8.4, choose the CLI by available usage first, from any
+orchestrator kind; ask when no candidate is clearly available, and never choose one at or above 80%.
 
 ## Live install
 
