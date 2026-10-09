@@ -12,7 +12,7 @@ prompt can carry several agents.
 1. `tail -20 <dir>/events.log` if the prompt says "and N more"; otherwise the prompt is enough.
 2. For each agent named, read its verdict, not its output (rule 3): `herdr agent read <agent>
    --source recent-unwrapped --lines 15 | tail -10`, or the handoff's `## Result` section.
-   - finished with plan questions: `commands/task.md` step 8 (relay them to the user).
+   - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
    - finished with a report: verify it (coordination rule 35) when the user has asked for a
      merge; otherwise record it and tell the user in one line.
    - needs you: it is waiting on a permission prompt or a question. Tell the user which agent

@@ -25,10 +25,15 @@ orchestrator never plans or codes it; it carries questions and decisions between
    (scope, files, acceptance checks, questions for the user) and stop; on the answers, build it,
    prove it, write the handoff, reply with a short summary." Without a lessons space, the brief
    also carries the standing rules in full, since the agent cannot load them.
-3. Worktree: if the agent has no row with a worktree, `herdr worktree create --cwd "$PWD"
+3. Usage: `python3 ~/.agents/skills/orch/scripts/orch-usage.py check <kind>`. Exit 3 means
+   that CLI's 5-hour or weekly window is at or above 80% used: show the user
+   `orch-usage.py show` and ask, with a recommendation, whether to start here anyway, use
+   another kind, or wait for the reset; never switch on your own (owner's rule: report only).
+   Exit 2 (unknown) is said in one line and does not block.
+4. Worktree: if the agent has no row with a worktree, `herdr worktree create --cwd "$PWD"
    --branch <slug> --base main --path ../<repo>.wt/<slug> --label <agent> --no-focus`; keep the
    workspace and pane ids from the JSON.
-4. Pane and agent: if the agent is not in `herdr agent list`, start it by its row in
+5. Pane and agent: if the agent is not in `herdr agent list`, start it by its row in
    `~/.agents/skills/orch/references/runtimes.md`: the kind decides the start command, the
    prompt method and the default model (claude: sonnet; codex: gpt-6.1-sol medium; cmd:
    deepseek/deepseek-v4-flash); a model outside the row's Allowed column, or in its Avoid
@@ -39,17 +44,17 @@ orchestrator never plans or codes it; it carries questions and decisions between
    and say so in the ledger's last event. Exit 2 means the model is not visible: read the last
    ten lines of the pane and decide. Never prompt an agent whose model you have not confirmed:
    a wrong model is cheapest to fix before it has read anything.
-5. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
+6. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
    <path>. Read it in full and follow it. Load the lessons first if the lessons skill is
    installed, then continue straight into the plan."` Confirm the status is working (rule 22).
-6. Ledger: add or update the row (name, kind/model as `orch-model.sh` reported it, pane,
+7. Ledger: add or update the row (name, kind/model as `orch-model.sh` reported it, pane,
    worktree and branch, brief, handoff, status working, last event "prompted: plan <slug>").
    Set Next action.
-7. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>` (the running
+8. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>` (the running
    watcher picks it up; no restart). No watcher running: `commands/watch.md`.
-8. Plan questions: on an "orch event" saying the agent finished with questions, read `tail -15` of
+9. Plan questions: on an "orch event" saying the agent finished with questions, read `tail -15` of
    its pane, ask the user one question at a time with a recommended option (core rule 60),
    record each answer under Open decisions in the ledger with the agent's name, then send all
    answers in one `herdr agent prompt` and confirm it is working again.
-9. Reply with the ledger row, one line, and end the turn. Do not wait for the agent: the watcher
+10. Reply with the ledger row, one line, and end the turn. Do not wait for the agent: the watcher
    prompts you when it finishes, and the user can keep talking to you meanwhile.

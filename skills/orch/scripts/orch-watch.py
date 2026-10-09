@@ -31,6 +31,7 @@ import sys
 import time
 
 POLL = 4               # seconds between polls of `herdr agent list`
+USAGE_EVERY = 300      # seconds between usage refreshes (orch-usage.py collect; codex is one app-server call)
 RETRY = 30             # seconds between wake attempts while the orchestrator is busy or typing
 HOLD_NOTICE = 120      # seconds a held wake waits before the user gets a notification
 WAKE_STATES = {"done", "blocked", "gone"}
@@ -170,6 +171,8 @@ class Watcher:
         self.next_try = 0
         self.recent = self.seed_recent()
         self.orch_note = ""
+        self.usage = ""       # one line from orch-usage.py, refreshed every USAGE_EVERY seconds
+        self.usage_at = 0
 
     def seed_recent(self):
         recent = []
@@ -188,11 +191,26 @@ class Watcher:
     def notify(self, title, body):
         herdr("notification", "show", title, "--body", body[:120], "--sound", "done")
 
+    def refresh_usage(self):
+        if time.time() - self.usage_at < USAGE_EVERY:
+            return False
+        self.usage_at = time.time()
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orch-usage.py")
+        try:
+            subprocess.run([sys.executable, script, "collect"], capture_output=True, text=True, timeout=45)
+            r = subprocess.run([sys.executable, script, "line"], capture_output=True, text=True, timeout=10)
+            new = r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.TimeoutExpired):
+            new = ""
+        changed = new != self.usage
+        self.usage = new
+        return changed
+
     def poll(self):
         live = agent_list()
         if live is None:
             return False
-        changed = False
+        changed = self.refresh_usage()
         names = read_lines(os.path.join(self.dir, "agents.txt"))
         for name in names:
             entry = live.get(name)
@@ -299,6 +317,8 @@ class Watcher:
         orch = (read_lines(os.path.join(self.dir, "orchestrator")) or ["none"])[0]
         out = [f"orch watcher · {os.path.basename(os.path.dirname(os.path.abspath(self.dir))).removesuffix(".reports")}"
                f" · {dt.datetime.now().strftime('%H:%M')} · {self.orch_note or 'orchestrator: ' + orch}"]
+        if self.usage:
+            out.append(self.usage[:width])
         out.append(f"{'AGENT':<22} {'STATE':<12} {'SINCE':<6} {'CONTEXT':<10} TASK")
         for name, state in self.prev.items():
             title, ctx = self.info.get(name, ("", ""))
@@ -370,6 +390,7 @@ def cmd_board(d):
                 w.since[name] = m.group(1)
                 break
         w.info[name] = ((entry or {}).get("terminal_title_stripped", ""), context_of(name) if entry else "")
+    w.refresh_usage()
     print(w.board())
 
 
