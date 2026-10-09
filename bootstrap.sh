@@ -190,5 +190,6 @@ case "$command_name" in
           ;;
       esac
     done < <(compare)
+    [[ "$herdr_check" == "true" ]] && herdr_doctor || true
     ;;
 esac
