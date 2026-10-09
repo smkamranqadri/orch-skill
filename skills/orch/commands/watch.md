@@ -9,7 +9,8 @@ The watcher lives in a visible pane, not in this session, so closing the orchest
 strands it and the user can read it. One watcher per run; it reads `<dir>/agents.txt` on every
 poll, so adding an agent never needs a restart.
 
-W = `python3 ~/.agents/skills/orch/scripts/orch-watch.py`
+W = `python3 ~/.agents/skills/orch/scripts/orch-watch.py`; `<dir>` is the run dir from
+`scripts/orch-dir.sh` (the ledger's folder).
 
 1. Already running (`kill -0 $(cat <dir>/watcher.pid)` succeeds): `W add <dir> $ARGUMENTS`,
    then `W orch <dir> <your pane id>` (`herdr pane current`, field `pane_id`). Done; skip to 5.
