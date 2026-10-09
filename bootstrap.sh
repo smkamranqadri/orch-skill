@@ -20,7 +20,7 @@ Options:
   --home <dir>       Home directory to install into. Defaults to $HOME.
   --force            install: replace an existing install, and a different
                      ~/.claude/agents/<name>.md (a copy is kept in ~/.agents/).
-  --no-claude-link   Do not create ~/.claude/commands/orch or install ~/.claude/agents/*.md.
+  --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
   --only <name>      Act on one skill only (orch or session-close). Repeatable.
   --with-herdr       Install what the Herdr check finds missing: the binary with the official
                      installer (network), the skill from `herdr --skill` (no network).
@@ -176,6 +176,20 @@ compare_agents() {
   done
 }
 
+compare_skill_links() {
+  local src name link
+  [[ "$claude_link" == "true" ]] || return 0
+  for src in "$source_root"/skills/*/; do
+    name="$(basename "$src")"
+    selected "$name" || continue
+    link="$home_dir/.claude/skills/$name"
+    if [[ -L "$link" ]] && [[ "$(readlink "$link")" == "../../.agents/skills/$name" ]]; then
+      echo "$name current"
+    elif [[ -e "$link" || -L "$link" ]]; then echo "$name differs"
+    else echo "$name missing"; fi
+  done
+}
+
 case "$command_name" in
   install)
     args=("${install_args[@]}")
@@ -200,6 +214,13 @@ case "$command_name" in
         missing) echo "Agent not installed: $name"; rc=1 ;;
       esac
     done < <(compare_agents)
+    while read -r name status; do
+      case "$status" in
+        current) echo "Claude skill link already current: $name" ;;
+        differs) echo "Claude skill link differs: $name (existing path kept)"; rc=1 ;;
+        missing) echo "Claude skill link missing: $name"; rc=1 ;;
+      esac
+    done < <(compare_skill_links)
     if [[ "$herdr_check" == "true" ]]; then herdr_doctor || rc=1; fi
     exit $rc
     ;;
