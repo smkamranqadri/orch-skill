@@ -4,6 +4,8 @@ Source repository for two user-scope agent skills: `orch` (run many coding agent
 replaceable orchestrator) and `session-close` (the owner's fixed end-of-session routine).
 Nothing here is a live install. The installer copies `skills/<name>/` to
 `~/.agents/skills/<name>` and links `~/.claude/commands/orch`, which is where every host looks.
+Since orch 0.8.0 it also copies orch's four sub-agents (`skills/orch/agents/`) to
+`~/.claude/agents/`, never overwriting a different file without `--force-agents`.
 
 ## The three systems this repo is part of
 
@@ -13,9 +15,10 @@ Stated by the owner on 2026-10-09:
   memory and operating system.
 - **orch** (this repo) is the operating system for working with many agents and sub-agents
   across models and TUIs: Claude Code, Codex, Command Code, agy.
-- **The ai-agents space** in Tartib is the agents' own memory (lessons, preferences, gotchas),
-  run by the `agent-lessons` skill. It will get its own repo with a pluggable notes backend
-  (not this repo).
+- **lore** (`../lore-skill`) is the agents' own memory across projects (lessons, preferences,
+  gotchas, profile, references), with a pluggable notes backend; the owner's backend is the
+  Tartib space `ai-agents`. It replaced the agent-lessons skill on 2026-10-09; orch and
+  session-close call `/lore:load` and `/lore:retro` when it is installed.
 
 Together they are a meta framework; there is no repo for the whole, and orch must work with
 or without the other two.
