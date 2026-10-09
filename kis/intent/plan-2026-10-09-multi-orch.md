@@ -13,7 +13,8 @@ Approved 2026-10-09 by the owner, answers relayed by orch-3. Standard mode.
 - Alternate terminal buffer, restored on exit/SIGTERM; redraw only on changed board text;
   last five Recent lines. Board includes owner.
 - Update watcher, template and six commands; orch version 0.9.0.
-- No usage changes, separate run dirs, cross-repo coordination, real installation/restart,
+- No usage changes in tasks 1–2 (task 4 adds statusline readings), separate run dirs,
+  cross-repo coordination, real installation/restart,
   live watcher files or pane wG:p2. Lore load is read-only; no further snapshots.
 
 ## Verification and delivery
@@ -33,3 +34,21 @@ Pane closed. Proof logs copied beside the handoff. Receiving orchestrator review
 
 Added by owner while implementing: task 4, cmd statusline usage, in the updated brief.
 Read that section after committing tasks 1–2; implement as a separate commit at 0.9.0.
+
+## Task 4: approved extension
+
+Owner requested cmd statusline usage in this same 0.9.0 as its own commit, after tasks 1–2.
+Read-only inspected statusline.ts, commandcode/statusline.sh and Claude cache block. Read
+usage-cmd.json rate_limits before CMD_API_KEY; expire statusline snapshots at five minutes
+(same interval as the watcher usage refresh). Keep API fallback when a key was explicitly set,
+with its cache in usage-cmd-api.json so it cannot overwrite the statusline source. Missing or
+stale statusline without that fallback is unknown. Update runtime/skill help, temporary cache
+fixture tests, fresh/stale and preference mutations. Exact statusline block supplied in handoff and shipped as a tested reference;
+never edit ~/.commandcode or ~/.cache.
+
+Task 4 complete on branch, 2026-10-09: seven fixture tests passed; six mutants killed
+(fresh/stale boundaries, cache preference, reset/range guards, API cache separation). Exact
+statusline block executed with a temporary cache directory, no real home changes. Final suite
+passed all ten shell test files, including 15 watcher/cmd unittest cases. Receiving orchestrator
+review, merge and live application remain. Cache freshness measures statusline write time; the
+installed mod can reuse its last upstream value after a failed fetch.

@@ -52,9 +52,13 @@ statusline refresh, so the number is as fresh as the last Claude turn on this ma
 window reset with no Claude session answering, the board shows the old figure and an ASK that
 may not apply (no second source without the OAuth token, which is never read). Codex: the
 app-server `account/rateLimits/read` over stdio after `initialize`, windows told apart by
-`windowDurationMins` (300, 10080), reused for five minutes. Command Code: only the unofficial
-`api.commandcode.ai/alpha/billing/credits` with `CMD_API_KEY` from the environment, unverified;
-`auth.json` is never read. Since orch 0.8.4, choose the CLI by available usage first, from any
+`windowDurationMins` (300, 10080), reused for five minutes. Command Code:
+`usage-cmd.json` written by its statusline, with Claude-shaped rate_limits, preferred while
+under five minutes old and before either known window reset. Missing/stale data is unknown
+unless the optional `CMD_API_KEY` API fallback supplies a reading. Its cache is
+`usage-cmd-api.json`, so it never overwrites the statusline file. `auth.json` is never read.
+The insertion block ships at `skills/orch/references/cmd-statusline-cache.sh`. Snapshot age
+measures the last statusline write, not necessarily the mod's last upstream fetch. Since orch 0.8.4, choose the CLI by available usage first, from any
 orchestrator kind; ask when no candidate is clearly available, and never choose one at or above 80%.
 
 ## Live install
