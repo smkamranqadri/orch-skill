@@ -2,7 +2,12 @@
 
 - Branch: `main`, tracking `origin/main` at `https://github.com/smkamranqadri/orch-skill`
   (public). Pushed through 3432eab (orch 0.9.0); later session-close syncs pushed with them.
-- Task: none in progress. The plan `../intent/plan-2026-10-09-multi-orch.md` (one watcher, many
+- Task: plan `../intent/plan-2026-10-13-visibility.md` (orch 0.10.0: mark/evidence, Needs-you
+  board block, check, show, stats; ideas from herdr-dagr) drafted 2026-10-13, approved by the
+  owner; orch-5 (Claude Opus, wG:p6) orchestrates, building through a Sonnet pane agent `visibility`. ctx-trims'
+  orch part merged as orch 0.9.1 (be5bf15, ff, 2026-10-13): `scripts/orch-agents.sh` replaces raw
+  Herdr list reads; clean detached suite pass, 2 mutants killed, installed live (`check` exit 0); not
+  pushed. Its kis-skill part stays with w3:pZ. Previous: the plan `../intent/plan-2026-10-09-multi-orch.md` (one watcher, many
   orchestrators; readable watcher pane; cmd usage from its statusline) is merged as orch 0.9.0
   (fast-forward to 2465eb0, 2026-10-09), installed live (`bootstrap.sh check --source .` current,
   exit 0), and the live watcher restarted on it (pane wG:p2).
