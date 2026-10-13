@@ -19,6 +19,9 @@
   orch-watch.py show <dir> <agent>        one card (15 lines at most): ledger row, owner, live state,
                                           model and context, brief and handoff present or missing,
                                           attempts with causes, evidence, last 8 events
+  orch-watch.py stats <dir> [agent]       per agent from events.log: working time, finishes, attempts,
+                                          finish->wake and finish->first-mark delays, closed or not;
+                                          run totals with the context at each handoff
   orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]
                                           record the orchestrator's verdict in events.log; tiers:
                                           reported verified asserted sent-back merged open closed
@@ -1037,6 +1040,73 @@ def cmd_show(d, args):
     return 0
 
 
+def dur(seconds):
+    seconds = int(seconds)
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds}s"
+
+
+def agent_stats(events, name, now):
+    own = [e for e in events if e["agent"] == name]
+    states = [e for e in own if e["kind"] == "state"]
+    work = 0.0
+    for i, e in enumerate(states):
+        if e["state"] == "working":
+            end = states[i + 1]["t"] if i + 1 < len(states) else now
+            work += max(0.0, (end - e["t"]).total_seconds())
+    done = finishes(own)
+    wake, mark = [], []
+    woken = [e for e in events if e["kind"] == "woken" and name in e["agents"]]
+    marks = [e for e in own if e["kind"] == "mark"]
+    for i, f in enumerate(done):
+        until = done[i + 1]["t"] if i + 1 < len(done) else None
+        inside = lambda e: e["t"] >= f["t"] and (until is None or e["t"] < until)
+        w = next((e for e in woken if inside(e)), None)
+        k = next((e for e in marks if inside(e)), None)
+        wake.append((w["t"] - f["t"]).total_seconds() if w else None)
+        mark.append((k["t"] - f["t"]).total_seconds() if k else None)
+    closed = bool(life(events, name) and (any(e["kind"] == "removed" for e in life(events, name))
+                                          or (marks and last_mark(events, name) and last_mark(events, name)["tier"] == "closed")))
+    return {"work": work, "finishes": len(done), "attempts": attempt_of(events, name),
+            "wake": wake, "mark": mark, "closed": closed}
+
+
+def delays(values):
+    got = [v for v in values if v is not None]
+    return f"{dur(sum(got) / len(got))} ({len(got)}/{len(values)})" if got else (f"- (0/{len(values)})" if values else "-")
+
+
+def cmd_stats(d, args, now=None):
+    args = list(args)
+    now = now or now_utc()
+    only = args[0] if args else None
+    events, _ = parse_log(d)
+    names = [n for n in dict.fromkeys(e["agent"] for e in events if e["kind"] in ("state", "registered"))]
+    if only:
+        if only not in names:
+            raise ValueError(f"unknown agent {only}: no state lines or registration in events.log")
+        names = [only]
+    rows = {n: agent_stats(events, n, now) for n in names}
+    out = [f"{'AGENT':<18} {'WORK':<8} {'FIN':<4} {'ATT':<4} {'FIN>WAKE':<14} {'FIN>MARK':<14} CLOSED"]
+    for n, r in rows.items():
+        out.append(f"{n[:18]:<18} {dur(r['work']):<8} {r['finishes']:<4} {r['attempts']:<4} "
+                   f"{delays(r['wake']):<14} {delays(r['mark']):<14} {'yes' if r['closed'] else 'no'}")
+    if not only:
+        wake = [v for r in rows.values() for v in r["wake"]]
+        mark = [v for r in rows.values() for v in r["mark"]]
+        handoffs = [(e["agent"], (re.search(r"ctx (\S+)", e["what"]) or [None, "?"])[1])
+                    for e in events if e["kind"] == "mark" and e["tier"] == "handoff"]
+        out.append(f"TOTAL: {len(rows)} agents, {sum(r['finishes'] for r in rows.values())} finishes, "
+                   f"rework {sum(r['attempts'] - 1 for r in rows.values())}, wake {delays(wake)}, mark {delays(mark)}, "
+                   f"closed {sum(1 for r in rows.values() if r['closed'])}/{len(rows)}")
+        out.append("handoffs: " + (", ".join(f"{a} at ctx {c}" for a, c in handoffs) if handoffs else "none marked"))
+    print("\n".join(out))
+    return 0
+
+
 def cmd_next(d, secs):
     log = os.path.join(d, "events.log")
     open(log, "a").close()
@@ -1069,6 +1139,8 @@ def main(argv):
         cmd_move(d, rest)
     elif cmd == "show":
         return cmd_show(d, rest)
+    elif cmd == "stats":
+        return cmd_stats(d, [a for a in rest if a != "--now" and not at_stamp(a)], option_now(rest))
     elif cmd == "check":
         return cmd_check(d, rest)
     elif cmd == "mark" and rest:
