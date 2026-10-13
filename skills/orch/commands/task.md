@@ -91,5 +91,8 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    its pane, ask the user one question at a time with a recommended option (core rule 60),
    record each answer under Open decisions in the ledger with the agent's name, then send all
    answers in one `herdr agent prompt` and confirm it is working again.
+    Sending a finished agent back to redo work (its proof failed, a review found a defect) is a
+    re-prompt: first `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <agent> sent-back "<cause>"`, then
+    prompt it with the cause, and keep the row's status `working`.
 10. Reply with the ledger row, one line, and end the turn. Do not wait for the agent: the watcher
    prompts you when it finishes, and the user can keep talking to you meanwhile.

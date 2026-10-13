@@ -20,5 +20,8 @@ Answer "what is pending, what is building, are the agents working" from one file
    agent's live state, since when, owner, context use and task, and the last five events. When the
    user asks about usage or limits, add `orch-usage.py show` (one line per CLI with reset times
    and the ASK warnings).
-3. Print those two blocks as the board and nothing else. Do not read panes, reports or KIS.
+3. When asked for more on one agent: `orch-watch.py show <dir> <agent>` (one card).
+   Run `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --offline`; when it exits 1, add one line, "check: N findings
+   (run /orch:start or event to fix)". Exit 3: one line, "check: ledger cannot be parsed".
+4. Print those blocks as the board and nothing else. Do not read panes, reports or KIS.
    If a row's live status differs from the ledger, fix only your owned ledger row and say so in one line.

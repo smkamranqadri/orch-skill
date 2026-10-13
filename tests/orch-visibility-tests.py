@@ -668,5 +668,37 @@ class StatsTests(Base):
         self.assertEqual(self.run_cli('stats', str(self.d), 'nobody').returncode, 2)
 
 
+class TemplateTests(Base):
+    def test_ledger_template_parses_and_states_the_limit(self):
+        template = (ROOT / 'skills/orch/ledger-template.md').read_text()
+        (self.d / 'ledger.md').write_text(template)
+        ledger = m.parse_ledger(str(self.d))
+        self.assertEqual(ledger['rows']['code']['status'], 'working')
+        self.assertEqual(ledger['rows']['code']['owner'], 'w5:p2')
+        self.assertIn('at most 60 lines', template)
+        for word in ('working', 'done', 'merged', 'closed', 'gone', 'open: next cycle'):
+            self.assertIn(word, template)
+
+    def test_commands_run_the_visibility_steps(self):
+        base = ROOT / 'skills/orch/commands'
+        expect = {'event.md': ['mark <dir> <agent> <tier>', 'sent-back', 'merged', 'check <dir> --owner'],
+                  'start.md': ['check <dir> --owner'], 'status.md': ['check <dir> --offline', 'show <dir> <agent>'],
+                  'task.md': ['mark <dir> <agent> sent-back'], 'handoff.md': ['check <dir> --owner', 'handoff "ctx <n>"']}
+        for name, needles in expect.items():
+            text = (base / name).read_text()
+            for needle in needles:
+                self.assertIn(needle, text, f'{name} lacks {needle!r}')
+        skill = (ROOT / 'skills/orch/SKILL.md').read_text()
+        self.assertIn('version: "0.10.0"', skill)
+        for needle in ('orch-watch.py mark', 'orch-watch.py check', 'orch-watch.py show', 'orch-watch.py stats',
+                       'references/visibility.md'):
+            self.assertIn(needle, skill)
+        ref = (ROOT / 'skills/orch/references/visibility.md').read_text()
+        for tier in m.TIERS:
+            self.assertIn(f'`{tier}`', ref)
+        for rule in ('ledger-length', 'next-action', 'no-row', 'row-unregistered', 'not-closed', 'watcher', 'owner-dead', 'log'):
+            self.assertIn(f'`{rule}`', ref)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

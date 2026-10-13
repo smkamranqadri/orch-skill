@@ -20,7 +20,10 @@ Agents keep running. Nothing is closed, removed or committed beyond the memory s
    present); each absent one is skipped in one line. Flush applied decisions from the ledger's
    Open decisions into the KIS plan (core rule 57), or leave them in the ledger without KIS.
 3. Update only your ledger rows and `Next action (<owner>):`. Refuse to continue while your
-   line is empty or stale; preserve other owners' lines.
+   line is empty or stale; preserve other owners' lines. Then
+   `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` must report nothing for your rows and
+   Next action line (fix them first); and record your context for the exit numbers:
+   `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <your pane id> handoff "ctx <n>"`.
 4. Write `<dir>/handoff-<date>-<n>.md`: line one is the Next action; then paths to the ledger,
    State, briefs and reports (paths, never bodies); decisions since the last handoff; your agent-tool
    sub-agents still running, listed as lost; the watcher's pane and pid; skills the successor
