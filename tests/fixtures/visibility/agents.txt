@@ -1,0 +1,4 @@
+lore-ids orch=w3:pZ
+tartib-search orch=w3:pZ
+ctx-trims orch=w3:pZ
+visibility orch=wG:p6
