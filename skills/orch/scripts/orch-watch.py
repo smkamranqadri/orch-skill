@@ -1027,8 +1027,8 @@ def show_card(d, name, live=None):
                                  + ("" if mark["proof"] == "-" else f" (proof {mark['proof']})") if mark else "none"))
     attempts = [f"a{e['attempt']} sent back: {e['what'][:50]}" for e in mine if e["kind"] == "mark" and e["tier"] == "sent-back"]
     lines.append(f"attempts: {attempt_of(events, name)}" + (f" ({'; '.join(attempts)})" if attempts else ""))
-    keep = 15 - len(lines)
-    lines += ["  " + plain_event(e) for e in own[-min(8, keep):]]
+    assert len(lines) == 7  # 7 head lines + the last 8 events = the card's 15-line limit
+    lines += ["  " + plain_event(e) for e in own[-8:]]
     return lines
 
 
