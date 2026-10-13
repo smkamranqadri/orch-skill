@@ -4,7 +4,7 @@
   (public). Pushed through 3432eab (orch 0.9.0); later session-close syncs pushed with them.
 - Task: plan `../intent/plan-2026-10-13-visibility.md` (orch 0.10.0: mark/evidence, Needs-you
   board block, check, show, stats; ideas from herdr-dagr) drafted 2026-10-13, approved by the
-  owner; orch-5 (Claude Opus, wG:p6) orchestrates, building through a Sonnet pane agent `visibility`. ctx-trims'
+  owner; orch-5 (Claude Opus, wG:p6) orchestrates, building through a Sonnet pane agent `visibility`. Built on branch `visibility` (code at eae8358, eight code commits over 5ab5e8c; clean detached suite and 50 of 50 mutants killed by the builder, report `.orch/visibility/report.md`); not yet verified by orch-5, not merged, not installed. ctx-trims'
   orch part merged as orch 0.9.1 (be5bf15, ff, 2026-10-13): `scripts/orch-agents.sh` replaces raw
   Herdr list reads; clean detached suite pass, 2 mutants killed, installed live (`check` exit 0); not
   pushed. Its kis-skill part stays with w3:pZ. Previous: the plan `../intent/plan-2026-10-09-multi-orch.md` (one watcher, many

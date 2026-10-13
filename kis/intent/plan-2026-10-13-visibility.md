@@ -116,3 +116,24 @@ and visibility"), scope "all five". Standard mode. Approved 2026-10-13 by the ow
   log lines.
 - Not proved by this plan: a real multi-agent run using marks end to end (first live run after
   install).
+
+## Status
+
+Built 2026-10-13 on branch `visibility` (code through eae8358, orch 0.10.0), one commit per scope
+item: mark 450020a, board eae952e, check bc258e6, show 4f5639c, stats a3230a6, commands, reference
+and version 7908567, then 087f34a (mutation survivors) and eae8358 (clip the Waiting line). Not
+merged, not installed, not pushed. Proved by the builder: the full suite in a clean detached
+checkout at eae8358 (all twelve files pass), 50 mutants killed with the original written back,
+the board rendered in a throwaway pane at 80 and 150 columns with Needs you empty and full.
+
+Measured against the plan's numbers, today's fixture (`tests/fixtures/visibility`, copies of the
+real 2026-10-13 run) gives: ledger 79 lines (the plan said 75), three done-not-closed agents,
+the "agents: none" mismatch, and seven events.log lines outside the grammar (the plan said six:
+four hand-written dateless lines plus three ISO-stamped free-form "closed/merged" lines). Choices
+the plan left open: a `sent-back` mark is written as the attempt it opens (`a2`); `add` of an
+already registered name logs nothing; Needs you reads events.log timestamps with an injectable
+`--now`; `check` exits 3 only when the ledger, a table row or agents.txt cannot be parsed
+(stray log lines are findings); `verified` does not require `--proof`.
+
+Not proved: a real multi-agent run using marks end to end (first live run after install), and the
+live watcher drawing the new board (only `board` was rendered).
