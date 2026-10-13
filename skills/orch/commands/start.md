@@ -23,10 +23,10 @@ Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger ho
    (`orch-dir.sh --migrate`). Then read the ledger `$D/ledger.md`, and `kis/state/current.md`
    (head 60) when the repo has `kis/` (no `kis/`: one line, "no KIS in this repo").
    No ledger: copy `~/.agents/skills/orch/ledger-template.md` there, fill it from State (if
-   any) and `herdr agent list`, and set your Next action from State's Next. No State or no Next: set
+   any) and `~/.agents/skills/orch/scripts/orch-agents.sh`, and set your Next action from State's Next. No State or no Next: set
    Next action to "ask the user for the first assignment", print the board, and ask in one
    line; then `/orch:task` does the rest.
-3. Reconcile your owned rows with `herdr agent list` and `git worktree list`. Fix only yours.
+3. Reconcile your owned rows with `~/.agents/skills/orch/scripts/orch-agents.sh` and `git worktree list`. Fix only yours.
    Do not claim live agents owned elsewhere or adopt every agent with no row. Joining an
    existing run adds your Next action line; it never resets the ledger or wake default.
 4. Check the watcher: `kill -0 $(cat <dir>/watcher.pid)`. Dead or missing: run `commands/watch.md`.

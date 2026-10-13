@@ -67,7 +67,8 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    is working in that worktree now. `pane`: `herdr pane split <pane> --direction down --ratio
    0.25 --no-focus` and `herdr pane run <id> "<command>"`; no agent, no ledger row beyond a note
    on the stream it serves; stop here.
-5. Pane and agent: if the agent is not in `herdr agent list`, start it by its row in
+5. Pane and agent: if the agent is not live (`~/.agents/skills/orch/scripts/orch-agents.sh --fields
+   name <agent>`; exit 2 means absent), start it by its row in
    `~/.agents/skills/orch/references/runtimes.md`: the kind decides the start command, the
    prompt method and the default model (claude: sonnet; codex: gpt-6.1-sol medium; cmd:
    deepseek/deepseek-v4-flash); a model outside the row's Allowed column, or in its Avoid

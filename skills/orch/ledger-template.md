@@ -1,5 +1,5 @@
 # Orchestrator ledger: <project>
-Updated: <UTC time> by <orchestrator name>. Live truth: `herdr agent list`, `git worktree list`.
+Updated: <UTC time> by <orchestrator name>. Live truth: `scripts/orch-agents.sh`, `git worktree list`.
 
 Next action (<owner pane>): <one line; never empty; agent and path>
 Next action (<second owner pane>): <that owner's next step; omit when only one owner>
