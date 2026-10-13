@@ -366,7 +366,7 @@ def needs_you(events, owners, live_state, since, now, wake_held=(), waiting=None
         items.append((t, f"{count} wake(s) held for {owner}"))
     items.sort(key=lambda x: x[0])
     if waiting:
-        items.append((None, f"waiting on user: {waiting}"))
+        items.append((None, f"waiting on user: {waiting if len(waiting) <= 72 else waiting[:71] + '…'}"))
     asked = [seg.split()[0] for seg in usage.split(" · ") if seg.split() and "ASK" in seg.split()]
     if asked:
         items.append((None, f"usage ASK: {', '.join(asked)}"))

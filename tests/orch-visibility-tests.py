@@ -333,6 +333,9 @@ class BoardTests(Base):
         self.assertEqual(got[0].split(' ', 1)[1], '1 wake(s) held for o1')
         self.assertEqual(got[1], 'waiting on user: (0) full permissions asked 10-09')
         self.assertEqual(got[2], 'usage ASK: claude, cmd')
+        (self.d / 'ledger.md').write_text('Waiting on user: ' + 'x' * 100 + '\n')
+        w.usage = ''; w.held_since = {}
+        self.assertEqual(self.needs(w.board(at(self.T0)))[0], 'waiting on user: ' + 'x' * 71 + '…')
         (self.d / 'ledger.md').write_text('Waiting on user: none.\n')
         w.usage = ''; w.held_since = {}
         self.assertEqual(self.needs(w.board(at(self.T0))), [])
