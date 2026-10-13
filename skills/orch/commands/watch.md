@@ -27,9 +27,10 @@ W = `python3 ~/.agents/skills/orch/scripts/orch-watch.py`; `<dir>` is the run di
    Never start it with `&`, `nohup` or a background job in your own shell: the user would not
    see it, and it would die with you. If a sandbox refuses the herdr command, ask the user to
    approve it; there is no fallback.
-4. After 10 seconds: `herdr pane list` shows the `watcher` pane, `<dir>/events.log` has a
+4. After 10 seconds: `<dir>/events.log` has a
    "watcher start" line and one line per agent, and `herdr pane read <id> --source visible`
-   shows the board.
+   shows the board. To list panes compactly, use
+   `~/.agents/skills/orch/scripts/orch-agents.sh --panes --fields pane,label`.
 5. Record pane id, pid and agent names under Watcher in the ledger.
 
 The pane redraws only when board text changes, including the minute clock, in an alternate

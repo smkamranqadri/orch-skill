@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lore notes and the project's status space when they are present."
 metadata:
-  version: "0.9.0"
+  version: "0.9.1"
 ---
 
 # Orchestrator (orch)
@@ -101,6 +101,10 @@ summary, then continue straight into the plan."
 - `scripts/orch-model.sh <agent> [model]`: the kind and model an agent really runs (Herdr's
   list for cmd, pane text for Claude and Codex); exit 1 on a mismatch, 2 when not visible.
   Run it after every `agent start`, before the first prompt.
+- `scripts/orch-agents.sh [--panes] [--fields a,b,...] [<name-or-pane>]`: the compact live
+  agents (`name,pane,status,model,cwd`) and panes (`pane,label,cwd,agent`), one row each, sorted
+  by the first field. Read this instead of the full Herdr agent or pane list JSON: it is about
+  12.6k chars a call. A named target exits 2 when it is not live.
 - `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see rule 2).
 - `scripts/orch-usage.py collect|show|line|check <kind>`: each CLI's 5-hour and weekly plan
   usage with reset times (claude from the Claude Code statusline cache, codex from its
