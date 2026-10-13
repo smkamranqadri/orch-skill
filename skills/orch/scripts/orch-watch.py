@@ -12,6 +12,10 @@
   orch-watch.py add <dir> <agent>... [--orch <target>]  register agents with an owner
   orch-watch.py move <dir> <agent>... --from <old> --orch <new>  transfer only owned agents
   orch-watch.py remove <dir> <agent>...   stop watching agents
+  orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]
+                                          record the orchestrator's verdict in events.log; tiers:
+                                          reported verified asserted sent-back merged open closed
+                                          handoff (see references/visibility.md)
   orch-watch.py orch <dir> <target>       set the orchestrator to wake (agent name or pane id);
                                           "none" turns waking off
   orch-watch.py board <dir>               print the board once and exit
@@ -56,6 +60,77 @@ PLAIN = {
     "gone": "pane closed",
 }
 LINE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (\S+) (\S+)")
+TIERS = ("reported", "verified", "asserted", "sent-back", "merged", "open", "closed", "handoff")
+EVENT = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (\S+) (.*)$")
+STATE_TAIL = re.compile(r"^(working|done|idle|blocked|unknown|gone) \| (.*) \| ctx (\S.*)$")
+MARK_TAIL = re.compile(r"^mark:([a-z-]+) a(\d+) \| (.*) \| proof (\S.*)$")
+WOKEN_TAIL = re.compile(r"^woken(?: \(file\))?(?: orch=(\S+))? \| (.*)$")
+START_TAIL = re.compile(r"^start pid (\d+) agents:(.*)$")
+OWNED_TAIL = re.compile(r"^(registered|moved) orch=(\S+)$")
+
+
+def parse_event(line):
+    """One events.log line as a dict, or None when it is not in the log's grammar."""
+    m = EVENT.match(line)
+    if not m:
+        return None
+    stamp, agent, tail = m.groups()
+    try:
+        t = dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return None
+    e = {"t": t, "stamp": stamp, "agent": agent}
+    if (m := STATE_TAIL.match(tail)):
+        e.update(kind="state", state=m.group(1), title=m.group(2), ctx=m.group(3))
+    elif (m := MARK_TAIL.match(tail)):
+        if m.group(1) not in TIERS:
+            return None
+        e.update(kind="mark", tier=m.group(1), attempt=int(m.group(2)), what=m.group(3), proof=m.group(4))
+    elif agent == "orchestrator" and (m := WOKEN_TAIL.match(tail)):
+        e.update(kind="woken", owner=m.group(1), agents=[a.strip() for a in m.group(2).split(",") if a.strip()])
+    elif agent == "watcher" and (m := START_TAIL.match(tail)):
+        e.update(kind="watcher", pid=int(m.group(1)))
+    elif (m := OWNED_TAIL.match(tail)):
+        e.update(kind=m.group(1), owner=m.group(2))
+    elif tail == "removed":
+        e.update(kind="removed")
+    else:
+        return None
+    return e
+
+
+def parse_log(d):
+    """(events, bad): every parsed event in file order, and (line number, text) for each line
+    outside the grammar (hand-written lines, a date with no time zone, a lone word)."""
+    events, bad = [], []
+    try:
+        with open(os.path.join(d, "events.log")) as f:
+            for n, raw in enumerate(f, 1):
+                line = raw.rstrip("\n")
+                if not line.strip():
+                    continue
+                e = parse_event(line)
+                if e:
+                    e["n"] = n
+                    events.append(e)
+                else:
+                    bad.append((n, line))
+    except OSError:
+        pass
+    return events, bad
+
+
+def attempt_of(events, agent):
+    """1 plus the sent-back marks since the agent's last registered line."""
+    n = 1
+    for e in events:
+        if e["agent"] != agent:
+            continue
+        if e["kind"] == "registered":
+            n = 1
+        elif e["kind"] == "mark" and e["tier"] == "sent-back":
+            n += 1
+    return n
 
 
 def herdr(*args, timeout=15):
@@ -456,14 +531,19 @@ def cmd_add(d, args):
         have = read_lines(os.path.join(d, "agents.txt"))
         existing = {line.split()[0] for line in have}
         # Existing registrations retain their owner; use guarded move for reassignment.
-        save_registrations(d, have + [n + (f" orch={owner}" if owner else "")
-                                     for n in dict.fromkeys(names) if n not in existing])
+        new = [n for n in dict.fromkeys(names) if n not in existing]
+        save_registrations(d, have + [n + (f" orch={owner}" if owner else "") for n in new])
+        for n in new:  # a re-add of a registered name is a no-op and must not reset its attempts
+            log_append(d, f"{iso()} {n} registered orch={owner or default_owner(d)}")
 
 
 def cmd_remove(d, names):
     with registration_lock(d):
-        save_registrations(d, [line for line in read_lines(os.path.join(d, "agents.txt"))
-                               if line.split()[0] not in names])
+        have = read_lines(os.path.join(d, "agents.txt"))
+        save_registrations(d, [line for line in have if line.split()[0] not in names])
+        for n in dict.fromkeys(names):
+            if any(line.split()[0] == n for line in have):
+                log_append(d, f"{iso()} {n} removed")
 
 
 def cmd_move(d, args):
@@ -481,6 +561,38 @@ def cmd_move(d, args):
         lines = read_lines(os.path.join(d, "agents.txt"))
         save_registrations(d, [f"{line.split()[0]} orch={owner}"
                                if line.split()[0] in names else line for line in lines])
+        for n in dict.fromkeys(names):  # `moved`, never `registered`: a handoff keeps the attempt count
+            log_append(d, f"{iso()} {n} moved orch={owner}")
+
+
+def log_append(d, line):
+    with open(os.path.join(d, "events.log"), "a") as f:
+        f.write(line + "\n")
+
+
+def cmd_mark(d, args):
+    args = list(args)
+    proof = "-"
+    if "--proof" in args:
+        i = args.index("--proof")
+        if i + 1 >= len(args):
+            raise ValueError("--proof needs a path")
+        proof = " ".join(args[i + 1].split()) or "-"
+        del args[i:i + 2]
+    if len(args) != 3:
+        raise ValueError('usage: mark <dir> <agent> <tier> "<what>" [--proof <path>]')
+    agent, tier, what = args
+    if not agent or len(agent.split()) != 1 or agent.startswith("--"):
+        raise ValueError("expected one agent name")
+    if tier not in TIERS:
+        raise ValueError(f"unknown tier {tier!r}; tiers: {' '.join(TIERS)}")
+    what = " ".join(what.split()).replace(" | ", " / ")
+    if not what:
+        raise ValueError("a mark needs a reason or result in words")
+    os.makedirs(d, exist_ok=True)
+    events, _ = parse_log(d)
+    n = attempt_of(events, agent) + (1 if tier == "sent-back" else 0)  # a sent-back mark is the attempt it opens
+    log_append(d, f"{iso()} {agent} mark:{tier} a{n} | {what} | proof {proof}")
 
 
 def cmd_orch(d, target):
@@ -497,7 +609,7 @@ def cmd_board(d):
         w.since[name] = iso()
         for l in reversed(read_lines(w.log)):
             m = LINE.match(l)
-            if m and m.group(2) == name:
+            if m and m.group(2) == name and m.group(3) in PLAIN:  # state lines only: marks do not move SINCE
                 w.since[name] = m.group(1)
                 break
         w.info[name] = ((entry or {}).get("terminal_title_stripped", ""), context_of(name) if entry else "")
@@ -535,6 +647,8 @@ def main(argv):
         cmd_remove(d, rest)
     elif cmd == "move" and rest:
         cmd_move(d, rest)
+    elif cmd == "mark" and rest:
+        cmd_mark(d, rest)
     elif cmd == "orch" and rest:
         cmd_orch(d, rest[0])
     elif cmd == "board":
