@@ -594,5 +594,79 @@ class ShowTests(Base):
         self.assertTrue(any('mark handoff' in l for l in card))
 
 
+class StatsTests(Base):
+    def make(self):
+        m.cmd_add(str(self.d), ['x', '--orch', 'o1'])
+        (self.d / 'events.log').write_text(''.join(l + '\n' for l in [
+            '2026-10-13T09:00:00Z x registered orch=o1',
+            '2026-10-13T10:00:00Z x working | t | ctx -',
+            '2026-10-13T10:05:00Z x done | t | ctx -',
+            '2026-10-13T10:05:30Z orchestrator woken orch=o1 | x',
+            '2026-10-13T10:05:40Z x idle | t | ctx -',
+            '2026-10-13T10:08:00Z x mark:reported a1 | says done | proof -',
+            '2026-10-13T10:10:00Z x working | t | ctx -',
+            '2026-10-13T10:12:00Z x done | t | ctx -',
+            '2026-10-13T10:30:00Z x mark:sent-back a2 | suite red | proof -',
+            '2026-10-13T10:40:00Z x mark:verified a2 | pass | proof p',
+            '2026-10-13T10:41:00Z o1 mark:handoff a1 | ctx 150k | proof -',
+            '2026-10-13T10:45:00Z x removed',
+        ]))
+
+    def stats(self, *args, now='2026-10-13T11:00:00Z'):
+        out = io.StringIO()
+        with patch.object(m.sys, 'stdout', out):
+            code = m.cmd_stats(str(self.d), list(args), at(now))
+        self.assertEqual(code, 0)
+        return out.getvalue().splitlines()
+
+    def test_numbers_checked_by_hand(self):
+        self.make()
+        lines = self.stats()
+        row = lines[1].split()
+        # working 10:00-10:05 (300 s) + 10:10-10:12 (120 s) = 420 s = 7m00s
+        # finishes: done 10:05:00 and done 10:12:00 (idle after done is no finish) = 2; one sent-back = attempt 2
+        # finish->wake: first finish woken 10:05:30 (30 s), second never: "30s (1/2)"
+        # finish->mark: 10:05:00 -> reported 10:08:00 = 180 s; 10:12:00 -> sent-back 10:30:00 = 1080 s; mean 630 s = 10m30s
+        self.assertEqual(row, ['x', '7m00s', '2', '2', '30s', '(1/2)', '10m30s', '(2/2)', 'yes'])
+        self.assertIn('TOTAL: 1 agents, 2 finishes, rework 1, wake 30s (1/2), mark 10m30s (2/2), closed 1/1', lines[2])
+        self.assertEqual(lines[3], 'handoffs: o1 at ctx 150k')
+
+    def test_one_agent_and_unknown(self):
+        self.make()
+        self.assertEqual(len(self.stats('x')), 2)  # header and the agent, no totals
+        with self.assertRaises(ValueError):
+            self.stats('o1')  # an owner pane with marks only is not an agent
+
+    def test_still_working_counts_up_to_now(self):
+        self.make()
+        self.log('2026-10-13T10:50:00Z y working | t | ctx -')
+        self.assertIn('10m00s', ' '.join(self.stats(now='2026-10-13T11:00:00Z')[2].split()))
+
+    def test_idle_after_working_or_blocked_is_a_finish(self):
+        (self.d / 'events.log').write_text(''.join(l + '\n' for l in [
+            '2026-10-13T10:00:00Z y working | t | ctx -', '2026-10-13T10:01:00Z y blocked | t | ctx -',
+            '2026-10-13T10:02:00Z y idle | t | ctx -', '2026-10-13T10:03:00Z y done | t | ctx -',
+            '2026-10-13T10:04:00Z y idle | t | ctx -']))
+        row = self.stats('y')[1].split()
+        self.assertEqual(row[2], '2')  # idle after blocked, then done; the later idle is only the user looking
+
+    def test_real_log_numbers(self):
+        (self.d / 'events.log').write_text((FIX / 'events.log').read_text())
+        lines = {l.split()[0]: l.split() for l in self.stats(now='2026-10-13T17:00:00Z')}
+        # orchfix: working 14:20:43-14:27:38 (415 s) + 14:27:51-14:27:59 (8 s) = 423 s = 7m03s;
+        # one finish (done 14:27:59), woken 14:28:12 = 13 s.
+        self.assertEqual(lines['orchfix'][:6], ['orchfix', '7m03s', '1', '1', '13s', '(1/1)'])
+        self.assertEqual(lines['ctx-trims'][:2], ['ctx-trims', '22m00s'])  # 21:52 -> 22:07 and the earlier runs
+
+    def test_cli(self):
+        self.make()
+        r = self.run_cli('stats', str(self.d), '--now', '2026-10-13T11:00:00Z')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('7m00s', r.stdout)
+        r = self.run_cli('stats', str(self.d), 'x')
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.run_cli('stats', str(self.d), 'nobody').returncode, 2)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
