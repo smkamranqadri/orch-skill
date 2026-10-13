@@ -1,4 +1,4 @@
-# Orchestrator ledger: <project>
+# Orchestrator ledger: <project>   (at most 60 lines; `orch-watch.py check <dir>` flags more)
 Updated: <UTC time> by <orchestrator name>. Live truth: `scripts/orch-agents.sh`, `git worktree list`.
 
 Next action (<owner pane>): <one line; never empty; agent and path>
@@ -9,6 +9,10 @@ Waiting on user: <decision, who asked, since when; or none>
 Parked: <item, until when, why; or none>
 
 ## Pane agents
+The status cell starts with one fixed word so `check` can read it: `working`, `done`, `merged`,
+`closed`, `gone`, or `open: next cycle <what>`. Any text follows after a comma or colon.
+Evidence (verdict marks) lives in events.log, not here.
+
 | name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event |
 |---|---|---|---|---|---|---|---|---|
 | code | w5:p2 | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions |

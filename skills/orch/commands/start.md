@@ -33,7 +33,10 @@ Full method: `~/.agents/skills/orch/SKILL.md`. Act without asking; the ledger ho
    Alive: leave its default unchanged. Register only your agents with
    `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent>... --orch <your pane id>`.
    Already registered agents retain their owner; use guarded `move` to transfer them.
-5. Print the board (`commands/status.md`).
+5. Print the board (`commands/status.md`), then run
+   `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` and fix the findings for your own rows and your
+   Next action first (the ledger over 60 lines, a done agent never closed, a missing row);
+   report run-wide findings you do not own in one line.
 6. For each of your agents whose status is stopped by a limit or gone with a resume brief, re-prompt it
    from that brief: "The user asked for this: resume. Your brief is <handoff or resume brief>.
    Read it in full and continue." Record the prompt as its last event.

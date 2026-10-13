@@ -2,7 +2,7 @@
 name: orch
 description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lore notes and the project's status space when they are present."
 metadata:
-  version: "0.9.1"
+  version: "0.10.0"
 ---
 
 # Orchestrator (orch)
@@ -122,8 +122,19 @@ summary, then continue straight into the plan."
   agents. The board shows owners and five Recent lines, redraws only when text changes in an
   alternate buffer and restores the terminal on exit. `board <dir>` prints once;
   `--next <dir> [seconds]` is the old blocking wait, only when the user asks to wait.
-- `<dir>/events.log`: one line per change, `<UTC> <agent> <state> | <task title> | ctx <use>`, and
-  `<UTC> orchestrator woken | <agents>` per delivered prompt.
+- `orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`: record a verdict (tiers
+  `reported verified asserted sent-back merged open closed handoff`). The board's EVID column and
+  its NEEDS YOU block read the marks; `event` marks every verdict and `task` marks a send-back.
+- `orch-watch.py check <dir> [--owner <pane>] [--offline]`: lint the run, one line per finding
+  with its owner; exit 0 clean, 1 findings, 3 when the ledger cannot be parsed. `start`, `event`,
+  `status` and `handoff` run it. It never writes the ledger.
+- `orch-watch.py show <dir> <agent>`: one card (15 lines at most) for one agent.
+- `orch-watch.py stats <dir> [agent]`: working time, finishes, attempts and the finish-to-wake and
+  finish-to-mark delays from events.log.
+- `references/visibility.md`: the mark tiers, the Needs-you rules and the check rules.
+- `<dir>/events.log`: one line per change, `<UTC> <agent> <state> | <task title> | ctx <use>`,
+  `<UTC> orchestrator woken | <agents>` per delivered prompt, `<UTC> <agent> mark:<tier> a<n> | <what>
+  | proof <path or ->` per verdict, and `registered`, `moved`, `removed` per registration change.
 - Handoff packets: `<dir>/handoff-<date>-<n>.md`.
 
 ## Not yet proved

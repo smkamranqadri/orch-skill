@@ -24,6 +24,12 @@ prompt can carry several agents.
    - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
    - finished with a report: verify it (coordination rule 35) when the user has asked for a
      merge; otherwise record it and tell the user in one line.
+   - Mark every verdict in the same turn, one short command each (`<dir>` is the run dir):
+     `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`. Tiers: `reported` (the agent
+     says done; not yet checked), `verified` (you re-ran the proof; `--proof` the log),
+     `asserted` (no proof possible; say why), `sent-back` (the proof failed and you re-prompt
+     it; what = the cause; this opens its next attempt). The watcher's board and its Needs you
+     block read these marks; an unmarked finish is listed there after 10 minutes.
    - needs you: it is waiting on a permission prompt or a question. Tell the user which agent
      and what it asks, in one line; never approve a permission prompt for them.
    - pane closed: mark the row gone; a resume brief means `commands/start.md` step 6.
@@ -37,9 +43,13 @@ prompt can carry several agents.
    - `herdr agent prompt <agent> "/exit"`, then `herdr worktree remove --workspace <ws>` (merged
      work only; with unmerged commits, keep the worktree and say so), and `git branch -d <branch>`
      (never `-D`).
-   - Ledger: row status "closed", with the merge commit; events.log one line.
-   Before ending any event turn, check your ledger rows: a row that is "done" or "merged" but neither
-   "closed" nor "open: next cycle ..." is a missed step.
+   - Ledger: row status "closed", with the merge commit. Mark it: `merged` when it merged,
+     then `closed` after the remove; a multi-cycle stream gets `open` ("next cycle: <what>")
+     instead, which holds the not-closed rules off until its next state change.
+   Before ending any event turn run `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` and fix
+   what it names for your rows (a row that is "done" or "merged" but neither "closed" nor
+   "open: next cycle ..." is a missed step). Its exit is 1 with findings, 3 when the ledger
+   cannot be parsed.
 4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/` and this event merged or
    closed work, rewrite `kis/state/current.md` in the same turn, inline (it is a few lines, not
    a sub-agent job): Task, Status, Proof as recorded in the ledger, and Next equal to the
