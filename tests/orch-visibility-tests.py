@@ -201,5 +201,169 @@ class ParserTests(Base):
         self.assertIn(m.local('2026-10-13T10:00:00Z'), row)
 
 
+class BoardTests(Base):
+    T0 = '2026-10-13T10:00:00Z'
+
+    def setup_agent(self, name='a', owner='o1', state='done', when=None):
+        m.cmd_add(str(self.d), [name, '--orch', owner])
+        self.agent(name, state)
+        self.agent(owner, 'idle')
+        self.log(f'{when or self.T0} {name} {state} | task | ctx 10k/200k')
+
+    def board(self, minutes=0, seconds=0, **kw):
+        w = m.Watcher(str(self.d))
+        w.owners = m.registrations(str(self.d))
+        live = m.agent_list() or {}
+        for n in w.owners:
+            w.prev[n] = live[n]['agent_status'] if n in live else 'gone'
+            w.since[n] = self.T0
+            w.info[n] = ('task', '')
+        for k, v in kw.items():
+            setattr(w, k, v)
+        return w.board(at(self.T0) + dt.timedelta(minutes=minutes, seconds=seconds))
+
+    def needs(self, text):
+        lines = text.splitlines()
+        if not any(l.startswith('NEEDS YOU') for l in lines):
+            return []
+        i = [l.startswith('NEEDS YOU') for l in lines].index(True)
+        out = []
+        for l in lines[i + 1:]:
+            if not l.startswith('  '):
+                break
+            out.append(l.strip())
+        return out
+
+    def row(self, text, name='a'):
+        return [l for l in text.splitlines() if l.startswith(name + ' ')][0]
+
+    def test_evid_sequence(self):
+        self.setup_agent()
+        self.assertNotRegex(self.row(self.board()), '[◆◇↩⇢]|asserted')  # blank before any mark
+        m.cmd_mark(str(self.d), ['a', 'reported', 'says done'])
+        self.assertIn('◇ reported', self.row(self.board()))
+        m.cmd_mark(str(self.d), ['a', 'sent-back', 'suite red'])
+        self.assertIn('↩ a2', self.row(self.board()))
+        m.cmd_mark(str(self.d), ['a', 'verified', 'suite pass'])
+        self.assertIn('◆ verified', self.row(self.board()))
+        m.cmd_mark(str(self.d), ['a', 'asserted', 'no device'])
+        self.assertIn('! asserted', self.row(self.board()))
+        m.cmd_mark(str(self.d), ['a', 'merged', 'abc123'])
+        self.assertIn('⇢ merged', self.row(self.board()))
+
+    def test_evid_starts_over_after_reregistration(self):
+        self.setup_agent()
+        m.cmd_mark(str(self.d), ['a', 'verified', 'x'])
+        m.cmd_remove(str(self.d), ['a'])
+        m.cmd_add(str(self.d), ['a', '--orch', 'o1'])
+        self.assertNotIn('◆', self.row(self.board()))
+
+    def test_finished_boundary(self):
+        self.setup_agent()
+        self.assertEqual(self.needs(self.board(minutes=9, seconds=59)), [])
+        self.assertEqual(self.needs(self.board(minutes=9)), [])
+        got = self.needs(self.board(minutes=10))
+        self.assertEqual(len(got), 1)
+        self.assertIn('a finished 10m ago, no verdict marked', got[0])
+        self.assertIn('a finished 11m ago', self.needs(self.board(minutes=11))[0])
+        m.cmd_mark(str(self.d), ['a', 'reported', 'x'])
+        self.assertNotIn('finished', ' '.join(self.needs(self.board(minutes=11))))
+
+    def test_mark_before_finish_does_not_count(self):
+        self.setup_agent()
+        self.log('2026-10-13T10:20:00Z a working | task | ctx -',
+                 '2026-10-13T10:21:00Z a mark:verified a1 | old | proof -',
+                 '2026-10-13T10:25:00Z a done | task | ctx -')
+        w = self.needs(self.board(minutes=40))
+        self.assertEqual(len(w), 1)
+        self.assertIn('a finished 15m ago, no verdict marked', w[0])
+
+    def test_reported_boundary(self):
+        self.setup_agent(state='idle')
+        self.log('2026-10-13T10:01:00Z a mark:reported a1 | says done | proof -')
+        # idle after idle is no finish; only the report is listed
+        self.assertEqual(self.needs(self.board(minutes=10, seconds=59)), [])
+        got = self.needs(self.board(minutes=11))
+        self.assertEqual(len(got), 1)
+        self.assertIn('a reported 10m ago, not verified', got[0])
+
+    def test_unclosed_boundary_and_open_closed(self):
+        self.setup_agent(state='idle')
+        self.log('2026-10-13T10:00:00Z a mark:verified a1 | pass | proof p')
+        self.assertEqual(self.needs(self.board(minutes=29, seconds=59)), [])
+        got = self.needs(self.board(minutes=30))
+        self.assertIn('a verified 30m ago, not closed', got[0])
+        self.log('2026-10-13T10:31:00Z a mark:merged a1 | abc | proof -')
+        self.assertIn('a merged', self.needs(self.board(minutes=61))[0])
+        self.log('2026-10-13T10:32:00Z a mark:open a1 | next cycle: round 2 | proof -')
+        self.assertEqual(self.needs(self.board(minutes=120)), [])
+        self.log('2026-10-13T10:33:00Z a mark:closed a1 | gone | proof -')
+        self.assertEqual(self.needs(self.board(minutes=120)), [])
+
+    def test_blocked_and_order_and_limit(self):
+        for i in range(7):
+            self.setup_agent(f'a{i}', when=f'2026-10-13T10:{10 + i}:00Z')
+        self.agent('a3', 'blocked')
+        out = self.board(minutes=30)
+        lines = out.splitlines()
+        self.assertTrue(lines[[l.startswith('NEEDS YOU') for l in lines].index(True)].endswith('(7)'))
+        got = self.needs(out)
+        self.assertEqual(len(got), 6)
+        self.assertEqual(got[-1], '+2 more')
+        self.assertIn('a3 is blocked and needs you', got[0])  # waiting since 10:00, the oldest
+        self.assertIn('a0 finished', got[1])
+        self.assertIn('a1 finished', got[2])
+        self.assertFalse(any('a6 finished' in l for l in got))  # cut by the limit
+
+    def test_block_omitted_when_empty(self):
+        self.setup_agent(state='working')
+        out = self.board(minutes=30)
+        self.assertNotIn('NEEDS YOU', out)
+
+    def test_wakes_waiting_and_usage(self):
+        self.setup_agent(state='working')
+        (self.d / 'ledger.md').write_text('Waiting on user: (0) full permissions asked 10-09\n')
+        w = m.Watcher(str(self.d))
+        w.owners = m.registrations(str(self.d))
+        w.prev = {'a': 'working'}; w.since = {'a': self.T0}; w.info = {'a': ('t', '')}
+        w.pending = [(self.T0, 'a', 'done')]
+        w.held_since = {'o1': at(self.T0).timestamp()}
+        w.usage = 'claude 25%/94% ASK · codex 10%/10% · cmd 0%/86% ASK'
+        got = self.needs(w.board(at(self.T0) + dt.timedelta(minutes=1)))
+        self.assertEqual(got[0].split(' ', 1)[1], '1 wake(s) held for o1')
+        self.assertEqual(got[1], 'waiting on user: (0) full permissions asked 10-09')
+        self.assertEqual(got[2], 'usage ASK: claude, cmd')
+        (self.d / 'ledger.md').write_text('Waiting on user: none.\n')
+        w.usage = ''; w.held_since = {}
+        self.assertEqual(self.needs(w.board(at(self.T0))), [])
+
+    def test_restart_keeps_the_clock(self):
+        self.setup_agent()
+        a = self.needs(self.board(minutes=15))
+        b = self.needs(self.board(minutes=15))  # a new Watcher over the same log
+        self.assertEqual(a, b)
+        self.assertEqual(len(a), 1)
+
+    def test_recent_shows_marks_in_words(self):
+        self.setup_agent()
+        m.cmd_mark(str(self.d), ['a', 'verified', 'suite 399 pass'])
+        m.cmd_mark(str(self.d), ['a', 'sent-back', 'mutant survived'])
+        w = m.Watcher(str(self.d))
+        self.assertTrue(any(r.endswith('a verified: suite 399 pass') for r in w.recent))
+        self.assertTrue(any(r.endswith('a sent back: mutant survived') for r in w.recent))
+        m.cmd_mark(str(self.d), ['a', 'merged', 'abc'])
+        w.owners = m.registrations(str(self.d))
+        w.poll()
+        self.assertTrue(any(r.endswith('a merged: abc') for r in w.recent))
+        self.assertEqual(len(w.recent), 5)
+
+    def test_cli_board_accepts_now(self):
+        self.setup_agent()
+        r = self.run_cli('board', str(self.d), '--now', '2026-10-13T10:11:00Z')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('a finished 11m ago', r.stdout)
+        self.assertEqual(self.run_cli('board', str(self.d), '--now', 'tomorrow').returncode, 2)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

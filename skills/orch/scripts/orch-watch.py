@@ -236,6 +236,128 @@ def write_lines(path, lines):
         f.write("".join(l + "\n" for l in lines))
 
 
+UTC = dt.timezone.utc
+FINISHED_AFTER = dt.timedelta(minutes=10)   # a finish with no mark, or a report not verified
+UNCLOSED_AFTER = dt.timedelta(minutes=30)   # a verified or merged agent neither closed nor kept open
+NEEDS_LINES = 5
+EVID = {"verified": "◆ verified", "reported": "◇ reported", "asserted": "! asserted",
+        "merged": "⇢ merged", "closed": "✓ closed", "open": "○ open"}
+
+
+def now_utc():
+    return dt.datetime.now(UTC)
+
+
+def at_stamp(stamp):
+    try:
+        return dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def mark_words(e):
+    tier = "sent back" if e["tier"] == "sent-back" else e["tier"]
+    return f"{local(e['stamp'])}  {e['agent']} {tier}: {e['what']}"
+
+
+def life(events, name):
+    """The events of one agent since its last registered line (a re-registered agent starts over)."""
+    own = [e for e in events if e["agent"] == name]
+    for i in range(len(own) - 1, -1, -1):
+        if own[i]["kind"] == "registered":
+            return own[i:]
+    return own
+
+
+def last_mark(events, name):
+    marks = [e for e in life(events, name) if e["kind"] == "mark"]
+    return marks[-1] if marks else None
+
+
+def finish_of(own):
+    """The latest finish in an agent's life: a `done` line, or `idle` after working or blocked."""
+    finish, prev = None, None
+    for e in own:
+        if e["kind"] != "state":
+            continue
+        if e["state"] == "done" or (e["state"] == "idle" and prev in ("working", "blocked")):
+            finish = e
+        prev = e["state"]
+    return finish
+
+
+def is_held(own):
+    """An `open` mark holds the not-closed rules off until the agent's next state line."""
+    marks = [e for e in own if e["kind"] == "mark"]
+    if not marks or marks[-1]["tier"] != "open":
+        return False
+    return not any(e["kind"] == "state" and e["n"] > marks[-1]["n"] for e in own)
+
+
+def evidence_of(events, name):
+    mark = last_mark(events, name)
+    if not mark:
+        return ""
+    if mark["tier"] == "sent-back":
+        return f"↩ a{mark['attempt']}"
+    return EVID.get(mark["tier"], "")
+
+
+def ago(delta):
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes}m" if minutes < 120 else f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def ledger_waiting(d):
+    try:
+        with open(os.path.join(d, "ledger.md")) as f:
+            for line in f:
+                m = re.match(r"^Waiting on user:\s*(.*)$", line.strip())
+                if m:
+                    text = m.group(1).strip()
+                    return None if not text or text.lower().rstrip(".") == "none" else text
+    except OSError:
+        pass
+    return None
+
+
+def needs_you(events, owners, live_state, since, now, wake_held=(), waiting=None, usage=""):
+    """The Needs-you lines, oldest first: [(time or None, text)]. Pure over the log, so a restarted
+    watcher shows the same block. Only the latest mark counts: a later `open` or `closed` mark
+    is what holds the verified/merged rule off. `wake_held` is [(time, owner, count)]; `since` maps blocked
+    agents to the time they started waiting."""
+    items = []
+    for name in owners:
+        own = life(events, name)
+        states = [e for e in own if e["kind"] == "state"]
+        marks = [e for e in own if e["kind"] == "mark"]
+        if live_state.get(name) == "blocked":
+            items.append((since.get(name) or now, f"{name} is blocked and needs you"))
+            continue
+        flagged = False
+        finish = finish_of(own)
+        if finish and states and states[-1]["state"] in ("done", "idle"):
+            unmarked = not any(e["n"] > finish["n"] for e in marks)
+            if unmarked and now - finish["t"] >= FINISHED_AFTER:
+                items.append((finish["t"], f"{name} finished {ago(now - finish['t'])} ago, no verdict marked"))
+                flagged = True
+        if marks and not flagged:
+            tier, t = marks[-1]["tier"], marks[-1]["t"]
+            if tier == "reported" and now - t >= FINISHED_AFTER:
+                items.append((t, f"{name} reported {ago(now - t)} ago, not verified"))
+            elif tier in ("verified", "merged") and now - t >= UNCLOSED_AFTER:
+                items.append((t, f"{name} {tier} {ago(now - t)} ago, not closed (close it or mark open)"))
+    for t, owner, count in wake_held:
+        items.append((t, f"{count} wake(s) held for {owner}"))
+    items.sort(key=lambda x: x[0])
+    if waiting:
+        items.append((None, f"waiting on user: {waiting}"))
+    asked = [seg.split()[0] for seg in usage.split(" · ") if seg.split() and "ASK" in seg.split()]
+    if asked:
+        items.append((None, f"usage ASK: {', '.join(asked)}"))
+    return items
+
+
 class Watcher:
     def __init__(self, d):
         self.dir = d
@@ -255,16 +377,42 @@ class Watcher:
         self.last_board = None
         self.usage = ""       # one line from orch-usage.py, refreshed every USAGE_EVERY seconds
         self.usage_at = 0
+        self.clock = now_utc
 
     def seed_recent(self):
         recent = []
         for l in read_lines(self.log)[-200:]:
             m = LINE.match(l)
-            if m and m.group(3) in PLAIN:
+            e = parse_event(l)
+            if e and e["kind"] == "mark":
+                recent.append(mark_words(e))
+            elif m and m.group(3) in PLAIN:
                 recent.append(f"{local(m.group(1))}  {m.group(2)}  {PLAIN[m.group(3)]}")
             elif m and m.group(2) == "orchestrator":
                 recent.append(f"{local(m.group(1))}  → orchestrator told")
+        try:
+            self.log_pos = os.path.getsize(self.log)
+        except OSError:
+            self.log_pos = 0
         return recent[-5:]
+
+    def read_marks(self):
+        """Marks are written by the orchestrator's `mark` command, not by this process: tail the log."""
+        try:
+            with open(self.log, "rb") as f:
+                f.seek(self.log_pos)
+                chunk = f.read()
+        except OSError:
+            return False
+        end = chunk.rfind(b"\n") + 1
+        self.log_pos += end
+        changed = False
+        for raw in chunk[:end].decode(errors="replace").splitlines():
+            e = parse_event(raw)
+            if e and e["kind"] == "mark":
+                self.recent = (self.recent + [mark_words(e)])[-5:]
+                changed = True
+        return changed
 
     def append(self, line):
         with open(self.log, "a") as f:
@@ -293,6 +441,7 @@ class Watcher:
         if live is None:
             return False
         changed = self.refresh_usage()
+        changed |= self.read_marks()
         self.owners = registrations(self.dir)
         names = self.owners
         for name in names:
@@ -422,17 +571,37 @@ class Watcher:
         self.held_since.pop(target, None)
         self.held_noticed.pop(target, None)
 
-    def board(self):
+    def wake_held(self):
+        out = []
+        for target, t0 in self.held_since.items():
+            count = sum(1 for e in self.pending if self.owners.get(e[1]) == target)
+            if count:
+                out.append((dt.datetime.fromtimestamp(t0, UTC), target, count))
+        return out
+
+    def board(self, now=None):
         width = shutil.get_terminal_size((100, 20)).columns
+        now = now or self.clock()
+        events, _ = parse_log(self.dir)
         orch = (read_lines(os.path.join(self.dir, "orchestrator")) or ["none"])[0]
         out = [f"orch watcher · {os.path.basename(os.path.dirname(os.path.abspath(self.dir))).removesuffix(".reports")}"
                f" · {dt.datetime.now().strftime('%H:%M')} · {self.orch_note or 'orchestrator: ' + orch}"]
         if self.usage:
             out.append(self.usage[:width])
-        out.append(f"{'AGENT':<18} {'OWNER':<14} {'STATE':<12} {'SINCE':<6} {'CONTEXT':<10} TASK")
+        since = {n: at_stamp(t) for n, t in self.since.items()}
+        items = needs_you(events, self.owners, self.prev, since, now, self.wake_held(),
+                          ledger_waiting(self.dir), self.usage)
+        if items:
+            out.append(f"NEEDS YOU ({len(items)})")
+            for t, text in items[:NEEDS_LINES]:
+                out.append(("  " + (local(t.strftime("%Y-%m-%dT%H:%M:%SZ")) + " " if t else "") + text)[:width])
+            if len(items) > NEEDS_LINES:
+                out.append(f"  +{len(items) - NEEDS_LINES} more")
+        out.append(f"{'AGENT':<16} {'OWNER':<8} {'STATE':<11} {'EVID':<10} {'SINCE':<5} {'CONTEXT':<9} TASK")
         for name, state in self.prev.items():
             title, ctx = self.info.get(name, ("", ""))
-            row = f"{name[:18]:<18} {self.owners.get(name, "none")[:14]:<14} {WORDS.get(state, state):<12} {local(self.since[name]):<6} {(ctx or '-')[:10]:<10} {title}"
+            row = (f"{name[:16]:<16} {self.owners.get(name, 'none')[:8]:<8} {WORDS.get(state, state):<11} "
+                   f"{evidence_of(events, name):<10} {local(self.since[name]):<5} {(ctx or '-')[:9]:<9} {title}")
             out.append(row[:width])
         if not self.prev:
             out.append("(no agents; add with: orch-watch.py add <dir> <agent>)")
@@ -599,7 +768,7 @@ def cmd_orch(d, target):
     write_lines(os.path.join(d, "orchestrator"), [target])
 
 
-def cmd_board(d):
+def cmd_board(d, now=None):
     w = Watcher(d)
     live = agent_list() or {}
     w.owners = registrations(d)
@@ -614,7 +783,18 @@ def cmd_board(d):
                 break
         w.info[name] = ((entry or {}).get("terminal_title_stripped", ""), context_of(name) if entry else "")
     w.refresh_usage()
-    print(w.board())
+    print(w.board(now))
+
+
+def option_now(args):
+    """`--now <ISO>` pins the clock (tests, and rendering a board at a known time)."""
+    if "--now" in args:
+        stamp = args[args.index("--now") + 1]
+        t = at_stamp(stamp)
+        if not t:
+            raise ValueError("--now expects 2026-10-13T10:00:00Z")
+        return t
+    return None
 
 
 def cmd_next(d, secs):
@@ -652,7 +832,7 @@ def main(argv):
     elif cmd == "orch" and rest:
         cmd_orch(d, rest[0])
     elif cmd == "board":
-        cmd_board(d)
+        cmd_board(d, option_now(rest))
     elif cmd == "--next":
         return cmd_next(d, int(rest[0]) if rest else 540)
     else:
