@@ -529,5 +529,70 @@ class CheckTests(Base):
         self.assertIn('2 unparseable line(s); first at line 1: 2026-10-09 22:01 tartib-search', lines[0])
 
 
+class ShowTests(Base):
+    def fixture_run(self):
+        for n in ('events.log', 'ledger.md', 'agents.txt'):
+            (self.d / n).write_text((FIX / n).read_text())
+
+    def test_card_for_a_real_agent(self):
+        self.fixture_run()
+        self.agent('ctx-trims', 'idle', tokens={'model': 'deepseek/deepseek-v4-flash'})
+        card = m.show_card(str(self.d), 'ctx-trims', m.agent_list())
+        self.assertLessEqual(len(card), 15)
+        self.assertTrue(card[0].startswith('ctx-trims · owner w3:pZ · idle since '))
+        self.assertIn('deepseek/deepseek-v4-flash', card[0])
+        self.assertTrue(card[1].startswith('row: done, awaiting user: kis-skill part commit/merge'))
+        self.assertIn('worktree: kis-loop-skill.wt/ctx-trims', card[2])
+        self.assertEqual(card[3], 'brief: .orch/ctx-trims/brief.md [missing]')  # the fixture dir holds no briefs
+        self.assertEqual(card[4], 'handoff: .orch/ctx-trims/handoff.md [missing]')
+        self.assertEqual(card[5], 'evidence: none')
+        self.assertEqual(card[6], 'attempts: 1')
+        events = [l for l in card[7:]]
+        self.assertEqual(len(events), 8)
+        self.assertTrue(events[-1].endswith('orchestrator told (w3:pZ)'))
+        self.assertIn('done | ', events[-2])
+
+    def test_present_and_missing_paths_and_attempts(self):
+        self.fixture_run()
+        repo = self.root / 'repo'
+        run = repo / '.orch'
+        run.mkdir(parents=True)
+        for n in ('events.log', 'ledger.md', 'agents.txt'):
+            (run / n).write_text((FIX / n).read_text())
+        (run / 'ctx-trims').mkdir()
+        (run / 'ctx-trims' / 'brief.md').write_text('brief')
+        m.cmd_mark(str(run), ['ctx-trims', 'sent-back', 'suite red on the board test'])
+        m.cmd_mark(str(run), ['ctx-trims', 'verified', 'suite pass', '--proof', 'proof.log'])
+        card = m.show_card(str(run), 'ctx-trims', None)
+        self.assertIn('unknown (offline)', card[0])
+        self.assertEqual(card[3], 'brief: .orch/ctx-trims/brief.md [present]')
+        self.assertEqual(card[4], 'handoff: .orch/ctx-trims/handoff.md [missing]')
+        self.assertEqual(card[5], 'evidence: ◆ verified suite pass (proof proof.log)')
+        self.assertEqual(card[6], 'attempts: 2 (a2 sent back: suite red on the board test)')
+        self.assertLessEqual(len(card), 15)
+        self.assertIn('mark verified a2: suite pass (proof proof.log)', card[-1])
+
+    def test_card_never_exceeds_fifteen_lines(self):
+        m.cmd_add(str(self.d), ['a', '--orch', 'o1'])
+        for i in range(30):
+            m.cmd_mark(str(self.d), ['a', 'sent-back', f'cause {i}'])
+        self.assertLessEqual(len(m.show_card(str(self.d), 'a', {})), 15)
+
+    def test_unknown_agent_and_cli(self):
+        self.fixture_run()
+        with self.assertRaises(ValueError):
+            m.show_card(str(self.d), 'nobody', {})
+        self.assertEqual(self.run_cli('show', str(self.d), 'nobody').returncode, 2)
+        r = self.run_cli('show', str(self.d), 'lore-ids')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith('lore-ids · owner w3:pZ'))
+        self.assertLessEqual(len(r.stdout.splitlines()), 15)
+
+    def test_mark_only_owner_is_not_an_agent(self):
+        m.cmd_mark(str(self.d), ['wG:p6', 'handoff', 'ctx 150k'])
+        card = m.show_card(str(self.d), 'wG:p6', {})
+        self.assertTrue(any('mark handoff' in l for l in card))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

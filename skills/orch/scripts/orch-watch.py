@@ -16,6 +16,9 @@
                                           lint the run: ledger against agents.txt, events.log and the
                                           watcher; one line per finding, exit 0 clean, 1 findings,
                                           3 when the ledger cannot be parsed
+  orch-watch.py show <dir> <agent>        one card (15 lines at most): ledger row, owner, live state,
+                                          model and context, brief and handoff present or missing,
+                                          attempts with causes, evidence, last 8 events
   orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]
                                           record the orchestrator's verdict in events.log; tiers:
                                           reported verified asserted sent-back merged open closed
@@ -278,16 +281,21 @@ def last_mark(events, name):
     return marks[-1] if marks else None
 
 
-def finish_of(own):
-    """The latest finish in an agent's life: a `done` line, or `idle` after working or blocked."""
-    finish, prev = None, None
+def finishes(own):
+    """Every finish in an agent's events: a `done` line, or `idle` after working or blocked."""
+    found, prev = [], None
     for e in own:
         if e["kind"] != "state":
             continue
         if e["state"] == "done" or (e["state"] == "idle" and prev in ("working", "blocked")):
-            finish = e
+            found.append(e)
         prev = e["state"]
-    return finish
+    return found
+
+
+def finish_of(own):
+    found = finishes(own)
+    return found[-1] if found else None
 
 
 def is_held(own):
@@ -962,6 +970,73 @@ def cmd_check(d, args):
     return 1 if found else 0
 
 
+def plain_event(e):
+    t = local(e["stamp"])
+    if e["kind"] == "state":
+        return f"{t} {e['state']} | {e['title']}"
+    if e["kind"] == "mark":
+        return f"{t} mark {e['tier']} a{e['attempt']}: {e['what']}" + ("" if e["proof"] == "-" else f" (proof {e['proof']})")
+    if e["kind"] == "woken":
+        return f"{t} orchestrator told" + (f" ({e['owner']})" if e["owner"] else "")
+    return f"{t} {e['kind']}" + (f" orch={e['owner']}" if e.get("owner") else "")
+
+
+def file_state(d, path):
+    path = path.strip().strip("`")
+    if not path or path == "-":
+        return "none recorded"
+    absolute = os.path.abspath(d)
+    bases = [os.path.dirname(absolute), os.path.dirname(os.path.dirname(absolute)), absolute]
+    found = os.path.exists(os.path.expanduser(path)) if path.startswith(("/", "~")) else \
+        any(os.path.exists(os.path.join(b, path)) for b in bases)
+    return "present" if found else "missing"
+
+
+def show_card(d, name, live=None):
+    events, _ = parse_log(d)
+    try:
+        owners = registrations(d)
+    except ValueError:
+        owners = {}
+    try:
+        row = parse_ledger(d)["rows"].get(name)
+    except CheckError:
+        row = None
+    own = [e for e in events if e["agent"] == name or (e["kind"] == "woken" and name in e["agents"])]
+    if not (row or own or name in owners):
+        raise ValueError(f"unknown agent {name}: no ledger row, registration or events")
+    states = [e for e in own if e["kind"] == "state"]
+    entry = (live or {}).get(name)
+    owner = owners.get(name) or (row or {}).get("owner") or "none"
+    state = entry.get("agent_status", "unknown") if entry else ("not live" if live is not None else "unknown (offline)")
+    stamp = f" since {local(states[-1]['stamp'])}" if states else ""
+    ctx = (context_of(name) if entry else "") or (states[-1]["ctx"] if states else "-")
+    model = ((entry or {}).get("tokens") or {}).get("model") or (row or {}).get("kind") or "-"
+    mine = life(events, name)
+    lines = [f"{name} · owner {owner} · {state}{stamp} · {model} · ctx {ctx}",
+             f"row: {row['text'] if row else 'no ledger row'}",
+             f"worktree: {row['worktree'] if row else '-'}"]
+    for label in ("brief", "handoff"):
+        path = row[label] if row else ""
+        lines.append(f"{label}: {path or '-'} [{file_state(d, path)}]")
+    mark = last_mark(events, name)
+    lines.append("evidence: " + (f"{evidence_of(events, name) or mark['tier']} {mark['what']}"
+                                 + ("" if mark["proof"] == "-" else f" (proof {mark['proof']})") if mark else "none"))
+    attempts = [f"a{e['attempt']} sent back: {e['what'][:50]}" for e in mine if e["kind"] == "mark" and e["tier"] == "sent-back"]
+    lines.append(f"attempts: {attempt_of(events, name)}" + (f" ({'; '.join(attempts)})" if attempts else ""))
+    keep = 15 - len(lines)
+    lines += ["  " + plain_event(e) for e in own[-min(8, keep):]]
+    return lines
+
+
+def cmd_show(d, args):
+    if len(args) != 1:
+        raise ValueError("usage: show <dir> <agent>")
+    live = agent_list()
+    print("\n".join(show_card(d, args[0], live)))
+    return 0
+
+
 def cmd_next(d, secs):
     log = os.path.join(d, "events.log")
     open(log, "a").close()
@@ -992,6 +1067,8 @@ def main(argv):
         cmd_remove(d, rest)
     elif cmd == "move" and rest:
         cmd_move(d, rest)
+    elif cmd == "show":
+        return cmd_show(d, rest)
     elif cmd == "check":
         return cmd_check(d, rest)
     elif cmd == "mark" and rest:
