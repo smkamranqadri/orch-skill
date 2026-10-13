@@ -12,6 +12,10 @@
   orch-watch.py add <dir> <agent>... [--orch <target>]  register agents with an owner
   orch-watch.py move <dir> <agent>... --from <old> --orch <new>  transfer only owned agents
   orch-watch.py remove <dir> <agent>...   stop watching agents
+  orch-watch.py check <dir> [--owner <pane>] [--offline]
+                                          lint the run: ledger against agents.txt, events.log and the
+                                          watcher; one line per finding, exit 0 clean, 1 findings,
+                                          3 when the ledger cannot be parsed
   orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]
                                           record the orchestrator's verdict in events.log; tiers:
                                           reported verified asserted sent-back merged open closed
@@ -797,6 +801,167 @@ def option_now(args):
     return None
 
 
+LEDGER_LIMIT = 60
+DONE_WORDS = ("done", "verified", "merged")
+ENDED_WORDS = ("closed", "gone")
+
+
+class CheckError(Exception):
+    """The run's files cannot be parsed; `check` exits 3 rather than guess."""
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def split_row(line):
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def parse_ledger(d):
+    path = os.path.join(d, "ledger.md")
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except OSError as exc:
+        raise CheckError(f"cannot read {path}: {exc.strerror}")
+    nexts = {}
+    for line in lines:
+        m = re.match(r"^Next action \(([^)]+)\):\s*(.*)$", line.strip())
+        if m:
+            nexts[m.group(1)] = m.group(2).strip()
+    section, header, rows, watcher, has_table = None, None, {}, None, False
+    for n, line in enumerate(lines, 1):
+        if line.startswith("## "):
+            section, header = line[3:].strip().lower(), None
+            continue
+        if section == "watcher" and line.strip() and watcher is None:
+            watcher = line.strip()
+        if section != "pane agents" or not line.lstrip().startswith("|"):
+            continue
+        cells = split_row(line)
+        if all(re.fullmatch(r":?-{3,}:?", c) for c in cells):
+            continue
+        if header is None:
+            if cells[0].lower() != "name" or "status" not in [c.lower() for c in cells]:
+                raise CheckError(f"ledger.md line {n}: Pane agents table has no name/status header")
+            header, has_table = [c.lower() for c in cells], True
+            continue
+        if len(cells) != len(header):
+            raise CheckError(f"ledger.md line {n}: row has {len(cells)} cells, header has {len(header)}")
+        row = dict(zip(header, cells))
+        m = re.match(r"^(\S+)\s*(?:\((.*)\))?$", row["name"])
+        if not m:
+            raise CheckError(f"ledger.md line {n}: cannot read the agent name {row['name']!r}")
+        owner = row.get("owner", "")
+        if not owner and m.group(2):
+            om = re.search(r"owner (\S+?)(?:[,;)]|$)", m.group(2))
+            owner = om.group(1) if om else ""
+        word = re.match(r"[a-z]+", row["status"].lower())
+        rows[m.group(1)] = {"owner": owner, "status": word.group(0) if word else "", "text": row["status"],
+                            "brief": row.get("brief", ""), "handoff": row.get("handoff", ""),
+                            "worktree": row.get("worktree / branch", ""), "kind": row.get("kind/model", ""),
+                            "last": row.get("last event", ""), "line": n}
+    if not has_table:
+        raise CheckError("ledger.md has no Pane agents table")
+    if watcher is None:
+        raise CheckError("ledger.md has no Watcher section")
+    pid = re.search(r"\bpid (\d+)", watcher)
+    agents = re.search(r"agents:\s*(.*?)\s*(?:\(|,\s*log:|$)", watcher)
+    names = None
+    if agents:
+        names = set() if agents.group(1).lower() in ("", "none") else set(re.split(r"[,\s]+", agents.group(1)))
+    return {"lines": len(lines), "nexts": nexts, "rows": rows, "pid": int(pid.group(1)) if pid else None,
+            "watcher_agents": names}
+
+
+def check_findings(d, offline=False):
+    """[(owner, rule, text)] for the run in d. Raises CheckError when it cannot parse."""
+    ledger = parse_ledger(d)
+    try:
+        owners = registrations(d)
+    except ValueError as exc:
+        raise CheckError(f"agents.txt: {exc}")
+    events, bad = parse_log(d)
+    out = []
+    if ledger["lines"] > LEDGER_LIMIT:
+        out.append(("run", "ledger-length", f"ledger has {ledger['lines']} lines, the limit is {LEDGER_LIMIT}"))
+    for owner in sorted({o for o in owners.values() if o != "none"}):
+        if not ledger["nexts"].get(owner):
+            out.append((owner, "next-action", f"no 'Next action ({owner}):' line, or it is empty"))
+    rows = ledger["rows"]
+    for name, owner in owners.items():
+        if name not in rows:
+            out.append((owner, "no-row", f"{name} is registered but has no ledger row"))
+    for name, row in rows.items():
+        if name not in owners and row["status"] not in ENDED_WORDS:
+            out.append((row["owner"] or "unowned", "row-unregistered",
+                        f"{name} has a ledger row ({row['status'] or '?'}) that is not closed, but is not registered"))
+    for name in dict.fromkeys([*owners, *rows]):
+        own = life(events, name)
+        row = rows.get(name)
+        held = is_held(own)
+        owner = owners.get(name) or (row or {}).get("owner") or "unowned"
+        causes = []
+        if row and row["status"] in DONE_WORDS and not held:
+            causes.append(f"ledger row says {row['status']}")
+        mark = last_mark(events, name) if name in owners else None
+        if mark and mark["tier"] in ("verified", "merged") and not (row and row["status"] == "open"):
+            causes.append(f"marked {mark['tier']}")
+        if causes:
+            out.append((owner, "not-closed", f"{name}: {' and '.join(causes)}, but it is neither closed nor 'open: next cycle'"))
+    if ledger["pid"] is None:
+        out.append(("run", "watcher", "the ledger's Watcher line has no pid"))
+    elif not pid_alive(ledger["pid"]):
+        out.append(("run", "watcher", f"watcher pid {ledger['pid']} is not alive"))
+    if ledger["watcher_agents"] is not None and ledger["watcher_agents"] != set(owners):
+        out.append(("run", "watcher", f"ledger Watcher line lists agents {sorted(ledger['watcher_agents']) or 'none'}"
+                                      f" but agents.txt holds {sorted(owners) or 'none'}"))
+    if not offline:
+        live = agent_list()
+        if live is not None:
+            for owner in sorted({o for o in owners.values() if o != "none"}):
+                if owner not in live:
+                    out.append((owner, "owner-dead", f"owner pane {owner} is not live"))
+    if bad:
+        out.append(("run", "log", f"events.log has {len(bad)} unparseable line(s); first at line {bad[0][0]}: {bad[0][1][:70]}"))
+    return out
+
+
+def cmd_check(d, args):
+    args = list(args)
+    offline = "--offline" in args
+    if offline:
+        args.remove("--offline")
+    owner = None
+    if "--owner" in args:
+        i = args.index("--owner")
+        if i + 1 >= len(args):
+            raise ValueError("--owner needs a pane id")
+        owner = args[i + 1]
+        del args[i:i + 2]
+    if args:
+        raise ValueError("usage: check <dir> [--owner <pane>] [--offline]")
+    try:
+        found = check_findings(d, offline)
+    except CheckError as exc:
+        print(f"check: cannot parse the run: {exc}", file=sys.stderr)
+        return 3
+    if owner:
+        found = [f for f in found if f[0] in (owner, "run")]
+    for who, rule, text in found:
+        print(f"{who}: [{rule}] {text}")
+    if not found:
+        print("check: clean")
+    return 1 if found else 0
+
+
 def cmd_next(d, secs):
     log = os.path.join(d, "events.log")
     open(log, "a").close()
@@ -827,6 +992,8 @@ def main(argv):
         cmd_remove(d, rest)
     elif cmd == "move" and rest:
         cmd_move(d, rest)
+    elif cmd == "check":
+        return cmd_check(d, rest)
     elif cmd == "mark" and rest:
         cmd_mark(d, rest)
     elif cmd == "orch" and rest:
