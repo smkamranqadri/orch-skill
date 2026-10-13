@@ -365,5 +365,169 @@ class BoardTests(Base):
         self.assertEqual(self.run_cli('board', str(self.d), '--now', 'tomorrow').returncode, 2)
 
 
+class CheckTests(Base):
+    def make_run(self, rows=(), nexts=('o1',), watcher=None, pad=0, agents=(), events=()):
+        lines = ['# Orchestrator ledger: test', 'Updated: now']
+        lines += [f'Next action ({o}): do the next thing' if o else '' for o in nexts]
+        lines += ['Waiting on user: none', '', '## Pane agents',
+                  '| name | kind/model | pane | worktree / branch | brief | handoff | status | last event |',
+                  '|---|---|---|---|---|---|---|---|']
+        for name, status in rows:
+            lines.append(f'| {name} | claude/sonnet | - | wt / br | .orch/{name}/brief.md | .orch/{name}/handoff.md | {status} | 10-13 10:00 x |')
+        lines += ['', '## Sub-agents and background jobs', '| name | type | status |', '|---|---|---|', '',
+                  '## Watcher', watcher if watcher is not None else
+                  f'pane wX:p1, pid {os.getpid()}, agents: {" ".join(n for n, _ in agents) or "none"} (.orch/agents.txt), log: .orch/events.log']
+        lines += [f'- filler {i}' for i in range(pad)]
+        (self.d / 'ledger.md').write_text('\n'.join(lines) + '\n')
+        (self.d / 'agents.txt').write_text(''.join(f'{n} orch={o}\n' for n, o in agents))
+        if events:
+            self.log(*events)
+        (self.d / 'orchestrator').write_text('o1\n')
+
+    def check(self, *args):
+        out = io.StringIO()
+        err = io.StringIO()
+        with patch.object(m.sys, 'stdout', out), patch.object(m.sys, 'stderr', err):
+            code = m.cmd_check(str(self.d), list(args))
+        return code, out.getvalue().splitlines(), err.getvalue()
+
+    def rules(self, lines):
+        return [re.search(r'\[([a-z-]+)\]', l).group(1) for l in lines]
+
+    def test_clean_run(self):
+        self.make_run(rows=[('a', 'working'), ('b', 'closed: merged abc')], agents=[('a', 'o1')])
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))
+
+    def test_todays_run_acceptance(self):
+        for n in ('events.log', 'ledger.md', 'agents.txt'):
+            (self.d / n).write_text((FIX / n).read_text())
+        with patch.object(m, 'pid_alive', return_value=False):
+            code, lines, _ = self.check('--offline')
+        self.assertEqual(code, 1)
+        self.assertEqual(self.rules(lines), ['ledger-length', 'not-closed', 'not-closed', 'not-closed', 'watcher', 'watcher', 'log'])
+        self.assertIn('ledger has 79 lines, the limit is 60', lines[0])
+        self.assertEqual([l.split(': ')[0] for l in lines[1:4]], ['w3:pZ'] * 3)
+        self.assertEqual(sorted(l.split('] ')[1].split(':')[0] for l in lines[1:4]), ['ctx-trims', 'lore-ids', 'tartib-search'])
+        self.assertIn('watcher pid 59865 is not alive', lines[4])
+        self.assertIn("lists agents none but agents.txt holds ['ctx-trims', 'lore-ids', 'tartib-search', 'visibility']", lines[5])
+        self.assertIn('events.log has 7 unparseable line(s); first at line 103', lines[6])
+        # Four of them are the hand-written "2026-10-09 22:01 ..." lines.
+        self.assertEqual(sum(1 for l in (FIX / 'events.log').read_text().splitlines() if re.match(r'^\d{4}-\d\d-\d\d \d\d:\d\d ', l)), 4)
+
+    def test_ledger_length_boundary(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        base = len((self.d / 'ledger.md').read_text().splitlines())
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], pad=60 - base)
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], pad=61 - base)
+        code, lines, _ = self.check('--offline')
+        self.assertEqual((code, self.rules(lines)), (1, ['ledger-length']))
+
+    def test_next_action_rule(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1'), ('b', 'o2')], nexts=('o1',))
+        self.make_run(rows=[('a', 'working'), ('b', 'working')], agents=[('a', 'o1'), ('b', 'o2')], nexts=('o1',))
+        code, lines, _ = self.check('--offline')
+        self.assertEqual((code, self.rules(lines)), (1, ['next-action']))
+        self.assertTrue(lines[0].startswith('o2: '))
+        text = (self.d / 'ledger.md').read_text().replace('Next action (o1): do the next thing', 'Next action (o1):\nNext action (o2):')
+        (self.d / 'ledger.md').write_text(text)
+        self.assertEqual(self.rules(self.check('--offline')[1]), ['next-action', 'next-action'])
+
+    def test_row_registration_rules(self):
+        self.make_run(rows=[('a', 'working'), ('ghost', 'working'), ('old', 'closed: done'), ('gone1', 'gone')],
+                      agents=[('a', 'o1'), ('missing', 'o1')])
+        code, lines, _ = self.check('--offline')
+        self.assertEqual(sorted(self.rules(lines)), ['no-row', 'row-unregistered'])
+        self.assertTrue(any('missing is registered but has no ledger row' in l for l in lines))
+        self.assertTrue(any('ghost has a ledger row' in l for l in lines))
+        # a mark-only name (an owner pane) is exempt
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z o1 mark:handoff a1 | ctx 150k | proof -'])
+        self.assertEqual(self.check('--offline')[0], 0)
+
+    def test_not_closed_rule(self):
+        self.make_run(rows=[('a', 'merged abc')], agents=[('a', 'o1')])
+        self.assertIn('ledger row says merged', self.check('--offline')[1][0])
+        self.make_run(rows=[('a', 'open: next cycle round 2')], agents=[('a', 'o1')])
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:verified a1 | pass | proof p'])
+        code, lines, _ = self.check('--offline')
+        self.assertIn('marked verified', lines[0])
+        # a later open or closed mark settles it; reported alone is not a done state
+        self.log('2026-10-13T10:01:00Z a mark:open a1 | next cycle: more | proof -')
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:reported a1 | says done | proof -'])
+        self.assertEqual(self.check('--offline')[0], 0)
+        # row says done, but the latest mark is a held open
+        self.make_run(rows=[('a', 'done, kept')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:open a1 | next cycle: more | proof -'])
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.log('2026-10-13T10:05:00Z a working | t | ctx -')
+        self.assertEqual(self.rules(self.check('--offline')[1]), ['not-closed'])
+
+    def test_watcher_rules(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        with patch.object(m, 'pid_alive', return_value=False):
+            self.assertEqual(self.rules(self.check('--offline')[1]), ['watcher'])
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], watcher='pane wX:p1, agents: a (.orch/agents.txt)')
+        self.assertIn('has no pid', self.check('--offline')[1][0])
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], watcher=f'pane wX:p1, pid {os.getpid()}, agents: a, b (.orch/agents.txt), log: x')
+        self.assertIn("['a', 'b'] but agents.txt holds ['a']", self.check('--offline')[1][0])
+
+    def test_owner_liveness_and_offline(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        self.agent('someone')
+        code, lines, _ = self.check()
+        self.assertEqual((code, self.rules(lines)), (1, ['owner-dead']))
+        self.assertTrue(lines[0].startswith('o1: '))
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.agent('o1')
+        self.assertEqual(self.check()[0], 0)
+
+    def test_owner_filter(self):
+        self.make_run(rows=[('a', 'done'), ('b', 'done')], agents=[('a', 'o1'), ('b', 'o2')], nexts=('o1', 'o2'), pad=70)
+        everything = self.check('--offline')[1]
+        self.assertEqual(sorted(self.rules(everything)), ['ledger-length', 'not-closed', 'not-closed'])
+        mine = self.check('--owner', 'o1', '--offline')[1]
+        self.assertEqual(sorted(self.rules(mine)), ['ledger-length', 'not-closed'])
+        self.assertTrue(all(l.startswith(('o1: ', 'run: ')) for l in mine))
+        self.assertEqual(self.check('--owner', 'nobody', '--offline')[1], ['run: [ledger-length] ' + everything[0].split('] ')[1]])
+
+    def test_cannot_parse_exits_3(self):
+        code, _, err = self.check('--offline')
+        self.assertEqual(code, 3)
+        self.assertIn('ledger.md', err)
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        good = (self.d / 'ledger.md').read_text()
+        for broken, why in ((good.replace('## Pane agents', '## Agents'), 'no Pane agents table'),
+                            (good.replace('## Watcher', '## Watching'), 'no Watcher section'),
+                            (good.replace('| working |', '| working | extra |'), 'cells'),
+                            (good.replace('| name |', '| who |'), 'header')):
+            (self.d / 'ledger.md').write_text(broken)
+            code, lines, err = self.check('--offline')
+            self.assertEqual((code, lines), (3, []), why)
+            self.assertIn(why.split()[-1], err)
+        (self.d / 'ledger.md').write_text(good)
+        (self.d / 'agents.txt').write_text('a orch=o1 junk\n')
+        self.assertEqual(self.check('--offline')[0], 3)
+
+    def test_cli_exit_codes(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        self.assertEqual(self.run_cli('check', str(self.d), '--offline').returncode, 0)
+        self.assertEqual(self.run_cli('check', str(self.d), '--offline', '--bogus').returncode, 2)
+        self.make_run(rows=[('a', 'done')], agents=[('a', 'o1')])
+        r = self.run_cli('check', str(self.d), '--offline')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('o1: [not-closed] a:', r.stdout)
+        (self.d / 'ledger.md').unlink()
+        self.assertEqual(self.run_cli('check', str(self.d), '--offline').returncode, 3)
+
+    def test_hand_written_and_stray_log_lines(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')],
+                      events=['2026-10-09 22:01 tartib-search done; suite re-run 399 passed; awaiting commit decision',
+                              '2026-10-09T15:38:32Z lore closed by orch-3: lore plan complete'])
+        code, lines, _ = self.check('--offline')
+        self.assertEqual((code, self.rules(lines)), (1, ['log']))
+        self.assertIn('2 unparseable line(s); first at line 1: 2026-10-09 22:01 tartib-search', lines[0])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
