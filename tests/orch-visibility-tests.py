@@ -452,6 +452,12 @@ class CheckTests(Base):
         self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:verified a1 | pass | proof p'])
         code, lines, _ = self.check('--offline')
         self.assertIn('marked verified', lines[0])
+        # a merged mark counts like verified; a row that says "open: next cycle" settles either
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:merged a1 | abc | proof -'])
+        self.assertIn('marked merged', self.check('--offline')[1][0])
+        self.make_run(rows=[('a', 'open: next cycle round 2')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:verified a1 | pass | proof p'])
+        self.assertEqual(self.check('--offline')[0], 0)
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], events=['2026-10-13T10:00:00Z a mark:verified a1 | pass | proof p'])
         # a later open or closed mark settles it; reported alone is not a done state
         self.log('2026-10-13T10:01:00Z a mark:open a1 | next cycle: more | proof -')
         self.assertEqual(self.check('--offline')[0], 0)
