@@ -1,13 +1,13 @@
 ---
 name: session-close
-description: "Close a working session in the user's fixed order: sync and check project memory (KIS), apply the check, close agent workspaces and remove merged worktrees and branches, update the project's Tartib space, run the lore retrospective, confirm no handoffs are left, then commit and push. Use when the user says close the session, wrap up, end of session, or asks for the closing routine. Each step runs without asking; only the KIS cleanup waits for a yes unless the user said apply."
+description: "Close a working session in the user's fixed order: sync and check project memory (KIS), apply the check, close agent workspaces and remove merged worktrees and branches, update the project's status space when present, run the lore retrospective, confirm no handoffs are left, then commit and push. Use when the user says close the session, wrap up, end of session, or asks for the closing routine. Each step runs without asking; only the KIS cleanup waits for a yes unless the user said apply."
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # Session close
 
-The user's end-of-session routine, from preferences 30 and 32 in the Tartib space `ai-agents`.
+The user's end-of-session routine, from preferences 30 and 32 in the lore store (any backend).
 Run every step in this order without asking between them. Skip a step only when its tool or
 folder is absent, and say so in one line. Never fail the whole close on one missing piece.
 
@@ -31,10 +31,10 @@ follow this file.
    `git log main..<branch>` first. Remove only those with zero unmerged commits and a clean
    tree. Keep any branch with unmerged work, and any folder an app holds open with unsaved
    edits (for example Pen); name each one kept and why. Never `git worktree remove --force`.
-6. **Update the project's Tartib space.** One task per feature, open or done, with a one-line
-   plain-language thought for each feature that moved this session (merged, released, paused),
-   and decisions waiting on the user starred (preference 33). Tartib tools absent: skip and
-   say so.
+6. **Update the project's status space**, when the project has a status space in the notes
+   backend. One task per feature, open or done, with a one-line plain-language thought for
+   each feature that moved this session (merged, released, paused), and decisions waiting on
+   the user starred (preference 33). No status space or backend tools: skip and say so.
 7. **Retrospective.** Run the lore retro (`/lore:retro`, or the Retrospective step of
    `~/.agents/skills/lore/SKILL.md`). Do this before any compact (core rule 66).
 8. **Confirm no handoffs are left.** If work is unfinished and a fresh session must pick it up,
