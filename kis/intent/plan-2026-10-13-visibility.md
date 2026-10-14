@@ -119,6 +119,13 @@ and visibility"), scope "all five". Standard mode. Approved 2026-10-13 by the ow
 
 ## Status
 
+**Done 2026-10-14:** merged to main (ff to ab56aae) by orch-5 after a clean detached suite
+(13 files) and three more mutants killed; installed live (0.10.0, `check` exit 0); the live
+watcher restarted on it and draws the EVID column and mark lines (pane wG:p2). Not pushed. Still
+not proved: a real multi-agent run using marks end to end. Follow-up: a watcher restart resets
+finish ages, so old finishes reach Needs you 10 minutes after a restart. The builder's notes below
+are kept as history.
+
 Built 2026-10-13 on branch `visibility` (code through eae8358, orch 0.10.0), one commit per scope
 item: mark 450020a, board eae952e, check bc258e6, show 4f5639c, stats a3230a6, commands, reference
 and version 7908567, then 087f34a (mutation survivors) and eae8358 (clip the Waiting line). Not

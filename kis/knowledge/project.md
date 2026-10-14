@@ -79,3 +79,13 @@ independent per owner. wake.md fallback entries name their owner. Each ledger ro
 and each orchestrator exact-matches its own `Next action (<owner>):` line. The watcher uses
 an alternate terminal buffer, restores it on exit, redraws changed text only and keeps five
 Recent entries.
+
+## Run visibility (orch 0.10.0, ideas from herdr-dagr)
+
+Decided 2026-10-13: borrow dagr's ideas, never its run.json. events.log stays the one append-only
+history and the ledger the one memory; the watcher and `check` read the ledger, never write it.
+Verdicts are `orch-watch.py mark` lines (tiers, attempts); `add`, `move` and `remove` log
+`registered`, `moved` and `removed` (a `move` never resets attempts). The board derives EVID and
+Needs you; `check`, `show` and `stats` read the same files. Detail: `skills/orch/references/visibility.md`.
+Live Herdr reads go through `scripts/orch-agents.sh` (0.9.1); a guard test keeps raw
+`herdr agent list` out of the orchestrator-facing files.
