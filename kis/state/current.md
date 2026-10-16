@@ -8,7 +8,8 @@
   and its `.orch/` proof logs stay on the owner's other machine.
 - Task: none open. Session 2026-10-16 did the landscape research (doc "Agent Stack Landscape
   Report", https://claude.ai/code/artifact/461cac36-c255-4f21-b056-fe80a896c54f) and built and
-  released lore 1.0.0 in `../lore-skill` (its own State holds the proof).
+  released lore 1.0.0 in `../lore-skill` (its own State holds the proof). Raw research files:
+  `.orch/research-2026-10-16/` (local, ignored; its README lists them).
 - Blocker: none.
 - Command: `tests/run.sh`; `ORCH_TEST_NO_LIVE=1` skips live Codex probes;
   `./bootstrap.sh check --source .`.
