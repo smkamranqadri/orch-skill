@@ -13,6 +13,10 @@
 - Command: `tests/run.sh`; `ORCH_TEST_NO_LIVE=1` skips live Codex probes;
   `./bootstrap.sh check --source .`.
 - Next (new session, owner's call): plan the KIS and orch changes deferred until lore was done.
+  Owner's stance (2026-10-16): KIS works well, change it only after discussion (hooks or skills
+  that cut ceremony are welcome); orch is early, heavily used and open to the best design; a
+  small project uses KIS alone, a big one uses orch, which works without KIS or offers to install
+  it. Every host (Claude Code, Codex, Command Code, agy) keeps the same layer.
   1. orch `start`/`handoff` and session-close still call `/lore:load` and `/lore:retro`; lore
      1.0.0 loads through each agent's global file and captures on its own, so those steps change.
   2. One front door: `kis:start` decides the work mode and escalates to orch for many agents.
