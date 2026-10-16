@@ -1,32 +1,25 @@
 # Current
 
-- Branch: `main`, tracking `origin/main` (public). Orch code base 43eed48 (0.10.0);
-  session-close 1.0.2 and review memory integrated. KIS vendor updated to 0.10.1.
-- Task: six review findings and transcript investigation complete; session closing under
-  the user's 2026-10-14 approval to commit, push and apply memory cleanup.
+- Branch: `main`, in step with `origin/main` (public). Source: orch 0.10.0, session-close 1.0.2,
+  vendored KIS 0.10.1. No code change since 43eed48.
+- Machine: fresh Linux laptop (2026-10). orch and session-close are **not installed** here. In
+  `~/.agents/skills`, linked for Claude and agy: lore 1.0.0 (from lore-skill), herdr (upstream
+  `herdrdev/herdr` 143bf5f) and humanizer (upstream `blader/humanizer` 3.1.0). The earlier setup
+  and its `.orch/` proof logs stay on the owner's other machine.
+- Task: none open. Session 2026-10-16 did the landscape research (doc "Agent Stack Landscape
+  Report", https://claude.ai/code/artifact/461cac36-c255-4f21-b056-fe80a896c54f) and built and
+  released lore 1.0.0 in `../lore-skill` (its own State holds the proof).
+- Blocker: none.
 - Command: `tests/run.sh`; `ORCH_TEST_NO_LIVE=1` skips live Codex probes;
-  `./bootstrap.sh check --source .`; watcher `check .orch --owner <pane>`.
-- Blocker: none for this completed scope.
-- Proof: isolated current-HEAD copies with exact review fixes pass all 13 orch and five
-  lore suites; `.orch/reviewfix/orchestrator-{orch-skill,lore-skill}-suite.log`. Session-close
-  1.0.2 installed/check current (`live-install.log`, `live-check.log`); diff checks pass.
-  No runtime guards changed; live Codex probes excluded.
-- Earlier orch 0.10.0 proof: clean detached suite, 50 worker mutants and three integrator
-  mutants killed (`.orch/visibility/proof/`). Orch 0.9.1 clean suite and two mutants pass.
-- Investigation: `.orch/fixes/lore-context-report.md`; duplicate fuzzy discovery/get and
-  troubleshooting add lore context, while project output adds further growth. GLM initial
-  34156, peak 128997, first >100k U10 independently checked. Installed lore 0.5.0 load files
-  match d92ba09; full session tables agent-reported, no controlled post-change benchmark.
-- Next for wG:p5: none; review work complete, session closed. Agents exited and reviewfix
-  worktrees/branches removed after byte-verified archives in `.orch/reviewfix/worktree-backups/`.
-- Other owners: rules-split remains active under w0:p2; preserve its workspace/worktree.
-  No work from that branch is included here.
-- Open acceptances: placement table against research cases, multi-owner successor wake,
-  real marks end-to-end. Follow-up: watcher restart finish-age behavior; cmd cache preserves
-  the last reading after a failed fetch. Full-permission starts held for owner action;
-  Tartib run migration parked. These are outside the completed review scope.
-- Public fixtures: user authorized push 2026-10-14 after the fixture concern was raised;
-  preflight found no home paths, private keys or common token signatures. Run metadata and
-  quoted decisions retained. Local `.commandcode/taste/taste.md` stays unpublished and locally git-excluded.
-- KIS 0.10.1: three vendored files byte-match source; session-anchor tests pass
-  (`.orch/reviewfix/kis-anchor-close.log`). Remote synchronization is checked after push.
+  `./bootstrap.sh check --source .`.
+- Next (new session, owner's call): plan the KIS and orch changes deferred until lore was done.
+  1. orch `start`/`handoff` and session-close still call `/lore:load` and `/lore:retro`; lore
+     1.0.0 loads through each agent's global file and captures on its own, so those steps change.
+  2. One front door: `kis:start` decides the work mode and escalates to orch for many agents.
+  3. orch slimming from the research: native host hooks and Monitor, or agent-of-empires,
+     instead of parts of the watcher; keep the ledger, evidence tiers and usage-based CLI choice.
+  4. Then install orch and session-close on this machine.
+- Open from before: placement table against research cases, multi-owner successor wake, real
+  marks end to end, watcher restart finish-age, cmd cache keeping the last reading after a failed
+  fetch, full-permission starts, the parked Tartib run migration. The rules-split branch of
+  2026-10-14 is not on this machine.
