@@ -31,7 +31,8 @@ The orch SKILL.md alone is 1908 words (est. 2480 tokens) and the Herdr skill 231
 `scripts/measure-live.py` in the same test home, headless, fixtures rebuilt per case (fictional
 repos pebble-notes and tidepool-cli). Hosts: Claude Code 2.1.300 (claude-sonnet-5-5, medium),
 Codex 0.162.1 (gpt-6.1-sol, medium), Command Code 1.82.5 (its configured default,
-z-ai/glm-5.3-flash, default effort), agy 1.4.0 (default model). Tokens are each host's own usage
+z-ai/glm-5.3-flash, default effort), agy 1.4.0 (gpt-oss-120b-medium; its default model's quota ran out
+mid-run, so all four agy cases were rerun on this one). Tokens are each host's own usage
 fields summed over the session, cached input included (`tokens_in`); they compare within a host
 only. Raw runs: `~/.cache/orch-skill-test-home/runs/2026-10-17-baseline/` (`summary.tsv`).
 
@@ -42,7 +43,7 @@ Session A per case (start step plus the fix; `resume-reopen` adds the KIS sync s
 | claude | 111,579 | 111,650 | 172,634 | 193,820 |
 | codex | 239,113 | 239,695 | 247,182 | 218,153 |
 | cmd | 395,754 | 314,605 | 484,985 | 1,787,614 |
-| agy | 694,744 | 957,925 | not run | not run |
+| agy | 243,465 | 200,838 | 296,709 | 982,315 |
 
 Session B (fresh process, start step, inventory), tokens in, and recovery against the seeded
 open set T2, T3, D1, D2:
@@ -52,10 +53,11 @@ open set T2, T3, D1, D2:
 | claude | 109,908 | 110,843 | none | both, as "not committed" |
 | codex | 99,473 | 122,596 | none | no |
 | cmd | 186,773 | 269,146 | none | no |
-| agy | 1,224,967 | not run | none | no |
+| agy | 75,011 | 89,001 | none | resume-clear, as unfinished (stale) |
 
-Every completed session reached the fix (tests green after) and asked the owner no questions.
-No session forgot an open task or decision.
+Every session reached the fix (tests green after). No session forgot an open task or decision.
+One question to the owner in total (agy, no-kis). agy's resume-clear B is the one stale
+recovery: with no sync, State still said T1 was not started, and agy reported it as open.
 
 Caveats:
 - Deviations approved 2026-10-17: a fresh process stands in for /clear (SessionStart source
@@ -64,8 +66,8 @@ Caveats:
 - Claude's T1 lines say the fix is done but not committed: the prompt forbade commits, so this
   is not forgotten work. A `stale` count for phase 5 compares like with like only under the same
   prompt.
-- agy's `resume-reopen` and `no-kis` hit its plan quota (429, resets about 2026-10-24); rerun
-  them then with `--host agy --case resume-reopen --case no-kis`.
+- agy's default-model run (`runs/2026-10-17-agy-default-model/`) is not used: its plan quota ran
+  out (429) after two cases.
 - The first full run (`runs/2026-10-17-run1-herdr-leak/`) is void: the XDG dirs still pointed at
   the owner's home, so test agents could reach the owner's live Herdr server (agy read one pane;
   nothing was changed). The harness now moves the XDG dirs and refuses to run while herdr reaches

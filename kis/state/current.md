@@ -3,10 +3,10 @@
 - Branch: `main`, in step with `origin/main` (public). Source: orch 0.10.0, session-close 1.0.2,
   vendored KIS 0.10.1. No code change since 43eed48.
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
-  Mode: Phase. Status: phase 0 nearly done (owner's go 2026-10-17). Static and live baselines in
-  `kis/knowledge/start-cost.md`; agy's `resume-reopen` and `no-kis` wait on its quota.
-- Blocker: agy plan quota (429) until about 2026-10-24; only those two agy cases.
-- Next: owner reviews the phase 0 commit; then phase 1 (KIS 0.11.0 in ../kis-loop-skill).
+  Mode: Phase. Status: phase 0 done 2026-10-17 (static and live baselines on all four hosts in
+  `kis/knowledge/start-cost.md`); phase 1 not started.
+- Blocker: none.
+- Next: phase 1 (KIS 0.11.0 in ../kis-loop-skill) on the owner's go.
   Before each implementer or reviewer call, propose harness, model and effort for approval.
 - Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
   memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
