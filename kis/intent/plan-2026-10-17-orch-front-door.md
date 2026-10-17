@@ -99,9 +99,19 @@ Status: done 2026-10-17 (`7ef115e` and the agy rerun; numbers in `kis/knowledge/
 Accept: static rerun prints identical numbers; every live number carries host, version and case.
 
 ### Phase 1: KIS 0.11.0 (in ../kis-loop-skill, then vendored)
-- State stamp: sync writes it; `session-anchor.sh` and the agy anchor print a stale line on branch
-  mismatch or code commits after the stamp. Tests: match, branch differs, code commit after stamp,
-  `kis/`-only commit after stamp (not stale), no stamp, and a full sync → commit → fresh session.
+Status: in progress 2026-10-17. Worktree `../kis-loop-skill.wt/kis-0.11`, branch `kis-0.11`.
+Builder Claude Sonnet 5.5 (high), reviewer Claude Opus 5.5 (high, read-only), one task at a
+time (owner, 2026-10-17; Codex and agy reviewed task 1 before the switch). Order: stamp, plan review, recovery contract and pointer-aware sync,
+anchors on four hosts, release and vendor.
+- State stamp: sync writes `Stamp: <branch> <short sha> <tree>` from `scripts/state-stamp.sh`;
+  `<tree>` fingerprints the working-tree content outside `kis/` and `.orch/`, committed or not.
+  The anchor (and so the agy anchor) prints one `Stale State` line on a branch mismatch or a
+  changed fingerprint. Owner, 2026-10-17: also catch uncommitted changes the last sync did not
+  see (the one stale recovery in the baseline); content, not commits, so sync-then-commit stays
+  quiet. Tests: match, branch differs, code commit after stamp, `kis/`-only commit (quiet), code
+  and State committed together after sync (quiet), uncommitted or untracked code (stale), dirt
+  that existed at sync (quiet), no stamp (quiet), linked worktree with the real index untouched,
+  and a full sync → commit → fresh session.
 - Anchors on all four hosts [3]: add Codex SessionStart (hooks.json; installer prints the one-time
   `/hooks` trust step) and cmd SessionStart (`~/.commandcode/settings.json` or project settings);
   define agy reinjection after compaction (its anchor currently suppresses repeats per
@@ -146,6 +156,13 @@ Herdr; upgrade test green; measured light start cost.
   pair, shared file, disjoint pair passes, queue → blocker merge → launch through `orch:task` and
   `event`, and recovery while queued [2.9].
 - Cross-CLI diff review before merge in the merge flow; records reviewed commit range.
+- Model matrix (owner, 2026-10-17): orch ships a provider x model x effort matrix (what each can do,
+  what it costs, measured use) and picks harness, model and effort from it when it proposes an agent.
+  Seed: `kis/knowledge/models.md`. A command rebuilds it on demand for whoever installs orch: it finds
+  the installed CLIs and their model lists (`codex` models cache, `cmd --list-models`, `agy models`,
+  Claude's model ids), asks the user which plans they have, fetches current prices with sources, and
+  keeps the user's own measured notes. Accept: rebuilt from scratch in the test home it lists exactly
+  the installed CLIs' models; picks follow the reviewer rule (different agent and model).
 - Watcher as an orch Herdr plugin, with a readable UI (owner, 2026-10-17; the owner's screenshot of a
   community stage graph is inspiration, not a spec). `herdr-plugin.toml` declares a board pane
   (popup or split, opened by an action bound to a key), actions, and `[[events]]` hooks where they
