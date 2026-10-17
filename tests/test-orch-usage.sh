@@ -43,9 +43,10 @@ python3 "$U" check codex --cached >/dev/null || fail "codex check should exit 0"
 test -f "$tmp/cache/usage.json" || fail "combined cache not written"
 
 # 3. a fresh codex reading is reused (no app-server start) even without --cached
-before=$(stat -f %m "$tmp/cache/usage-codex.json" 2>/dev/null || stat -c %Y "$tmp/cache/usage-codex.json")
+touch -t 202001010000 "$tmp/cache/usage-codex.json"
+before=$(stat -c %Y "$tmp/cache/usage-codex.json" 2>/dev/null || stat -f %m "$tmp/cache/usage-codex.json")
 PATH="$tmp/nobin" "$PY" "$U" collect >/dev/null 2>&1 || fail "collect with fresh codex cache should not need the codex binary"
-after=$(stat -f %m "$tmp/cache/usage-codex.json" 2>/dev/null || stat -c %Y "$tmp/cache/usage-codex.json")
+after=$(stat -c %Y "$tmp/cache/usage-codex.json" 2>/dev/null || stat -f %m "$tmp/cache/usage-codex.json")
 [[ "$before" == "$after" ]] || fail "fresh codex cache was rewritten"
 
 # 4. a stale codex reading with no codex binary stays as the last known value, not an error

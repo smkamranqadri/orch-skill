@@ -10,7 +10,7 @@ names="worker explorer researcher designer"
 b="$repo_root/bootstrap.sh"
 
 fail() { echo "FAIL: $*" >&2; echo "--- last output ---" >&2; cat "$log" >&2 || true; exit 1; }
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 
 # 0. the source ships exactly the four, each with a matching name in its frontmatter
 test "$(ls "$repo_root/skills/orch/agents" | wc -l | tr -d ' ')" = 4 || fail "source should ship exactly four agents"
