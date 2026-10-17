@@ -3,11 +3,19 @@
 - Branch: `main`, in step with `origin/main` (public). Source: orch 0.10.0, session-close 1.0.2,
   vendored KIS 0.10.1. No code change since 43eed48.
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
-  Mode: Phase. Status: phase 0 done 2026-10-17 (static and live baselines on all four hosts in
-  `kis/knowledge/start-cost.md`); phase 1 not started.
+  Mode: Phase. Status: phase 1 in progress (KIS 0.11.0, worktree
+  `../kis-loop-skill.wt/kis-0.11`, branch `kis-0.11`). Done on the branch: task 1 State stamp
+  (`5a3aa78`, `7ea6ebe`), task 2 plan review (`bda1469`, `0c29a80`, `bd81360`), task 3 Run pointer
+  (`16e08d3`); each re-verified by the coordinator (gates and probes). Task 4 (anchors on four
+  hosts) is with the builder; tasks 1-3 await the Opus review.
 - Blocker: none.
-- Next: phase 1 (KIS 0.11.0 in ../kis-loop-skill) on the owner's go.
-  Before each implementer or reviewer call, propose harness, model and effort for approval.
+- Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
+  `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
+  Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
+  model; the same host is fine. Picks come from `kis/knowledge/models.md`.
+- Next: Opus review of tasks 1-2, then 3 and 4; live anchor checks on each host in the test home;
+  task 5 release 0.11.0 and vendor here. When vendored, this plan needs a `## Review` record in
+  the new format or `kis:act` refuses it.
 - Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
   memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
   cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run
