@@ -36,10 +36,11 @@ HOSTS = ["claude", "codex", "cmd", "agy"]
 CASES = ["fix", "resume-clear", "resume-reopen", "no-kis"]
 TIMEOUT = 900
 
-# Approved 2026-10-17: mid tier per host; cmd and agy on their default model and effort (cmd's
-# default model accepts only off, high or max as effort).
+# Approved 2026-10-17: mid tier per host; cmd on its default model and effort (that model accepts
+# only off, high or max as effort); agy on gpt-oss-120b-medium (owner, 2026-10-17, after its
+# default model's quota ran out).
 MODELS = {"claude": "claude-sonnet-5-5 (medium)", "codex": "gpt-6.1-sol (medium)",
-          "cmd": "default", "agy": "default"}
+          "cmd": "default", "agy": "gpt-oss-120b-medium"}
 
 EXPECTED_OPEN = {"T2", "T3", "D1", "D2"}
 DONE_BY_FIX = {"T1"}
@@ -211,8 +212,8 @@ def host_cmd(host, prompt):
     if host == "cmd":
         return ["cmd", "-p", prompt, "--output-format", "json", "--yolo", "--trust"]
     if host == "agy":
-        return ["agy", "-p", prompt, "--output-format", "stream-json",
-                "--dangerously-skip-permissions"]
+        return ["agy", "-p", prompt, "--model", "gpt-oss-120b-medium", "--output-format",
+                "stream-json", "--dangerously-skip-permissions"]
     raise ValueError(host)
 
 

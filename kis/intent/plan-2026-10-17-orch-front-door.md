@@ -85,6 +85,7 @@ than orch-skill; lore changes; agent-of-empires; trimming KIS start beyond what 
 ## Phases
 
 ### Phase 0: baseline
+Status: done 2026-10-17 (`7ef115e` and the agy rerun; numbers in `kis/knowledge/start-cost.md`).
 - `scripts/measure-start.sh` (source clone only): static part lists the files each path loads
   (`kis:start`, `orch:start` light and heavy, `session-close`) plus each host's global file chain,
   with words and estimated tokens (words x 1.3), labelled as estimates.
