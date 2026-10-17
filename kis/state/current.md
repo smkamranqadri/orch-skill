@@ -2,29 +2,21 @@
 
 - Branch: `main`, in step with `origin/main` (public). Source: orch 0.10.0, session-close 1.0.2,
   vendored KIS 0.10.1. No code change since 43eed48.
-- Machine: fresh Linux laptop (2026-10). orch and session-close are **not installed** here. In
-  `~/.agents/skills`, linked for Claude and agy: lore 1.0.0 (from lore-skill), herdr (upstream
-  `herdrdev/herdr` 143bf5f) and humanizer (upstream `blader/humanizer` 3.1.0). The earlier setup
-  and its `.orch/` proof logs stay on the owner's other machine.
-- Task: none open. Session 2026-10-16 did the landscape research (doc "Agent Stack Landscape
-  Report", https://claude.ai/code/artifact/461cac36-c255-4f21-b056-fe80a896c54f) and built and
-  released lore 1.0.0 in `../lore-skill` (its own State holds the proof). Raw research files:
-  `.orch/research-2026-10-16/` (local, ignored; its README lists them).
+- Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
+  Mode: Phase. Status: plan approved 2026-10-17, **not started** (owner: write, do not start).
 - Blocker: none.
+- Next: on the owner's go, Phase 0 (baseline probe and live cases in an isolated test home).
+  Before each implementer or reviewer call, propose harness, model and effort for approval.
+- Proof on record: plan reviewed twice 2026-10-17 by Codex gpt-6.1-sol (high, read-only). Pass 1:
+  rework (1 blocker, 11 major, 1 minor); pass 2: ready after fixes (10 major, 1 minor); all
+  folded in. Re-checked by hand: the PreCompact blocker (Claude hooks docs), the watcher finding
+  (`orch-watch.py:454`) and per-repo KIS delivery (`install-skill.sh:110`, KIS README).
+- Machine: fresh Linux laptop (2026-10). orch and session-close are **not installed** here. In
+  `~/.agents/skills`, linked for Claude and agy: lore 1.0.0, herdr (upstream 143bf5f; CLI 0.9.5)
+  and humanizer 3.1.0. The earlier setup and its `.orch/` proof logs stay on the owner's Mac.
+- Research: doc "Agent Stack Landscape Report"
+  (https://claude.ai/code/artifact/461cac36-c255-4f21-b056-fe80a896c54f); raw files in
+  `.orch/research-2026-10-16/` (untracked, not git-ignored: never stage it).
 - Command: `tests/run.sh`; `ORCH_TEST_NO_LIVE=1` skips live Codex probes;
   `./bootstrap.sh check --source .`.
-- Next (new session, owner's call): plan the KIS and orch changes deferred until lore was done.
-  Owner's stance (2026-10-16): KIS works well, change it only after discussion (hooks or skills
-  that cut ceremony are welcome); orch is early, heavily used and open to the best design; a
-  small project uses KIS alone, a big one uses orch, which works without KIS or offers to install
-  it. Every host (Claude Code, Codex, Command Code, agy) keeps the same layer.
-  1. orch `start`/`handoff` and session-close still call `/lore:load` and `/lore:retro`; lore
-     1.0.0 loads through each agent's global file and captures on its own, so those steps change.
-  2. One front door: `kis:start` decides the work mode and escalates to orch for many agents.
-  3. orch slimming from the research: native host hooks and Monitor, or agent-of-empires,
-     instead of parts of the watcher; keep the ledger, evidence tiers and usage-based CLI choice.
-  4. Then install orch and session-close on this machine.
-- Open from before: placement table against research cases, multi-owner successor wake, real
-  marks end to end, watcher restart finish-age, cmd cache keeping the last reading after a failed
-  fetch, full-permission starts, the parked Tartib run migration. The rules-split branch of
-  2026-10-14 is not on this machine.
+- Older open items: `kis/intent/backlog.md` (re-triage in the plan's phase 5).
