@@ -1,5 +1,7 @@
 # Plan: run visibility (ideas adapted from herdr-dagr)
 
+Status: COMPLETE 2026-10-13 (orch 0.10.0 merged and live, 43eed48).
+
 Drafted 2026-10-13 from a read of github.com/aemrebarut/herdr-dagr (v0.3.1). The owner chose
 not to try dagr itself, and to adapt what fits ("let's adapt what we can and improve our workflow
 and visibility"), scope "all five". Standard mode. Approved 2026-10-13 by the owner
