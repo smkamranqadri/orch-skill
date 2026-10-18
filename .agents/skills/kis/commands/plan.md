@@ -43,4 +43,24 @@ KIS writes this plan implies:
 
 ## Stop Condition
 
-For Fast Mode, offer to execute immediately. For Standard or Phase Mode, write the plan into `kis/intent/` only after the user approves the scope, then stop.
+For Fast Mode, offer to execute immediately. For Standard or Phase Mode, write the plan into `kis/intent/` only after the user approves the scope, then run the review below, then stop.
+
+## Review
+
+A written plan is reviewed by a different CLI than the one that wrote it before it can be acted on (`SKILL.md` owns the rule).
+
+1. Propose the reviewer: a different CLI from the author, with harness, model, effort, and a one-line reason. Wait for the user's approval. The user may instead waive the review for this plan.
+2. Run the review. Resolve every finding with the user where it changes scope. Mark each one fixed, rejected with a reason, or open.
+3. Append a `## Review` section to the plan in the format `.agents/skills/kis/references/execution.md` (Plan Review) owns, using the hash from `.agents/skills/kis/scripts/plan-review.sh hash <plan>`:
+
+```text
+## Review
+- Reviewed: <YYYY-MM-DD> by <cli> <model> (<effort>); plan hash <12 hex>
+- [fixed] <finding> - <what changed>
+- [rejected] <finding> - <reason>
+- [open] <finding>
+```
+
+A waiver is `- Reviewed: waived by the owner <YYYY-MM-DD>; plan hash <12 hex>`. Take the hash last: any later edit to the plan's substance invalidates the review (Plan Review owns the rules).
+
+4. Run `.agents/skills/kis/scripts/plan-review.sh check <plan>` and show its output as proof.
