@@ -57,12 +57,19 @@ echo "# drift" >> "$home/.commandcode/commands/orch-start.md"
 unlink "$home/.gemini/config/skills/orch"
 if run check --source "$repo_root" --home "$home" --hosts all; then fail "check should exit 1 on broken wiring"; fi
 has "Codex prompt missing: $home/.codex/prompts/orch-close.md"
-has "Command Code command differs: $home/.commandcode/commands/orch-start.md (update replaces a plain file)"
+has "Command Code command differs: $home/.commandcode/commands/orch-start.md (not shipped by orch; kept; install --force replaces it)"
 has "agy skill link missing: $home/.gemini/config/skills/orch"
 has "Codex prompt already current: $home/.codex/prompts/orch-start.md"
 run update --source "$repo_root" --home "$home" --hosts all || fail "update failed"
-run check --source "$repo_root" --home "$home" --hosts all || fail "check should pass after update repaired the wiring"
-cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.commandcode/commands/orch-start.md" || fail "update did not restore the cmd command"
+test -f "$home/.codex/prompts/orch-close.md" -a -L "$home/.gemini/config/skills/orch" || fail "update did not repair the missing items"
+# the drifted copy was edited, so it is the user's: update keeps it, install --force replaces it
+grep -q -x '# drift' "$home/.commandcode/commands/orch-start.md" || fail "update overwrote an edited prompt"
+if run check --source "$repo_root" --home "$home" --hosts all; then fail "check should still flag the edited prompt"; fi
+has "Command Code command differs: $home/.commandcode/commands/orch-start.md (not shipped by orch; kept; install --force replaces it)"
+run install --source "$repo_root" --home "$home" --hosts all --force || fail "install --force over an edited prompt"
+cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.commandcode/commands/orch-start.md" || fail "--force did not restore the cmd command"
+grep -l -x '# drift' "$home"/.agents/prompt-backup-* >/dev/null 2>&1 || fail "--force kept no copy of the edited prompt"
+run check --source "$repo_root" --home "$home" --hosts all || fail "check should pass after update and --force repaired the wiring"
 
 # 3. a second install is idempotent: identical copies are not rewritten, the link keeps its inode
 touch -t 202001010000 "$home/.codex/prompts/orch-start.md"
@@ -86,7 +93,7 @@ has "Kept your existing Command Code command path: $home/.commandcode/commands/o
 [[ "$(readlink "$home/.gemini/config/skills/orch")" == "$home/other" ]] || fail "foreign agy link changed"
 test -d "$home/.commandcode/commands/orch-start.md" || fail "foreign directory replaced"
 if run check --source "$repo_root" --home "$home" --hosts all; then fail "check should flag foreign wired paths"; fi
-has "agy skill link differs: $home/.gemini/config/skills/orch (update replaces a plain file)"
+has "agy skill link differs: $home/.gemini/config/skills/orch (existing path kept)"
 
 # 5. hosts: none skips them, a list picks them, auto follows the folders
 home="$tmp/h5"
@@ -197,5 +204,82 @@ ln -s ../../../.agents/skills/session-close "$home/.gemini/config/skills/session
 run install --source "$repo_root" --home "$home" --only orch --hosts none || fail "install with agy session-close link"
 has "Retired session-close link: $home/.gemini/config/skills/session-close"
 test ! -L "$home/.gemini/config/skills/session-close" || fail "agy session-close link remains"
+
+# 10. the user's own prompt at a wired path is kept (install, update, check), never overwritten
+home="$tmp/h10"; mkdir -p "$home/.codex/prompts" "$home/.commandcode/commands"
+echo "my own prompt" > "$home/.codex/prompts/orch-start.md"
+echo "my own command" > "$home/.commandcode/commands/orch-close.md"
+run install --source "$repo_root" --home "$home" --hosts all || fail "install over the user's own prompts"
+has "Kept your different Codex prompt: $home/.codex/prompts/orch-start.md (not shipped by orch; --force-prompts replaces it)"
+has "Kept your different Command Code command: $home/.commandcode/commands/orch-close.md (not shipped by orch; --force-prompts replaces it)"
+grep -q -x 'my own prompt' "$home/.codex/prompts/orch-start.md" || fail "install overwrote the user's codex prompt"
+grep -q -x 'my own command' "$home/.commandcode/commands/orch-close.md" || fail "install overwrote the user's cmd command"
+cmp -s "$repo_root/skills/orch/commands/status.md" "$home/.codex/prompts/orch-status.md" || fail "the other prompts were not installed"
+rm "$home/.codex/prompts/orch-task.md"
+run update --source "$repo_root" --home "$home" --hosts all || fail "update beside the user's prompts"
+grep -q -x 'my own prompt' "$home/.codex/prompts/orch-start.md" || fail "update overwrote the user's codex prompt"
+test -f "$home/.codex/prompts/orch-task.md" || fail "update did not restore the missing prompt"
+test -z "$(ls "$home"/.agents/prompt-backup-* 2>/dev/null)" || fail "a backup was made for a file that was kept"
+inst() { "$repo_root/scripts/install-skill.sh" "$@" >"$log" 2>&1; }
+inst --source "$repo_root" --home "$home" --hosts all --only orch --force || fail "install-skill --force"
+grep -q -x 'my own prompt' "$home/.codex/prompts/orch-start.md" || fail "--force alone (skill replace) overwrote the user's prompt"
+inst --source "$repo_root" --home "$home" --hosts all --force-prompts --wire-only || fail "install-skill --force-prompts"
+cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "--force-prompts did not replace the prompt"
+grep -q -x 'my own prompt' "$home"/.agents/prompt-backup-*orch-start.md || fail "--force-prompts kept no copy of the user's prompt"
+
+# 11. a shipped older copy is replaced with a backup; a command dropped from the source takes its
+#     shipped copy with it, and a user's orch-<name>.md with no source command is left alone
+src="$tmp/src"; mkdir -p "$src"; cp -R "$repo_root/skills" "$repo_root/scripts" "$repo_root/bootstrap.sh" "$src/"
+echo "# a command that will go away" > "$src/skills/orch/commands/old.md"
+bs="$src/bootstrap.sh"; srun() { "$bs" "$@" --no-herdr >"$log" 2>&1; }
+home="$tmp/h11"
+srun install --source "$src" --home "$home" --hosts all || fail "install from the temp source"
+echo "my own, unrelated" > "$home/.codex/prompts/orch-mine.md"
+echo "a line the next release adds" >> "$src/skills/orch/commands/start.md"
+rm "$src/skills/orch/commands/old.md"
+if srun check --source "$src" --home "$home" --hosts all; then fail "check should flag the outdated and the dropped prompts"; fi
+has "Codex prompt outdated: $home/.codex/prompts/orch-start.md (a shipped older copy; update replaces it and keeps a backup)"
+has "Codex prompt stale: $home/.codex/prompts/orch-old.md (its command no longer exists; update removes it and keeps a backup)"
+has "Command Code command stale: $home/.commandcode/commands/orch-old.md (its command no longer exists; update removes it and keeps a backup)"
+if grep -q 'orch-mine' "$log"; then fail "check reported a user file"; fi
+srun update --source "$src" --home "$home" --hosts all || fail "update from the temp source"
+cmp -s "$src/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "update did not replace the shipped older copy"
+grep -q -x "a line the next release adds" "$home/.codex/prompts/orch-start.md" || fail "new text missing after update"
+test ! -e "$home/.codex/prompts/orch-old.md" -a ! -e "$home/.commandcode/commands/orch-old.md" || fail "update left a dropped command's prompt"
+grep -q -x '# a command that will go away' "$home"/.agents/prompt-backup-*orch-old.md || fail "no backup of the removed prompt"
+test -f "$home/.codex/prompts/orch-mine.md" || fail "update removed a user file"
+grep -q -x "my own, unrelated" "$home/.codex/prompts/orch-mine.md" || fail "update changed a user file"
+n="$(grep -l -v 'a line the next release adds' "$home"/.agents/prompt-backup-*orch-start.md | wc -l | tr -d ' ')"
+[[ "$n" -ge 1 ]] || fail "no backup of the replaced prompt"
+srun check --source "$src" --home "$home" --hosts all || fail "check should pass after the update"
+# a copy of an older release made before the manifest existed is still recognised as shipped
+home="$tmp/h11b"; mkdir -p "$home/.codex/prompts"
+cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-start.md"
+run install --source "$repo_root" --home "$home" --hosts codex || fail "install over an older shipped copy"
+has "Codex prompt updated: $home/.codex/prompts/orch-start.md (previous kept at $(ls "$home"/.agents/prompt-backup-*orch-start.md))"
+cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "the older shipped copy was not replaced"
+
+# 12. with the orch skill already current, update still repairs an outdated copy and drops an orphan
+home="$tmp/h12"
+run install --source "$repo_root" --home "$home" --hosts codex || fail "stage h12"
+cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-start.md"
+cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-gone.md"
+if run check --source "$repo_root" --home "$home" --hosts codex; then fail "check should flag the outdated and the orphan"; fi
+has "Already current: orch"
+has "Codex prompt outdated: $home/.codex/prompts/orch-start.md (a shipped older copy; update replaces it and keeps a backup)"
+has "Codex prompt stale: $home/.codex/prompts/orch-gone.md (its command no longer exists; update removes it and keeps a backup)"
+run update --source "$repo_root" --home "$home" --hosts codex || fail "update with a current skill"
+cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "update left the outdated prompt"
+test ! -e "$home/.codex/prompts/orch-gone.md" || fail "update left the orphan prompt"
+run check --source "$repo_root" --home "$home" --hosts codex || fail "check after update with a current skill"
+# each alone must trigger the repair
+home="$tmp/h12a"; run install --source "$repo_root" --home "$home" --hosts codex || fail "stage h12a"
+cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-start.md"
+run update --source "$repo_root" --home "$home" --hosts codex || fail "update with only an outdated prompt"
+cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "an outdated prompt alone did not trigger the repair"
+home="$tmp/h12b"; run install --source "$repo_root" --home "$home" --hosts codex || fail "stage h12b"
+cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-gone.md"
+run update --source "$repo_root" --home "$home" --hosts codex || fail "update with only an orphan"
+test ! -e "$home/.codex/prompts/orch-gone.md" || fail "an orphan alone did not trigger the removal"
 
 echo "host tests: pass"

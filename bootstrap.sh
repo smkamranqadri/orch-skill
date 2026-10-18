@@ -22,8 +22,9 @@ Options:
   --ref <git-ref>    Git ref to install from. Defaults to main. Also ORCH_SKILL_REF.
   --source <path>    Local source repo root. Skips the clone.
   --home <dir>       Home directory to install into. Defaults to $HOME.
-  --force            install: replace an existing install, and a different
-                     ~/.claude/agents/<name>.md (a copy is kept in ~/.agents/).
+  --force            install: replace an existing install, a different
+                     ~/.claude/agents/<name>.md, and a Codex or Command Code prompt that orch
+                     did not ship (a copy is kept in ~/.agents/).
   --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
   --only <name>      Act on one skill only (orch). Repeatable.
   --hosts <list>     Hosts to wire orch commands into besides Claude: auto (default: those
@@ -208,7 +209,7 @@ case "$command_name" in
   install)
     args=("${install_args[@]}")
     [[ "$force" == "true" ]] && args+=(--force)
-    [[ "$force" == "true" ]] && args+=(--force-agents)
+    [[ "$force" == "true" ]] && args+=(--force-agents --force-prompts)
     "$source_root/scripts/install-skill.sh" "${args[@]}"
     [[ "$herdr_check" == "true" ]] && herdr_doctor || true
     ;;
@@ -247,7 +248,12 @@ case "$command_name" in
         case "$status" in
           current) echo "$label already current: $path" ;;
           missing) echo "$label missing: $path"; rc=1 ;;
-          differs) echo "$label differs: $path (update replaces a plain file)"; rc=1 ;;
+          stale) echo "$label outdated: $path (a shipped older copy; update replaces it and keeps a backup)"; rc=1 ;;
+          orphan) echo "$label stale: $path (its command no longer exists; update removes it and keeps a backup)"; rc=1 ;;
+          differs)
+            if [[ "$host" == agy ]]; then echo "$label differs: $path (existing path kept)"
+            else echo "$label differs: $path (not shipped by orch; kept; install --force replaces it)"; fi
+            rc=1 ;;
         esac
       done <<<"$report"
       while IFS=$'\t' read -r host kind path status; do
@@ -279,7 +285,7 @@ case "$command_name" in
       "$source_root/scripts/install-skill.sh" "${args[@]}"
     fi
     # Wiring and retirement: repair whatever the report shows missing, different or leftover.
-    if selected orch && grep -q -E $'\t(missing|differs|ours)$' <<<"$(wiring_report)"; then
+    if selected orch && grep -q -E $'\t(missing|stale|orphan|ours)$' <<<"$(wiring_report)"; then
       args=(--source "$source_root" --home "$home_dir" --hosts "$hosts" --wire-only)
       [[ "$claude_link" == "false" ]] && args+=(--no-claude-link)
       "$source_root/scripts/install-skill.sh" "${args[@]}"
