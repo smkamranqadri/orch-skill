@@ -24,7 +24,7 @@ Loaded in Agents mode only; `SKILL.md` points here.
   agents (`name,pane,status,model,cwd`) and panes (`pane,label,cwd,agent`), one row each, sorted
   by the first field. Read this instead of the full Herdr agent or pane list JSON: it is about
   12.6k chars a call. A named target exits 2 when it is not live.
-- `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see SKILL.md, the ledger rule).
+- `scripts/orch-dir.sh [--check] [repo]`: prints the run dir (see SKILL.md, the ledger rule).
 - `scripts/orch-usage.py collect|show|line|check <kind>`: each CLI's 5-hour and weekly plan
   usage with reset times (claude from the Claude Code statusline cache, codex from its
   app-server, cmd from its statusline cache while under five minutes old, with optional

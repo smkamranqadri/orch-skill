@@ -65,9 +65,7 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
 --orch <your pane id>` and record the owner in their ledger rows.
 
 1. Run dir: `$ARGUMENTS`, or `D=$(~/.agents/skills/orch/scripts/orch-dir.sh)` from the repo
-   root. It creates `.orch/` (excluded from git) or, while an old `../<repo>.reports/orch/`
-   run exists, names that one and creates nothing; migrate only when the user asks
-   (`orch-dir.sh --migrate`). Read the ledger `$D/ledger.md`. A `Ledger: minimal` ledger is
+   root. It creates `.orch/` (excluded from git). Read the ledger `$D/ledger.md`. A `Ledger: minimal` ledger is
    upgraded: copy `ledger-template.md` over it, keeping Task as the first Next action and
    moving its Decisions and Done into the matching sections.
    A ledger marked `Run closed <date>` belongs to a finished run: archive it with

@@ -25,25 +25,23 @@ test ! -e "$tmp/proj.wt/feat/.orch" || fail "worktree got its own .orch"
 mkdir -p "$tmp/proj.wt/feat/.orch" && touch "$tmp/proj.wt/feat/.orch/x"
 [[ -z "$(git -C "$tmp/proj.wt/feat" status --short)" ]] || fail ".orch visible in worktree git status (exclude not shared)"
 
-# 3. legacy run wins while it exists; --check creates nothing
+# 3. a ../<repo>.reports/orch run beside the repo is ignored; --check creates nothing
 mkdir -p "$tmp/old" && git -C "$tmp/old" init -q
-mkdir -p "$tmp/old.reports/orch" "$tmp/old.reports/agent-a" && echo "# ledger" > "$tmp/old.reports/orch/ledger.md" && echo brief > "$tmp/old.reports/agent-a/brief-x.md"
-out="$("$S" --check "$tmp/old" 2>/dev/null)"
-[[ "$out" == "$tmp/old.reports/orch" ]] || fail "legacy not detected by --check: $out"
+mkdir -p "$tmp/old.reports/orch" && echo "# ledger" > "$tmp/old.reports/orch/ledger.md"
+out="$("$S" --check "$tmp/old")"
+[[ "$out" == "$tmp/old/.orch" ]] || fail "--check used a ../old.reports run: $out"
 test ! -e "$tmp/old/.orch" || fail "--check created .orch"
-out="$("$S" "$tmp/old" 2>/dev/null)"
-[[ "$out" == "$tmp/old.reports/orch" ]] || fail "legacy not used: $out"
-test ! -e "$tmp/old/.orch" || fail "use created .orch beside a legacy run"
+out="$("$S" "$tmp/old")"
+[[ "$out" == "$tmp/old/.orch" ]] || fail "use followed a ../old.reports run: $out"
+test -d "$tmp/old/.orch" || fail ".orch not created beside a ../old.reports run"
+grep -qxF '.orch/' "$tmp/old/.git/info/exclude" || fail "exclude entry missing"
+test -f "$tmp/old.reports/orch/ledger.md" || fail "old.reports run was touched"
 
-# 4. migrate moves ledger and agent folders, then the new dir is used
-out="$("$S" --migrate "$tmp/old" 2>/dev/null)"
-[[ "$out" == "$tmp/old/.orch" ]] || fail "migrate dir: $out"
-test -f "$tmp/old/.orch/ledger.md" || fail "ledger not moved"
-test -f "$tmp/old/.orch/agent-a/brief-x.md" || fail "agent folder not moved"
-test ! -e "$tmp/old.reports" || fail "legacy parent not removed"
-grep -qxF '.orch/' "$tmp/old/.git/info/exclude" || fail "exclude after migrate"
-[[ "$("$S" "$tmp/old")" == "$tmp/old/.orch" ]] || fail "new dir not used after migrate"
-if "$S" --migrate "$tmp/old" >/dev/null 2>&1; then fail "second migrate should fail"; fi
+# 4. unknown flags fail clearly instead of being taken as a path
+for flag in --migrate --bogus; do
+  if err="$("$S" "$flag" "$tmp/old" 2>&1 >/dev/null)"; then fail "$flag should fail"; fi
+  [[ "$err" == "Error: unknown option: $flag"* ]] || fail "$flag message: $err"
+done
 
 # 5. not a git repo: .orch under the path, no exclude needed
 mkdir -p "$tmp/plain"
