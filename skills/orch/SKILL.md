@@ -118,6 +118,7 @@ Agents mode loads these; none is read outside it.
 - `references/tools.md`: every script and `orch-watch.py` subcommand, the sub-agents, `events.log`.
 - `references/placement.md`: where work runs (sub-agent, new worktree pane, tab, helper pane).
 - `references/runtimes.md`: per agent kind (claude, codex, cmd, agy): start, prompt, models.
+- Model matrix: `scripts/orch-models.py pick <job>` proposes harness, model and effort from the user's `~/.agents/orch/models.md` (else `references/models.md`); `commands/models.md` rebuilds it.
 - `references/brief-rules.md`: the standing rules every brief carries.
 - `references/design.md`: the design stream. `references/visibility.md`: marks and check rules.
 - Handoff packets: `<dir>/handoff-<date>-<n>.md`.
