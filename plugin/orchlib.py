@@ -214,7 +214,7 @@ def close_agent(a):
             if ws:
                 herdr("worktree","remove","--workspace",ws); agent["created"].remove(f"worktree:{ws}"); save_registry(registry_path(),d)
             if f"branch:{agent['branch']}" in agent.get("created",[]):
-                p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=agent["project"],text=True,capture_output=True)
+                p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=os.getcwd(),text=True,capture_output=True)
                 if p.returncode: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")
                 agent["created"].remove(f"branch:{agent['branch']}"); save_registry(registry_path(),d)
         agent.update(state="closed",status="closed"); deliver(d)
