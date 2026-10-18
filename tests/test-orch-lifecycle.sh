@@ -32,12 +32,25 @@ has "$orch/SKILL.md" "\`start\` moves State's"
 has "$orch/SKILL.md" 'Codex: `/prompts:orch-start`; Command Code: `/orch-start`'
 # 6. exit 2 with kis/ present is offered the install; pointer off is recorded in the ledger and read
 #    by event and close; the helper still reports exit 2 for a repo with kis/ and no package
-has "$orch/commands/start.md" 'or exit 2 with `kis/` present (no `.agents/skills/kis`): offer that repo'"'"'s'
+has "$orch/commands/start.md" 'or exit 2 with `kis/` present (no `.agents/skills/kis`): before offering, read'
 has "$orch/commands/start.md" 'put `State pointer: off (KIS <version>)` on the line under `Updated:`'
 has "$orch/commands/event.md" 'the ledger has no `State pointer: off` line'
 has "$orch/commands/close.md" 'A ledger with a `State pointer: off` line means State is not touched.'
 has "$orch/SKILL.md" 'notes `State pointer: off (KIS <version>)` under `Updated:` in the'
 has "$orch/SKILL.md" '(`orch-kis-version.sh` exit 2) is offered the same install.'
+# 7. a finished run does not leak into the next one (start renames a ledger marked Run closed and
+#    starts from the template; close also runs for a live watcher; step 1.1 reads the pointer-off line)
+has "$orch/commands/start.md" 'A ledger marked `Run closed <date>` belongs to a finished run: rename it `ledger-<date>.md`'
+has "$orch/commands/start.md" 'the template without the old `Run closed` or `State pointer:` lines.'
+has "$orch/commands/start.md" 'marked `Run closed`; a `State pointer: off (KIS <v>)` line whose `<v>` is the version the'
+has "$orch/commands/start.md" 'script printed (`none` for exit 2) means the user already declined this: skip the offer and'
+has "$orch/commands/start.md" 'step 1.1'
+has "$orch/commands/close.md" 'minimal`) not yet marked `Run closed`, or `<D>/watcher.pid` names a live process'
+has "$orch/commands/close.md" 'and put `Run closed <date>` on its'
+# 8. a declined exit 2 has no KIS start step to run
+has "$orch/commands/start.md" 'Declined at exit 2 there is no KIS start step to'
+has "$orch/commands/start.md" 'Next, report them, propose the mode as step 3 does, and skip step 2.'
+has "$orch/commands/start.md" 'unchanged (not after a'
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/kisdir/kis/state"; echo x > "$tmp/kisdir/kis/state/current.md"
 out="$("$orch/scripts/orch-kis-version.sh" "$tmp/kisdir")" && rc=0 || rc=$?
@@ -48,4 +61,8 @@ a="$({ python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline || true;
 sed -i '2a State pointer: off (KIS 0.10.1)' "$tmp/led/ledger.md"
 b="$({ python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline || true; } | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
 [[ "$a" == "$b" ]] || fail "the pointer-off header line changed check output"
+sed -i '3a Run closed 2031-01-05' "$tmp/led/ledger.md"
+c="$({ python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline || true; } | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
+[[ "$a" == "$c" ]] || fail "the Run closed header line changed check output"
+sed -n 1,5p "$tmp/led/ledger.md" | grep -q -x 'Run closed 2031-01-05' || fail "the Run closed line is not under the header"
 echo "ok: lifecycle"
