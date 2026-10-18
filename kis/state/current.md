@@ -1,5 +1,6 @@
 # Current
 
+- Stamp: main fe8380a be32462f93a8
 - Branch: `main`. Source: orch 0.10.0, session-close 1.0.2, vendored KIS 0.11.0 (byte-identical
   to tag v0.11.0, vendored from GitHub 2026-10-18).
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
