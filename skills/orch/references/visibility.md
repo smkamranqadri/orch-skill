@@ -62,9 +62,9 @@ guesses). `--offline` skips the owner-pane liveness check.
 | `next-action` | a registered owner has no `Next action (<owner>):` line, or it is empty |
 | `plan-review` | a `Ledger: minimal` ledger names a written `Plan:` but its `Plan review:` lacks `outcome: ready` (minimal ledgers are checked for this, `ledger-length` and `next-action` only; they have no watcher) |
 | `no-row` | a registered agent has no row in Pane agents |
-| `row-unregistered` | a row not `closed` or `gone` whose agent is not registered |
+| `row-unregistered` | a row not `closed`, `gone` or `queued: after <task>` whose agent is not registered |
 | `not-closed` | the row says done/merged/verified, or the latest mark is verified/merged, and it is neither `closed` nor `open: next cycle` |
-| `watcher` | the Watcher line's pid is dead, or its agents differ from agents.txt |
+| `watcher` | agents are registered and `<dir>/watcher.pid` is missing or its pid is dead (an old ledger's `## Watcher` section is ignored) |
 | `owner-dead` | an owner pane is not live |
 | `log` | events.log has lines outside its grammar (hand-written lines, a date without a time zone), counted with the first example |
 
