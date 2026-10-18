@@ -25,7 +25,8 @@ prompt can carry several agents.
    - finished with a report: verify it when the user has asked for a
      merge; otherwise record it and tell the user in one line.
    - **Diff review before any merge.** The reviewer is a different agent on a different model than the
-     builder (the same host is fine). It reads `git diff <fork point>..<branch tip>` and the
+     builder (the same host is fine; `review` refuses the builder's own model under any spelling,
+     and a name not in the model matrix: use `host/model` from `orch-models.py show`). It reads `git diff <fork point>..<branch tip>` and the
      brief; on its verdict record it:
      `python3 ~/.agents/skills/orch/scripts/orch-gate.py review <dir> <agent> --repo <worktree> --range <fork point>..<tip> --author <cli/model> --reviewer <cli/model> --verdict pass|fail`
      (a fail is `sent-back`: re-prompt the builder, then review again). Immediately before the
@@ -51,7 +52,8 @@ prompt can carry several agents.
    - `herdr agent prompt <agent> "/exit"`, then `herdr worktree remove --workspace <ws>` (merged
      work only; with unmerged commits, keep the worktree and say so), and `git branch -d <branch>`
      (never `-D`).
-   - Ledger: row status "closed", with the merge commit. Mark it: `merged` when it merged,
+   - Ledger: row status "closed, merged <short sha>" (the gate reads "merged" to release tasks that
+     depend on it; an abandoned stream is "closed: abandoned"). Mark it: `merged` when it merged,
      then `closed` after the remove; a multi-cycle stream gets `open` ("next cycle: <what>")
      instead, which holds the not-closed rules off until its next state change.
    Before ending any event turn run `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` and fix
@@ -70,7 +72,8 @@ prompt can carry several agents.
    After a merge, release held work: `python3 ~/.agents/skills/orch/scripts/orch-gate.py release <dir> --apply`.
    For each `release <name>`: launch it by `commands/task.md` steps 4 to 8 from the brief in its
    row (the row's status becomes `working`, its last event "released: <blocker> merged"). A
-   `hold <name> after <task>` stays queued; `--apply` already rewrote its blocker.
+   `hold <name> after <task>` stays queued; `--apply` already rewrote its blocker. A
+   `hold <name>: dependency <task> ended unmerged` line: tell the user in your reply; do not launch.
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.
    Then end the turn. Never wait in the foreground for the next event: the watcher will
    prompt again.

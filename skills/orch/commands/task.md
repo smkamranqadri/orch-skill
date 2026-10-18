@@ -60,14 +60,18 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    starting there.
    **Gate (after 3, before any worktree or pane).** Every task that writes files (not a read-only
    `--sub` type) passes the split gate. Fill the row's `depends` (task names that must merge
-   first) and `owns` (paths or globs it writes), then run
+   first) and `owns` (paths or globs it writes; `none` for a pane agent that writes nothing, such
+   as a diff reviewer: it never holds another task and `admit --owns none` runs it now; an empty
+   cell would hold everything), then run
    `python3 ~/.agents/skills/orch/scripts/orch-gate.py admit <dir> <agent> --owns "<paths>" [--depends "<tasks>"]`
    (`<dir>` = the run dir). Exit 0, `run`: continue at step 4. Exit 3, `queue` (a dependency has not
-   merged) or `sequential` (owned paths overlap an active task, or the active task records none):
+   merged), `sequential` (owned paths overlap an active task, or its `owns` cell is empty), or
+   `hold` (a dependency ended unmerged, `closed` without a merge or `gone`: tell the user, who
+   decides; it never launches by itself):
    add the row with the `status:` line it printed (`queued: after <task>`), `depends` and `owns`
    filled, the brief written, kind/model as planned, no pane, no worktree, no watcher
    registration; set Next action to the release, tell the user which task holds it and why, and
-   end the turn. Exit 2 (unknown dependency, unreadable ledger): fix the row and run it again.
+   end the turn. Exit 2 (unknown dependency, unreadable ledger, no `--owns`): fix the row and run it again.
    A `--place tab` stream on a worktree owns the same paths, so it is always sequential. The
    queued task starts later from `commands/event.md` (its release step) at step 4 below, from its
    saved brief; re-run `admit` first only if its `owns` changed.
