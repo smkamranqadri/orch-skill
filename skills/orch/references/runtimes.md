@@ -1,7 +1,7 @@
 # Runtimes: one row per agent kind
 
 Orch drives agents through Herdr panes. Each kind starts, is prompted and reports its model
-differently, and the owner's model policy (preference 29 and its 2026-10-09 refinement) differs
+differently, and the owner's model policy (refined 2026-10-09) differs
 per kind. `task` picks the row from `--kind`, and `scripts/orch-model.sh <agent> <model>` reads
 the live model back after start; a mismatch is fixed before the first prompt.
 

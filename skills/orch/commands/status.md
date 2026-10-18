@@ -16,6 +16,8 @@ Answer "what is pending, what is building, are the agents working" from one file
 1. `D=$(~/.agents/skills/orch/scripts/orch-dir.sh --check 2>/dev/null)` unless given; then
    read the ledger header and every `Next action (<owner>):` line, Waiting on user and Parked.
    Do not assume a fixed header length when several owners share the run.
+   A `Ledger: minimal` ledger has no agents: print Task, Next action and Plan review, run
+   `orch-watch.py check <dir>`, and stop.
 2. `python3 ~/.agents/skills/orch/scripts/orch-watch.py board <dir>`: the usage line, each
    agent's live state, since when, owner, context use and task, and the last five events. When the
    user asks about usage or limits, add `orch-usage.py show` (one line per CLI with reset times
