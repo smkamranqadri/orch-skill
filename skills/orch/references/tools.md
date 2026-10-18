@@ -30,8 +30,8 @@ Loaded in Agents mode only; `SKILL.md` points here.
   app-server, cmd from its statusline cache while under five minutes old, with optional
   `CMD_API_KEY` fallback). Usage decides the kind first: `task` starts the
   agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
-  user when no candidate is clearly available. The watcher shows usage on the board and the
-  ledger header carries the line.
+  user when no candidate is clearly available. `board` and the board plugin show usage from the
+  cache, and the ledger header carries the line.
 - `scripts/orch-watch.py`: one watcher per repo run, headless; it sleeps on the plugin's
   `events.signal` file (Herdr events) and re-reads Herdr's agent list on every wake and every 60 s.
   `add <dir> <agent>... --orch <owner>` registers agents; bare lines fall back to
