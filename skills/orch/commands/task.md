@@ -21,8 +21,8 @@ the default), in a new tab on an existing worktree (`--place tab <workspace>`, a
 on the same branch that never runs at the same time), or a helper pane (`--place pane`, not an
 agent). Say the home in the ledger row.
 
-**Sub-agent route (`--sub`).** Steps 1 to 3 as below (source, brief, usage check for claude),
-then: call the `Agent` tool with that type, in the background, for `worker` with
+**Sub-agent route (`--sub`).** Steps 1 to 3 and the gate as below (source, brief, usage check for
+claude; a `worker` passes the gate, its row is in the Sub-agents table), then: call the `Agent` tool with that type, in the background, for `worker` with
 `isolation: "worktree"` (its working directory is then its own worktree, never main's
 checkout; an Agent-tool sub-agent otherwise starts where the orchestrator sits), with the same
 pointer prompt as step 6 plus "reply with the report and, if you changed files, your worktree
@@ -58,6 +58,19 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    clearly available (every candidate is 3 or 2), show `orch-usage.py show` and ask the user,
    with a recommendation. A kind the user named still gets the check; at exit 3, ask before
    starting there.
+   **Gate (after 3, before any worktree or pane).** Every task that writes files (not a read-only
+   `--sub` type) passes the split gate. Fill the row's `depends` (task names that must merge
+   first) and `owns` (paths or globs it writes), then run
+   `python3 ~/.agents/skills/orch/scripts/orch-gate.py admit <dir> <agent> --owns "<paths>" [--depends "<tasks>"]`
+   (`<dir>` = the run dir). Exit 0, `run`: continue at step 4. Exit 3, `queue` (a dependency has not
+   merged) or `sequential` (owned paths overlap an active task, or the active task records none):
+   add the row with the `status:` line it printed (`queued: after <task>`), `depends` and `owns`
+   filled, the brief written, kind/model as planned, no pane, no worktree, no watcher
+   registration; set Next action to the release, tell the user which task holds it and why, and
+   end the turn. Exit 2 (unknown dependency, unreadable ledger): fix the row and run it again.
+   A `--place tab` stream on a worktree owns the same paths, so it is always sequential. The
+   queued task starts later from `commands/event.md` (its release step) at step 4 below, from its
+   saved brief; re-run `admit` first only if its `owns` changed.
 4. Home: by `--place`. `worktree` (default), if the agent has no row with a worktree:
    `herdr worktree create --cwd "$PWD" --branch <slug> --base main --path ../<repo>.wt/<slug>
    --label <agent> --no-focus`; keep the workspace and pane ids from the JSON. `tab`: `herdr tab
