@@ -2,7 +2,7 @@
 name: orch
 description: "Front door for any repo, on any host. With kis/ it runs KIS's start step and adds one mode, Agents; without kis/ it installs KIS or keeps a minimal ledger. Agents mode runs a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own Herdr pane that wakes the orchestrator when an agent finishes (it never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user starts a session, asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator."
 metadata:
-  version: "0.11.0"
+  version: "0.11.1"
 ---
 
 # Orchestrator (orch)
