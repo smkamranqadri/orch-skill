@@ -122,9 +122,9 @@ else: print(json.dumps({"result":{}}))
   self.assertEqual(self.env['HOME'],str(self.userhome)); self.assertEqual(self.env['GIT_CONFIG_GLOBAL'],str(self.userhome/'gitconfig')); self.assertEqual(self.env['GIT_CONFIG_SYSTEM'],os.devnull)
   self.assertTrue(all(name not in self.env for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT')))
  def test_list_role_idle_filters(self):
-  self.reg(); self.spawn(); self.spawn('working-review','pane'); d=self.state(); d['agents']['session-a/worker']['status']='idle'; d['agents']['session-a/working-review']['role']='review'; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.reg(); self.spawn(); self.spawn('working-review','pane'); d=self.state(); d['agents']['session-a/worker']['status']='idle'; d['agents']['session-a/working-review']['role']='build'; (self.home/'orch/registry.json').write_text(json.dumps(d))
   p=self.runcli('list','--idle','--role','build'); self.assertEqual(p.stdout.splitlines(),['build\tworker\tidle\tpane'])
-  p=self.runcli('list','--idle','--role','review'); self.assertEqual(p.stdout,'')
+  p=self.runcli('list','--idle','--role','explore'); self.assertEqual(p.stdout,'')
  def test_cli_retries_queue_only_when_orch_is_idle_or_done(self):
   self.reg(); d=self.state(); d['orchs']['session-a/p1']['queue']=['[orch] reviewer done · pane p2 · read: herdr agent read reviewer']; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('list',env=self.env|{'ORCH_STATUS':'working'}); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],['[orch] reviewer done · pane p2 · read: herdr agent read reviewer'])
@@ -145,6 +145,14 @@ else: print(json.dumps({"result":{}}))
   self.reg(); e=self.env|{'FAIL_START':'1','FAIL_CLOSE':'newpane'}; self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
   agent=self.state()['agents']['session-a/broken']; self.assertEqual(agent['state'],'cleanup'); self.assertEqual(agent['created'],['pane:newpane'])
   self.runcli('close','broken'); self.assertEqual(self.state()['agents']['session-a/broken']['state'],'closed')
+ def test_failed_worktree_rollback_keeps_branch_for_retry(self):
+  self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); e=self.env|{'FAIL_START':'1','FAIL_WORKTREE_REMOVE':'1'}
+  self.runcli('spawn','broken-writer','--role','build','--kind','claude','--where','worktree','--brief',str(self.root/'brief.txt'),ok=False,env=e)
+  agent=self.state()['agents']['session-a/broken-writer']; self.assertEqual(agent['state'],'cleanup'); self.assertIn('branch:orch/broken-writer',agent['created']); self.assertIn('worktree:wtws',agent['created'])
+  branch=subprocess.run(['git','-C',str(self.repo),'branch','--list','orch/broken-writer'],text=True,capture_output=True,env=self.env); self.assertEqual(branch.stdout.strip(),'+ orch/broken-writer')
+  self.runcli('close','broken-writer'); self.assertEqual(self.state()['agents']['session-a/broken-writer']['state'],'closed')
+  branch=subprocess.run(['git','-C',str(self.repo),'branch','--list','orch/broken-writer'],text=True,capture_output=True,env=self.env); self.assertEqual(branch.stdout,'')
+  self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
  def test_partial_close_resumes_successful_steps(self):
   self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber',ok=False,env=self.env|{'FAIL_CLOSE':'tabpane'})
   a=self.state()['agents']['session-a/tabber']; self.assertEqual(a['created'],['pane:tabpane']); self.assertTrue(a['stopped'])
@@ -152,6 +160,11 @@ else: print(json.dumps({"result":{}}))
  def test_spawn_failure_rolls_back_created_resources(self):
   self.reg(); e=self.env|{'FAIL_START':'1'}; p=self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
   self.assertNotIn('session-a/broken',self.state()['agents']); self.assertIn(['pane','close','--pane','newpane'],self.calls())
+ def test_worktree_start_failure_removes_branch_without_force(self):
+  self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); self.runcli('spawn','broken-writer','--role','build','--kind','claude','--where','worktree','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_START':'1'})
+  self.assertNotIn('session-a/broken-writer',self.state()['agents'])
+  branch=subprocess.run(['git','-C',str(self.repo),'branch','--list','orch/broken-writer'],text=True,capture_output=True,env=self.env); self.assertEqual(branch.stdout,'')
+  self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
  def test_close_worktree_preflight_does_not_stop(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'untracked-fictional.txt').write_text('unsaved')
   n=len(self.calls()); p=self.runcli('close','writer',ok=False); self.assertIn('dirty paths: ?? untracked-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
