@@ -917,7 +917,7 @@ def minimal_findings(d):
         out.append(("run", "next-action", "no 'Next action:' line, or it is empty"))
     plan = field.get("Plan", "none")
     if plan.lower() not in ("", "none"):
-        if not re.search(r"\boutcome: ready\b", field.get("Plan review", "")):
+        if not re.search(r"\boutcome:\s*(ready|waived)\s*(;|$)", field.get("Plan review", "")):
             out.append(("run", "plan-review",
                         f"written plan {plan} has no recorded review with 'outcome: ready'; review it before implementing"))
     return out

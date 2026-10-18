@@ -35,10 +35,13 @@ State ("pointer off").
 
 **Minimal ledger** (no KIS, no agents): `ledger-minimal-template.md` holds Task, Next action,
 Plan and Plan review, Decisions, Done; no pane, owner or watcher fields. `orch-watch.py check`
-accepts it without a watcher. A written plan is reviewed before implementation (reviewer a
-different CLI than the author; harness, model and effort proposed to the user); the ledger
-records `Plan review: <reviewer>; outcome: ready|rework; <date>`, and `check` reports
-`[plan-review]` until it says `ready`; `start` does not implement while it does.
+accepts it without a watcher. The template ships `Plan: none` and `Plan review: none`.
+Fast-mode work (a small, obvious fix) writes no plan. A plan written for Standard or Phase work is reviewed
+before implementation: the reviewer (a different CLI than the author; harness, model and effort)
+is proposed to the user and launched only after approval, never on your own. The ledger records
+`Plan review: <reviewer>; outcome: ready|rework; <date>`, and `check` reports `[plan-review]`
+until it says `ready` (or `waived` by the user). A review that cannot run is recorded as
+`blocked` and the user is asked: review later, waive, or stop. `start` does not implement meanwhile.
 
 ## State contract (Agents mode in a KIS >= 0.11 repo, not "pointer off")
 
