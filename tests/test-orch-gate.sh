@@ -117,6 +117,15 @@ run admit "$d" e --owns 'z/**' --depends b;        eq "$rc|$(verdict)" '3|hold' 
 echo "$out" | grep -q '^hold: dependency b ended unmerged; ask the user$' || fail "admit hold message: $out"
 sed -i 's/| closed: report kept |/| closed, merged abc1234 |/' "$d/ledger.md"
 run release "$d";                                  eq "$out" 'release c' "closed after a merge releases"
+sed -i 's/| closed, merged abc1234 |/| closed: merged abc1234 |/' "$d/ledger.md"
+run release "$d";                                  eq "$out" 'release c' "closed: merged releases"
+for neg in 'closed: not merged' 'closed, never merged; abandoned'; do
+  sed -i "s/^\(| b .*\)| closed[^|]* |/\1| $neg |/" "$d/ledger.md"
+  run admit "$d" e --owns 'z/**' --depends b;      eq "$rc|$(verdict)" '3|hold' "admit holds on '$neg'"
+  echo "$out" | grep -q '^hold: dependency b ended unmerged; ask the user$' || fail "negated '$neg' admit message: $out"
+  run release "$d";                                eq "$out" 'hold c: dependency b ended unmerged; ask the user' "release holds on '$neg'"
+done
+sed -i 's/^\(| b .*\)| closed[^|]* |/\1| closed, merged abc1234 |/' "$d/ledger.md"
 sed -i 's/| closed, merged abc1234 |/| merged |/' "$d/ledger.md"
 run release "$d";                                  eq "$out" 'release c' "merged releases"
 # a dependency that is itself queued still blocks

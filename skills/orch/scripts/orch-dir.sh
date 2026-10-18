@@ -10,11 +10,17 @@ set -euo pipefail
 
 common=""
 mode="use"
-case "${1:-}" in
-  --check) mode="check"; shift ;;
-  -*) echo "Error: unknown option: $1 (usage: orch-dir.sh [--check] [repo-path])" >&2; exit 2 ;;
-esac
-start="${1:-$PWD}"
+usage="usage: orch-dir.sh [--check] [repo-path]"
+start=""
+for arg in "$@"; do
+  case "$arg" in
+    --check) mode="check" ;;
+    -*) echo "Error: unknown option: $arg ($usage)" >&2; exit 2 ;;
+    *) [[ -z "$start" ]] || { echo "Error: more than one path: $arg ($usage)" >&2; exit 2; }
+       start="$arg" ;;
+  esac
+done
+start="${start:-$PWD}"
 [[ -d "$start" ]] || { echo "Error: no such directory: $start" >&2; exit 1; }
 
 # The run dir belongs to the repository, not to one worktree: resolve the main checkout from
