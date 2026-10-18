@@ -698,7 +698,7 @@ class TemplateTests(Base):
             for needle in needles:
                 self.assertIn(needle, text, f'{name} lacks {needle!r}')
         skill = (ROOT / 'skills/orch/SKILL.md').read_text()
-        self.assertIn('version: "0.11.1"', skill)
+        self.assertIn('version: "0.12.0"', skill)
         tools = (ROOT / 'skills/orch/references/tools.md').read_text()
         self.assertIn('references/tools.md', skill)
         for needle in ('orch-watch.py mark', 'orch-watch.py check', 'orch-watch.py show', 'orch-watch.py stats',
