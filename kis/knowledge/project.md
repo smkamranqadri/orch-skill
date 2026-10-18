@@ -63,11 +63,11 @@ orchestrator kind; ask when no candidate is clearly available, and never choose 
 
 ## Live install
 
-`~/.agents/skills/orch` and `~/.agents/skills/session-close` come from this repo
-(`bootstrap.sh update --source .`); `~/.claude/commands/orch` links to the orch commands. The
+`~/.agents/skills/orch` comes from this repo (`bootstrap.sh update --source .`; the installer
+removes the retired session-close); `~/.claude/commands/orch` links to the orch commands. The
 `designer` sub-agent in `~/.claude/agents/designer.md` points at `references/design.md` and
-`scripts/design-pages.py`. The tartib run (ledger at `../tartib.reports/orch`, Command Code
-orchestrator) still uses the legacy layout; `orch-dir.sh --migrate` moves it when the owner says.
+`scripts/design-pages.py`. The run dir is `<repo>/.orch` only (orch 0.12.1 dropped the legacy
+`../<repo>.reports/orch` and `--migrate`); the owner's old runs sit in `<repo>/.orch/run-legacy/`.
 
 ## Watcher owners (orch 0.9.0)
 

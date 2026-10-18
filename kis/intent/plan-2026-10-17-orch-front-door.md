@@ -1,6 +1,6 @@
 # Plan: orch as the global front door (path B, after lore 1.0.0)
 
-Status: APPROVED 2026-10-17 by the owner; phases 0-1 done; reviewed again 2026-10-18 (Review section). Phase mode. Current status and proof live in State.
+Status: APPROVED 2026-10-17 by the owner; phases 0-4 done; reviewed again 2026-10-18 (Review section). Phase mode. Current status and proof live in State.
 
 Goal: one global pair, `orch:start` and `orch:close`, usable in any repo on Claude Code, Codex,
 Command Code (cmd) and agy, with the same layer on each. KIS stays the project memory when a repo
@@ -216,6 +216,7 @@ Accept: tests green; a live run (one Claude, one Codex agent, scratch repo, test
 wake, mark, review, merge in events.log, and a fresh session recovers the run from State + ledger.
 
 ### Phase 4: legacy cleanup
+Status: done 2026-10-18 (moves by hand, delete nothing; legacy path removed in 091c41d, review fixes 5dfac31, orch 0.12.2).
 - Per legacy folder: drain or persist the watcher's pending wakes, stop the old watcher and verify
   it is gone [2.1]; list contents and what is kept; move to `<repo>/.orch/` repairing brief,
   handoff and report paths inside the ledger and in every KIS file or kept artifact citing them
