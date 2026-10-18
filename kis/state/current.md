@@ -1,6 +1,6 @@
 # Current
 
-- Stamp: main 0cf718a be32462f93a8
+- Stamp: main af8dade be32462f93a8
 - Branch: `main`. Source: orch 0.10.0, session-close 1.0.2, vendored KIS 0.11.0 (byte-identical
   to tag v0.11.0, vendored from GitHub 2026-10-18).
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
@@ -14,8 +14,12 @@
   `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
   Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
   model; the same host is fine. Picks come from `kis/knowledge/models.md`.
-- Next: phase 2 (front door and close), starting with the interactive baseline. Propose
-  builder and reviewer per kis/knowledge/models.md before launching.
+- Next: phase 2 in progress. Interactive baseline done 2026-10-18 (kis/knowledge/start-cost.md);
+  owner approved the coordinator answering permission and trust prompts in the test home only
+  (this baseline and its phase 5 rerun), never owner questions. Builders in Herdr: A
+  `orch-builder-a` (worktree ../orch-skill.wt/p2-front-door), B `orch-builder-b`
+  (../orch-skill.wt/p2-close-install), Sonnet 5.5 high; briefs in ../orch-skill.wt/briefs/.
+  Review: Opus 5.5 high per branch, then the coordinator merges.
   Follow-ups: lore's harvester records coordinator briefs sent to Herdr agents as owner
   corrections; KIS bootstrap warns "is not a commit" on an annotated tag; the KIS test fixture
   named `tartib` (a real product) predates 0.11 and should get a fictional name.
