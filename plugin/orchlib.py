@@ -125,11 +125,11 @@ def spawn(a):
     require_runtime(); project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
     with locked() as d:
         require_registered(d)
-        if key in d["agents"] and d["agents"][key].get("state") in ("starting","live"): fail(f"agent already exists: {a.name}")
+        if key in d["agents"] and d["agents"][key].get("state") in ("starting","live","cleanup","closing"): fail(f"agent already exists: {a.name}")
         live=herdr("agent","list",check=False) or {}
         if a.name in agent_names(live): fail(f"agent already exists in Herdr: {a.name}")
         destination=tree if a.where!="worktree" else str((Path(project)/f"../{Path(project).name}.wt/{a.name}").resolve())
-        if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("starting","live") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
+        if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
         d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False}
         save_registry(registry_path(),d)
         try:

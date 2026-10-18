@@ -145,6 +145,16 @@ else: print(json.dumps({"result":{}}))
   self.reg(); e=self.env|{'FAIL_START':'1','FAIL_CLOSE':'newpane'}; self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
   agent=self.state()['agents']['session-a/broken']; self.assertEqual(agent['state'],'cleanup'); self.assertEqual(agent['created'],['pane:newpane'])
   self.runcli('close','broken'); self.assertEqual(self.state()['agents']['session-a/broken']['state'],'closed')
+ def test_cleanup_reservation_blocks_name_replacement(self):
+  self.reg(); self.runcli('spawn','reserved-name','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_START':'1','FAIL_CLOSE':'newpane'})
+  before=self.state()['agents']['session-a/reserved-name']['created']; calls=self.calls()
+  p=self.runcli('spawn','reserved-name','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False)
+  self.assertEqual(p.stderr.strip(),'orch: agent already exists: reserved-name'); self.assertEqual(self.state()['agents']['session-a/reserved-name']['created'],before); self.assertEqual(self.calls(),calls)
+ def test_cleanup_writer_reservation_blocks_second_writer(self):
+  self.reg(); self.runcli('spawn','uncertain-writer','--role','build','--kind','claude','--where','pane','--writes','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_PROMPT':'1','FAIL_CLOSE':'newpane'})
+  old=self.state()['agents']['session-a/uncertain-writer']; self.assertEqual(old['state'],'cleanup'); self.assertTrue(old['started']); self.assertFalse(old['stopped'])
+  p=self.runcli('spawn','second-writer','--role','build','--kind','claude','--where','pane','--writes','--brief',str(self.root/'brief.txt'),ok=False)
+  self.assertIn('writer already active in tree',p.stderr); self.assertNotIn('session-a/second-writer',self.state()['agents'])
  def test_failed_worktree_rollback_keeps_branch_for_retry(self):
   self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); e=self.env|{'FAIL_START':'1','FAIL_WORKTREE_REMOVE':'1'}
   self.runcli('spawn','broken-writer','--role','build','--kind','claude','--where','worktree','--brief',str(self.root/'brief.txt'),ok=False,env=e)
