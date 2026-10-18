@@ -41,7 +41,9 @@ Herdr hooks (`pane.agent_status_changed`, `pane.closed`) append one line to it p
 `{"ts":<epoch>,"event":<name>,"pane":<id>,"status":<status or null>}`. A change to that file
 wakes the watcher, which then reads Herdr's agent list (its `completion_seq` catches a turn
 shorter than the event debounce). With no event it still reads the list every 60 s, so a missed
-hook costs at most a minute. It truncates the file when it passes 1 MB.
+hook costs at most a minute. It truncates the file when it passes 1 MB. The file is per user, not
+per run: an event in any workspace wakes every running watcher, and each one only reads its own
+agents from Herdr's list.
 
 When an agent finishes, needs the user, or closes, the watcher shows a Herdr notification and
 queues an "orch event" for that agent's owner. Each owner has its own batch, retry timer
