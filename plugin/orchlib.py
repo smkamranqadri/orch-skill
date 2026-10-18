@@ -188,7 +188,7 @@ def close_agent(a):
         if agent.get("state")=="closed":
             deliver(d); return
         wt=agent.get("worktree")
-        if wt and not a.discard and agent.get("state") not in ("cleanup","closing"):
+        if wt and Path(wt).exists() and not a.discard:
             base=subprocess.run(["git","merge-base","--is-ancestor",agent["branch"],"HEAD"],cwd=os.getcwd(),capture_output=True)
             status=subprocess.run(["git","-C",wt,"status","--porcelain","--ignored"],text=True,capture_output=True)
             if base.returncode or status.returncode or status.stdout:

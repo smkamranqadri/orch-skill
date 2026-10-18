@@ -168,6 +168,11 @@ else: print(json.dumps({"result":{}}))
  def test_close_worktree_preflight_does_not_stop(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'untracked-fictional.txt').write_text('unsaved')
   n=len(self.calls()); p=self.runcli('close','writer',ok=False); self.assertIn('dirty paths: ?? untracked-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
+ def test_close_retry_rechecks_checkout_before_destructive_calls(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree'])
+  self.runcli('close','writer',ok=False,env=self.env|{'FAIL_CLOSE':'wtws'}); self.assertEqual(self.state()['agents']['session-a/writer']['state'],'closing')
+  dirty=wt/'retry-dirty-fictional.txt'; dirty.write_text('retain on refusal'); n=len(self.calls())
+  p=self.runcli('close','writer',ok=False); self.assertIn('retry-dirty-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n); self.assertTrue(dirty.exists())
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
