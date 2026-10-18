@@ -44,8 +44,8 @@ out="$("$orch/scripts/orch-kis-version.sh" "$tmp/kisdir")" && rc=0 || rc=$?
 [[ "$out|$rc" == 'kis none|2' ]] || fail "kis/ without a package: expected [kis none|2], got [$out|$rc]"
 # a full ledger with the pointer-off line still checks like one without it
 mkdir -p "$tmp/led"; cp "$repo_root"/tests/fixtures/visibility/* "$tmp/led/"
-a="$(python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
+a="$({ python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline || true; } | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
 sed -i '2a State pointer: off (KIS 0.10.1)' "$tmp/led/ledger.md"
-b="$(python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
+b="$({ python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline || true; } | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
 [[ "$a" == "$b" ]] || fail "the pointer-off header line changed check output"
 echo "ok: lifecycle"

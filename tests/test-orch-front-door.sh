@@ -105,7 +105,7 @@ if grep -nE '/lore:(load|retro)|(^|[^A-Za-z])lore notes|[Rr]ules? [0-9]+|[Pp]ref
 fi
 # --- SKILL.md stays short and carries the new version ---
 lines="$(wc -l < "$orch/SKILL.md")"; (( lines < 150 )) || fail "SKILL.md has $lines lines"
-grep -qE '^  version: "0\.11\.0"$' "$orch/SKILL.md" || fail "SKILL.md version is not 0.11.0"
+grep -qE '^  version: "0\.11\.1"$' "$orch/SKILL.md" || fail "SKILL.md version is not 0.11.1"
 # Herdr is required only in Agents mode: no unconditional stop in SKILL.md.
 if grep -nE '^.*Herdr missing: say so and stop\.' "$orch/SKILL.md"; then fail "unconditional Herdr stop"; fi
 grep -q 'Herdr.*required in Agents mode only' "$orch/SKILL.md" || fail "Agents-only Herdr rule missing"
