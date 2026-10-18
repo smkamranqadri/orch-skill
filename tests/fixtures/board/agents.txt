@@ -1,2 +1,0 @@
-ember orch=wQ:p1
-fern orch=wQ:p1

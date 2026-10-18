@@ -1,1 +1,0 @@
-../../.agents/skills/kis/commands/start.md
