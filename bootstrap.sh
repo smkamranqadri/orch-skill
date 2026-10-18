@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-command install, check and update of the orch and session-close skills into a home.
+# One-command install, check and update of the orch skill into a home, with its commands wired
+# into Claude, Codex, Command Code and agy, and the retired session-close skill removed.
 set -euo pipefail
 
 usage() {
@@ -8,9 +9,12 @@ Usage:
   bootstrap.sh [install|check|update] [options]
 
 Commands:
-  install  Install the skills into ~/.agents/skills (default), then check Herdr.
-  check    Report whether the installed skills differ from the source, then check Herdr.
-  update   Replace the installed skills with the source when they differ (backup kept).
+  install  Install the skills into ~/.agents/skills (default), wire the commands into each host,
+           retire session-close, then check Herdr.
+  check    Report whether the installed skills, the host wiring and the session-close
+           retirement are current, then check Herdr.
+  update   Replace the installed skills with the source when they differ (backup kept), and
+           repair the wiring and the retirement.
   doctor   Check Herdr only: the herdr binary and the Herdr agent skill.
 
 Options:
@@ -21,7 +25,9 @@ Options:
   --force            install: replace an existing install, and a different
                      ~/.claude/agents/<name>.md (a copy is kept in ~/.agents/).
   --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
-  --only <name>      Act on one skill only (orch or session-close). Repeatable.
+  --only <name>      Act on one skill only (orch). Repeatable.
+  --hosts <list>     Hosts to wire orch commands into besides Claude: auto (default: those
+                     installed here), all, none, or a comma list of codex, cmd, agy.
   --with-herdr       Install what the Herdr check finds missing: the binary with the official
                      installer (network), the skill from `herdr --skill` (no network).
   --no-herdr         Skip the Herdr check.
@@ -49,6 +55,7 @@ force="false"
 claude_link="true"
 with_herdr="false"
 herdr_check="true"
+hosts="auto"
 only=()
 
 while [[ $# -gt 0 ]]; do
@@ -60,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --force) force="true"; shift ;;
     --no-claude-link) claude_link="false"; shift ;;
     --only) [[ $# -ge 2 ]] || die "--only requires a skill name"; only+=("$2"); shift 2 ;;
+    --hosts) [[ $# -ge 2 ]] || die "--hosts requires auto, all, none or a list"; hosts="$2"; shift 2 ;;
     --with-herdr) with_herdr="true"; shift ;;
     --no-herdr) herdr_check="false"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -132,7 +140,7 @@ source_root="$(cd "$source_arg" && pwd -P)"
 [[ -n "$home_dir" ]] || die "missing --home <dir> and HOME is unset"
 home_dir="$(mkdir -p "$home_dir" && cd "$home_dir" && pwd -P)"
 
-install_args=(--source "$source_root" --home "$home_dir")
+install_args=(--source "$source_root" --home "$home_dir" --hosts "$hosts")
 [[ "$claude_link" == "false" ]] && install_args+=(--no-claude-link)
 for o in ${only[@]+"${only[@]}"}; do install_args+=(--only "$o"); done
 
@@ -190,6 +198,12 @@ compare_skill_links() {
   done
 }
 
+# Prints the install-skill.sh --report lines: host wiring and session-close leftovers.
+wiring_report() {
+  "$source_root/scripts/install-skill.sh" --source "$source_root" --home "$home_dir" --hosts "$hosts" \
+    $([[ "$claude_link" == "false" ]] && echo --no-claude-link) --report
+}
+
 case "$command_name" in
   install)
     args=("${install_args[@]}")
@@ -221,6 +235,29 @@ case "$command_name" in
         missing) echo "Claude skill link missing: $name"; rc=1 ;;
       esac
     done < <(compare_skill_links)
+    if selected orch; then
+      report="$(wiring_report)"
+      while IFS=$'\t' read -r host path status; do
+        case "$host" in
+          codex) label="Codex prompt" ;;
+          cmd) label="Command Code command" ;;
+          agy) label="agy skill link" ;;
+          *) continue ;;
+        esac
+        case "$status" in
+          current) echo "$label already current: $path" ;;
+          missing) echo "$label missing: $path"; rc=1 ;;
+          differs) echo "$label differs: $path (update replaces a plain file)"; rc=1 ;;
+        esac
+      done <<<"$report"
+      while IFS=$'\t' read -r host kind path status; do
+        [[ "$host" == retired ]] || continue
+        case "$status" in
+          ours) echo "session-close leftover: $kind $path (update removes it)"; rc=1 ;;
+          foreign) echo "session-close kept (yours or modified): $kind $path (orch:close replaces it; remove by hand)" ;;
+        esac
+      done <<<"$report"
+    fi
     if [[ "$herdr_check" == "true" ]]; then herdr_doctor || rc=1; fi
     exit $rc
     ;;
@@ -239,6 +276,12 @@ case "$command_name" in
     agent_state="$(compare_agents)"
     if grep -q -E ' (missing|differs)$' <<<"$agent_state"; then
       args=(--source "$source_root" --home "$home_dir" --only orch --agents-only)
+      "$source_root/scripts/install-skill.sh" "${args[@]}"
+    fi
+    # Wiring and retirement: repair whatever the report shows missing, different or leftover.
+    if selected orch && grep -q -E $'\t(missing|differs|ours)$' <<<"$(wiring_report)"; then
+      args=(--source "$source_root" --home "$home_dir" --hosts "$hosts" --wire-only)
+      [[ "$claude_link" == "false" ]] && args+=(--no-claude-link)
       "$source_root/scripts/install-skill.sh" "${args[@]}"
     fi
     [[ "$herdr_check" == "true" ]] && herdr_doctor || true
