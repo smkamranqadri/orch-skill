@@ -24,6 +24,14 @@ prompt can carry several agents.
    - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
    - finished with a report: verify it when the user has asked for a
      merge; otherwise record it and tell the user in one line.
+   - **Diff review before any merge.** The reviewer is a different agent on a different model than the
+     builder (the same host is fine). It reads `git diff <fork point>..<branch tip>` and the
+     brief; on its verdict record it:
+     `python3 ~/.agents/skills/orch/scripts/orch-gate.py review <dir> <agent> --repo <worktree> --range <fork point>..<tip> --author <cli/model> --reviewer <cli/model> --verdict pass|fail`
+     (a fail is `sent-back`: re-prompt the builder, then review again). Immediately before the
+     merge: `python3 ~/.agents/skills/orch/scripts/orch-gate.py merge-check <dir> <agent> --repo <worktree> --branch <branch>`.
+     Merge only on exit 0. Exit 4 no review, 5 review failed, 6 a commit came after the review,
+     7 the review does not start at the branch's fork point: do not merge; get a new review.
    - Mark every verdict in the same turn, one short command each (`<dir>` is the run dir):
      `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`. Tiers: `reported` (the agent
      says done; not yet checked), `verified` (you re-ran the proof; `--proof` the log),
@@ -59,6 +67,10 @@ prompt can carry several agents.
    single `Stamp:` line near the top of State. Pointer off or no KIS: do not touch State. The
    ledger and State must never disagree about what is merged; a handoff is too late to fix it.
    When the status space exists, give its task a one-line thought through a sub-agent.
+   After a merge, release held work: `python3 ~/.agents/skills/orch/scripts/orch-gate.py release <dir> --apply`.
+   For each `release <name>`: launch it by `commands/task.md` steps 4 to 8 from the brief in its
+   row (the row's status becomes `working`, its last event "released: <blocker> merged"). A
+   `hold <name> after <task>` stays queued; `--apply` already rewrote its blocker.
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.
    Then end the turn. Never wait in the foreground for the next event: the watcher will
    prompt again.
