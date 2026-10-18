@@ -113,7 +113,7 @@ handoff to <path> and reply with a short summary, then continue straight into th
 | `task` | One task to one named agent, which plans then acts in its worktree: brief, worktree and pane, pointer prompt, ledger row, watcher, plan questions relayed. |
 | `status` | The board in under 20 lines: Next, Waiting on user, Parked, each agent's live state, last five events. |
 | `handoff` | At about 150k context, or when asked: sync and check State (if KIS), ledger and handoff packet, start the successor, confirm it read the ledger, then say "close me". Read your own context by pane id: `herdr pane read <your pane id> --source recent-unwrapped --lines 8 \| grep -o 'ctx [^·]*'`. |
-| `watch` | Start the watcher in its own pane, or add agents to the running one; record pane and pid. |
+| `watch` | Start the watcher in its own pane, or add agents to the running one; the pid is in `watcher.pid`, the watcher is headless. |
 | `event` | Handle the watcher's "orch event" prompt: read each verdict, take the next ledger step, State per the contract, reply in five lines, end the turn. |
 | `close` | The single close, built separately: agents, KIS sync and check, worktrees, commit and push. Follows the State contract. |
 
