@@ -32,25 +32,26 @@ Loaded in Agents mode only; `SKILL.md` points here.
   agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
   user when no candidate is clearly available. The watcher shows usage on the board and the
   ledger header carries the line.
-- `scripts/orch-watch.py` (`orch-watch.sh` wraps old ledgers): one watcher per repo run.
+- `scripts/orch-watch.py`: one watcher per repo run, headless; it sleeps on the plugin's
+  `events.signal` file (Herdr events) and re-reads Herdr's agent list on every wake and every 60 s.
   `add <dir> <agent>... --orch <owner>` registers agents; bare lines fall back to
   `<dir>/orchestrator`. `move <dir> <agent>... --from <old> --orch <new>` transfers only
   the named owner's agents; pending events follow them. Each owner gets its own wake batch
   and retry timer, so a busy owner does not hold another's events. `orch <dir> <pane>` changes
   only the legacy default; never use it for multi-owner handoff. `remove` stops watching named
-  agents. The board shows owners and five Recent lines, redraws only when text changes in an
-  alternate buffer and restores the terminal on exit. `board <dir>` prints once;
-  `--next <dir> [seconds]` is the old blocking wait, only when the user asks to wait.
+  agents. `board <dir>` prints the board once, with the usage line from the cache (the watcher
+  never refreshes usage; `orch-usage.py check <kind>` and the board plugin do). The pid lives in
+  `<dir>/watcher.pid`; the ledger has no Watcher section.
 - `orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`: record a verdict (tiers
   `reported verified asserted sent-back merged open closed handoff`). The board's EVID column and
   its NEEDS YOU block read the marks; `event` marks every verdict and `task` marks a send-back.
 - `orch-watch.py check <dir> [--owner <pane>] [--offline]`: lint the run, one line per finding
   with its owner; exit 0 clean, 1 findings, 3 when the ledger cannot be parsed. `start`, `event`,
   `status` and `handoff` run it. It never writes the ledger. A `Ledger: minimal` ledger is checked
-  for length, Next action and the plan review only, with no watcher.
-- `orch-watch.py show <dir> <agent>`: one card (15 lines at most) for one agent.
-- `orch-watch.py stats <dir> [agent]`: working time, finishes, attempts and the finish-to-wake and
-  finish-to-mark delays from events.log.
+  for length, Next action and the plan review only, with no watcher. A row `queued: after <task>`
+  needs no registration.
+- `orch-watch.py show <dir> <agent>` (one card) and `orch-watch.py stats <dir> [agent]` (timings
+  from events.log): see `references/visibility.md`.
 - `references/visibility.md`: the mark tiers, the Needs-you rules and the check rules.
 - `<dir>/events.log`: one line per change, `<UTC> <agent> <state> | <task title> | ctx <use>`,
   `<UTC> orchestrator woken | <agents>` per delivered prompt, `<UTC> <agent> mark:<tier> a<n> | <what>
