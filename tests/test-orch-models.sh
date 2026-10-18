@@ -228,6 +228,48 @@ expect "claude quill-2-5 high" 0 pk plan-review --author codex
 expect "codex zephyr-3-pro high" 0 pk plan-review --author claude/quill-2-mini
 expect "" 1 pk plan-review --author claude --reviewer claude/quill-2-mini
 grep -q '^REFUSED: reviewer CLI claude is the plan author' "$tmp/err" || fail "plan-review refusal not explained"
+# the builder and a --reviewer resolve against the matrix: id forms, dated ids and aliases cannot slip past
+expect "codex zephyr-3-pro high" 0 pk code-review --builder 'quill-2-5[1m]'
+expect "codex zephyr-3-pro high" 0 pk code-review --builder 'claude/quill-2-5[1m]'
+expect "codex zephyr-3-pro high" 0 pk code-review --builder claude/quill-2-5-20311001
+expect "" 1 pk code-review --reviewer 'quill-2-5[1m]' --builder claude/quill-2-5
+grep -q '^REFUSED: reviewer model quill-2-5 is the builder' "$tmp/err" || fail "[1m] reviewer not refused: $(cat "$tmp/err")"
+expect "" 1 pk code-review --reviewer claude/quill-2-5-20311001 --builder claude/quill-2-5
+expect "" 64 pk code-review --builder ghost-9
+grep -q "^--builder 'ghost-9' is not in the matrix; name it as host/model" "$tmp/err" || fail "unresolved builder not explained: $(cat "$tmp/err")"
+expect "" 64 pk code-review --builder claude/ghost-9
+expect "" 64 pk code-review --reviewer ghost-9 --builder claude/quill-2-5
+cat > "$tmp/pa.md" <<'MD'
+# Alias fixture
+
+## Matrix
+
+| Host | Model | Efforts | Price in / cached / out | Price source | Priced | Good for | Measured | Seen |
+|---|---|---|---|---|---|---|---|---|
+| claude | claude-opus-5-5 | low, high | 4 / 0.2 / 20 | s | 2031-01-05 |  |  | 2031-01-05 |
+| claude | claude-sonnet-5-5 | low, high | 2 / 0.1 / 10 | s | 2031-01-05 |  |  | 2031-01-05 |
+| codex | zephyr-3-pro | low, high | 3 / 0.3 / 15 | s | 2031-01-05 |  |  | 2031-01-05 |
+
+## Picks by job
+
+| Job | First choice | Alternatives |
+|---|---|---|
+| code-review | claude/claude-opus-5-5 high | claude/claude-sonnet-5-5 high; codex/zephyr-3-pro high |
+MD
+pa() { python3 "$M" pick --matrix "$tmp/pa.md" "$@"; }
+expect "claude claude-sonnet-5-5 high" 0 pa code-review --builder opus
+expect "claude claude-opus-5-5 high" 0 pa code-review --builder sonnet
+expect "claude claude-sonnet-5-5 high" 0 pa code-review --builder 'claude-opus-5-5[1m]'
+expect "claude claude-sonnet-5-5 high" 0 pa code-review --builder claude/claude-opus-5-5-20261001
+expect "" 1 pa code-review --reviewer opus --builder claude/claude-opus-5-5
+expect "" 64 pa code-review --builder haiku
+# plan review: a bare --reviewer model resolves to its CLI, and an unknown one is refused
+expect "" 1 pk plan-review --author claude --reviewer quill-2-mini
+grep -q '^REFUSED: reviewer CLI claude is the plan author' "$tmp/err" || fail "bare reviewer model not refused: $(cat "$tmp/err")"
+expect "OK: zephyr-3-pro may review" 0 pk plan-review --author claude --reviewer zephyr-3-pro
+expect "" 1 pk plan-review --author claude --reviewer ghost-9
+grep -q "^REFUSED: --reviewer 'ghost-9' is not in the matrix" "$tmp/err" || fail "unknown plan reviewer not refused: $(cat "$tmp/err")"
+expect "OK: quill-2-5 may review" 0 pk plan-review --author codex --reviewer quill-2-5
 expect "" 64 pk plan-review
 expect "" 64 pk plan-review --author Opus
 expect "claude quill-2-5 medium" 0 pk build
@@ -235,6 +277,38 @@ expect "" 64 pk nojob
 # every candidate refused -> exit 1, no invented model
 sed -i 's#^| plan-review .*#| plan-review | claude/quill-2-5 high | claude/quill-2-mini high |#' "$tmp/pm.md"
 expect "" 1 pk plan-review --author claude
+
+# --- 6b. a CLI unreachable at the first rebuild joins the picks when a later rebuild finds it -----
+rm -rf "$tmp/h2"; mkdir -p "$tmp/h2"; fx2="$tmp/fx2"; mkdir -p "$fx2"
+cat > "$fx2/codex-models-cache.json" <<'J'
+{"fetched_at":"2031-01-04T08:00:00Z","models":[{"slug":"gpt-6.1-sol","visibility":"list",
+ "supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"}]}]}
+J
+cp "$tmp/claude-help.txt.off" "$fx2/claude-help.txt"
+printf 'claude-opus-5-5\nclaude-sonnet-5-5\nclaude-haiku-5-5\n' > "$tmp/claude-real.txt"
+m2="$tmp/h2/models.md"
+set +e
+ORCH_MODELS_FIXTURE_DIR="$fx2" python3 "$M" rebuild --out "$m2" --plan codex=P --plan claude=P > "$tmp/c1.out" 2>&1
+set -e
+grep -q '^UNREACHABLE claude:' "$tmp/c1.out" || fail "first rebuild should leave claude unreachable: $(cat "$tmp/c1.out")"
+grep -q '^| bulk |' "$m2" && fail "bulk should have no pick before the claude rebuild"
+grep -q '^| code-review | codex/gpt-6.1-sol high |  |$' "$m2" || fail "first-rebuild picks: $(grep -A8 'Picks by job' "$m2")"
+set +e; python3 "$M" pick --matrix "$m2" code-review --builder codex/gpt-6.1-sol 2>/dev/null; rc=$?; set -e
+[[ $rc -eq 1 ]] || fail "before the claude rebuild no reviewer exists, got rc $rc"
+set +e
+ORCH_MODELS_FIXTURE_DIR="$fx2" python3 "$M" rebuild --out "$m2" --claude-models "$tmp/claude-real.txt" > "$tmp/c2.out" 2>&1
+set -e
+grep -q '^PICK ADDED code-review: claude/claude-opus-5-5 high (now installed)$' "$tmp/c2.out" || fail "pick catch-up not reported: $(cat "$tmp/c2.out")"
+grep -q '^| code-review | codex/gpt-6.1-sol high | claude/claude-opus-5-5 high; claude/claude-sonnet-5-5 high |$' "$m2" \
+  || fail "claude candidates not appended, or First choice touched: $(grep '^| code-review' "$m2")"
+grep -q '^| plan-review | codex/gpt-6.1-sol high | claude/claude-opus-5-5 high; claude/claude-sonnet-5-5 high |$' "$m2" || fail "plan-review picks: $(grep '^| plan-review' "$m2")"
+grep -q '^| bulk | claude/claude-haiku-5-5 low |  |$' "$m2" || fail "a job with no pick was not created from the new model: $(grep '^| bulk' "$m2" || echo none)"
+out="$(python3 "$M" pick --matrix "$m2" code-review --builder codex/gpt-6.1-sol 2>/dev/null)"
+[[ "$out" == "claude claude-opus-5-5 high" ]] || fail "pick after the catch-up: $out"
+cp "$m2" "$tmp/m2.once"
+ORCH_MODELS_FIXTURE_DIR="$fx2" python3 "$M" rebuild --out "$m2" --claude-models "$tmp/claude-real.txt" > "$tmp/c3.out" 2>&1 || true
+cmp -s "$m2" "$tmp/m2.once" || fail "a second rebuild changed the picks again"
+grep -q '^PICK ADDED' "$tmp/c3.out" && fail "a second rebuild re-reported an added pick"
 
 # --- 7. the shipped matrix: generic, parseable, stable under a rebuild's writer ----------------
 sh="$repo_root/skills/orch/references/models.md"
