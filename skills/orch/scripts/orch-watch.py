@@ -386,7 +386,8 @@ class Watcher:
         self.since = {}       # agent -> iso time of last change
         self.info = {}        # agent -> (title, ctx)
         self.pending = []     # (iso, agent, state) waiting to be told to the orchestrator
-        self.held_since = {}
+        self.held_since = {}   # owner -> wall clock of the first hold, for the display only
+        self.held_mono = {}    # owner -> monotonic time of the first hold, for HOLD_NOTICE
         self.held_noticed = {}
         self.next_try = {}
         self.recent = self.seed_recent()
@@ -456,12 +457,14 @@ class Watcher:
 
     def wait(self, before):
         """Sleep until `stamp()` differs from `before` (True) or the timeout passes (False). The
-        timeout is SAFETY_POLL, or sooner when a held wake is due for another try."""
+        timeout is SAFETY_POLL, or sooner when a held wake has another try still ahead. A try that
+        is already due but not made (Herdr unreachable) does not shorten the wait."""
         limit = SAFETY_POLL
         owners = {self.owners.get(a) for _, a, _ in self.pending} - {None, "none"}
         if owners:
             due = min(self.next_try.get(o, 0) for o in owners) - self.mono()
-            limit = min(limit, max(1.0, due))
+            if due > 0:
+                limit = min(limit, max(1.0, due))
         end = self.mono() + limit
         while self.mono() < end:
             if self.stamp() != before:
@@ -597,7 +600,8 @@ class Watcher:
                 note = f"prompt to {target} failed; retrying in {RETRY}s"
         if target not in self.held_since:
             self.held_since[target] = time.time()
-        if not self.held_noticed.get(target) and time.time() - self.held_since[target] > HOLD_NOTICE:
+            self.held_mono[target] = self.mono()
+        if not self.held_noticed.get(target) and self.mono() - self.held_mono[target] > HOLD_NOTICE:
             self.notify("orchestrator: events waiting", note)
             self.held_noticed[target] = True
         changed = note != self.owner_note
@@ -607,6 +611,7 @@ class Watcher:
     def delivered(self, target, batch):
         self.pending = [e for e in self.pending if e not in batch]
         self.held_since.pop(target, None)
+        self.held_mono.pop(target, None)
         self.held_noticed.pop(target, None)
 
     def wake_held(self):
