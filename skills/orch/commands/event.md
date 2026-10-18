@@ -19,10 +19,10 @@ prompt can carry several agents.
    registrations. Read only your `orch=<owner>` entries in wake.md (legacy entries belong to
    the default owner). Preserve other owners' entries; process only your owned agents.
    Recheck ownership before acting: a handoff may have moved an agent since the prompt.
-2. For each agent named, read its verdict, not its output (rule 3): `herdr agent read <agent>
+2. For each agent named, read its verdict, not its output: `herdr agent read <agent>
    --source recent-unwrapped --lines 15 | tail -10`, or the handoff's `## Result` section.
    - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
-   - finished with a report: verify it (coordination rule 35) when the user has asked for a
+   - finished with a report: verify it when the user has asked for a
      merge; otherwise record it and tell the user in one line.
    - Mark every verdict in the same turn, one short command each (`<dir>` is the run dir):
      `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`. Tiers: `reported` (the agent
@@ -50,12 +50,15 @@ prompt can carry several agents.
    what it names for your rows (a row that is "done" or "merged" but neither "closed" nor
    "open: next cycle ..." is a missed step). Its exit is 1 with findings, 3 when the ledger
    cannot be parsed.
-4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/` and this event merged or
-   closed work, rewrite `kis/state/current.md` in the same turn, inline (it is a few lines, not
-   a sub-agent job): Task, Status, Proof as recorded in the ledger, and Next equal to the
-   ledger's Next action for this owner. Preserve other owners' current State entries. The ledger and State must never disagree about what is merged; a
-   handoff is too late to fix it. When the status space exists, give its task a one-line thought
-   through a sub-agent (rule 49).
+4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/`, State
+   is KIS >= 0.11 and the run is not "pointer off" (SKILL.md, State contract) and this event
+   merged work: in the same turn, inline (a few lines, not a sub-agent job), add one proof line
+   `Merged: <task> <short sha>; proof <command: result>` to `kis/state/current.md`, leave the
+   `Run:` line and every other line alone, then write the stamp: run
+   `.agents/skills/kis/scripts/state-stamp.sh <project root>` and put its output verbatim as the
+   single `Stamp:` line near the top of State. Pointer off or no KIS: do not touch State. The
+   ledger and State must never disagree about what is merged; a handoff is too late to fix it.
+   When the status space exists, give its task a one-line thought through a sub-agent.
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.
    Then end the turn. Never wait in the foreground for the next event: the watcher will
    prompt again.

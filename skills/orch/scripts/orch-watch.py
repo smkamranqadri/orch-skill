@@ -892,8 +892,41 @@ def parse_ledger(d):
             "watcher_agents": names}
 
 
+def is_minimal(d):
+    """True when ledger.md is the minimal no-agent ledger (a `Ledger: minimal` line)."""
+    try:
+        with open(os.path.join(d, "ledger.md")) as f:
+            return any(line.strip() == "Ledger: minimal" for line in f)
+    except OSError:
+        return False
+
+
+def minimal_findings(d):
+    """Findings for a minimal ledger: no pane, owner or watcher fields, only length, Next and plan review."""
+    with open(os.path.join(d, "ledger.md")) as f:
+        lines = f.read().splitlines()
+    field = {}
+    for line in lines:
+        m = re.match(r"^(Next action|Plan review|Plan|Task):\s*(.*)$", line.strip())
+        if m:
+            field[m.group(1)] = m.group(2).strip()
+    out = []
+    if len(lines) > LEDGER_LIMIT:
+        out.append(("run", "ledger-length", f"ledger has {len(lines)} lines, the limit is {LEDGER_LIMIT}"))
+    if not field.get("Next action"):
+        out.append(("run", "next-action", "no 'Next action:' line, or it is empty"))
+    plan = field.get("Plan", "none")
+    if plan.lower() not in ("", "none"):
+        if not re.search(r"\boutcome: ready\b", field.get("Plan review", "")):
+            out.append(("run", "plan-review",
+                        f"written plan {plan} has no recorded review with 'outcome: ready'; review it before implementing"))
+    return out
+
+
 def check_findings(d, offline=False):
     """[(owner, rule, text)] for the run in d. Raises CheckError when it cannot parse."""
+    if is_minimal(d):
+        return minimal_findings(d)
     ledger = parse_ledger(d)
     try:
         owners = registrations(d)

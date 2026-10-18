@@ -698,14 +698,16 @@ class TemplateTests(Base):
             for needle in needles:
                 self.assertIn(needle, text, f'{name} lacks {needle!r}')
         skill = (ROOT / 'skills/orch/SKILL.md').read_text()
-        self.assertIn('version: "0.10.0"', skill)
+        self.assertIn('version: "0.11.0"', skill)
+        tools = (ROOT / 'skills/orch/references/tools.md').read_text()
+        self.assertIn('references/tools.md', skill)
         for needle in ('orch-watch.py mark', 'orch-watch.py check', 'orch-watch.py show', 'orch-watch.py stats',
                        'references/visibility.md'):
-            self.assertIn(needle, skill)
+            self.assertIn(needle, skill + tools)
         ref = (ROOT / 'skills/orch/references/visibility.md').read_text()
         for tier in m.TIERS:
             self.assertIn(f'`{tier}`', ref)
-        for rule in ('ledger-length', 'next-action', 'no-row', 'row-unregistered', 'not-closed', 'watcher', 'owner-dead', 'log'):
+        for rule in ('ledger-length', 'next-action', 'no-row', 'row-unregistered', 'not-closed', 'watcher', 'owner-dead', 'log', 'plan-review'):
             self.assertIn(f'`{rule}`', ref)
 
 
