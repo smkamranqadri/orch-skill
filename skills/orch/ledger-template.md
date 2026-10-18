@@ -10,16 +10,19 @@ Parked: <item, until when, why; or none>
 
 ## Pane agents
 The status cell starts with one fixed word so `check` can read it: `working`, `done`, `merged`,
-`closed`, `gone`, or `open: next cycle <what>`. Any text follows after a comma or colon.
-Evidence (verdict marks) lives in events.log, not here.
+`closed`, `gone`, `open: next cycle <what>`, or `queued: after <task>` (held by the split gate: no pane yet).
+Any text follows after a comma or colon. Evidence (verdict marks) lives in events.log, not here.
+`depends`: task names that must merge first; `owns`: paths or globs the task writes (both feed
+`scripts/orch-gate.py`; `none` for no dependency). A task is a row, named by its agent.
 
-| name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event |
-|---|---|---|---|---|---|---|---|---|
-| code | w5:p2 | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions |
+| name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event | depends | owns |
+|---|---|---|---|---|---|---|---|---|---|---|
+| code | w5:p2 | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions | none | src/fees/**, tests/fees/** |
+| docs | w5:p2 | claude/sonnet | - | ../repo.wt/docs / docs | .orch/docs/brief-docs.md | .orch/docs/handoff.md | queued: after code | 06 14:05 held: shares src/fees | code | docs/fees.md, src/fees/README.md |
 
 ## Sub-agents and background jobs (die with the orchestrator; `--sub` route)
-| name | owner | type | started | report | status |
-|---|---|---|---|---|---|
+| name | owner | type | started | report | status | depends | owns |
+|---|---|---|---|---|---|---|---|
 
 ## Watcher
 pane <id>, pid <n>, wakes: <owners per agents.txt>, agents: <names> (<dir>/agents.txt), log: <dir>/events.log
