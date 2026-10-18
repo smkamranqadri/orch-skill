@@ -10,6 +10,26 @@ BOARD = ROOT / "skills/orch/plugin/board"
 HOOK = ROOT / "skills/orch/plugin/event-hook.py"
 MANIFEST = ROOT / "skills/orch/plugin/herdr-plugin.toml"
 MUTANTS = [
+    (BOARD, 'title = brief_title(directory, row.get("brief"))', 'title = "none"', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, 'if path == "none":', 'if False:', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, 'bases = (directory, directory.parent, directory.parent.parent)', 'bases = (directory,)', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, 'if line.startswith("# "):', 'if line.startswith("## "):', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, r'return clean(re.sub(r"^Brief:\s*", "", line[2:]))', 'return clean(line[2:])', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, 'if not section:', 'if True:', 'legacy_owner_regex_and_header_next'),
+    (BOARD, r'r"\bby ([\w.-]+), (w[^\s,;()]+:p[^\s,;()]+)(?=$|[\s,;.])"',
+            r'r"\bby ([\w.-]+).*?\b(w[^\s,;()]+:p[^\s,;()]+)"', 'legacy_owner_regex_and_header_next'),
+    (BOARD, 'label = "Next action:" if owner == "none" else f"Next action ({owner}):"',
+            'label = f"Next action ({owner}):"', 'legacy_owner_regex_and_header_next'),
+    (BOARD, 'if hours >= 24:', 'if hours > 24:', 'legacy_ages_at_day_boundary'),
+    (BOARD, 'return f"{hours // 24}d {hours % 24:02d}h"', 'return f"{hours}h{minutes:02d}m"', 'legacy_ages_at_day_boundary'),
+    (BOARD, 'lambda m: age(int(m[1]) * 3600 + int(m[2]) * 60)', 'lambda m: m[0]', 'legacy_ages_at_day_boundary'),
+    (BOARD, 'add(line, cut=True)', 'add(line)', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'if cells(text) <= width:', 'if False:', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'return result.rstrip() + "…"', 'return result.rstrip()', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'parts = hanging(text, width, indent)', 'parts = wrap(text, width)', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'indent=" " * 11)', 'indent="")', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'if line.strip() and cells(line + gap + word) > width:', 'if False:', 'legacy_recent_clip_and_needs_hanging'),
+    (ROOT / 'tests/fixtures/board/ledger.md', '|' + '---|' * 11, '|' + '---|' * 12, 'fixture_separator_counts'),
     (HOOK, 'if event not in ("pane.agent_status_changed", "pane.closed"):', 'if False:', 'hook_rejects_invalid_event'),
     (HOOK, 'if not isinstance(pane, str) or not pane:', 'if False:', 'hook_rejects_invalid_event'),
     (HOOK, 'if status is not None and not isinstance(status, str):', 'if False:', 'hook_rejects_invalid_event'),
@@ -50,7 +70,7 @@ MUTANTS = [
     (BOARD, 'if not ready:\n            yield pending', 'if not ready:\n            yield []', 'graph_order_cycles_and_selection'),
     (BOARD, 'if path:\n        return Path(path).expanduser().resolve()', 'if False:\n        return Path(path).expanduser().resolve()', 'explicit_titles_and_run_override'),
     (BOARD, 'if not pane:\n                raise ValueError', 'if False:\n                raise ValueError', 'explicit_titles_and_run_override'),
-    (BOARD, 'title = clean(row.get("title") or row.get("task"))', 'title = "none"', 'explicit_titles_and_run_override'),
+    (BOARD, 'title = clean(row.get("task"))', 'title = "none"', 'explicit_titles_and_run_override'),
     (BOARD, 'columns = max(1, width // 39)', 'columns = 1', 'widths_and_rows'),
     (BOARD, 'if edges:\n                add', 'if False:\n                add', 'widths_and_rows'),
     (BOARD, 'if selected == task["name"]:\n                        heading',
@@ -64,6 +84,11 @@ MUTANTS = [
     (BOARD, 'directory = Path(directory)\n    now',
             'directory = Path(directory)\n    (directory / "watcher.pid").write_text("0\\n")\n    now', 'plain_readonly_and_repeat'),
     (MANIFEST, 'on = "pane.closed"', 'on = "pane.focused"', 'manifest_and_key_contract'),
+    (BOARD, 'if cells(result + char) > width - 1:', 'if cells(result + char) > width:', 'legacy_recent_clip_and_needs_hanging'),
+    (BOARD, 'if title == "none":\n            title = clean(row.get("task"))',
+            'if False:\n            title = clean(row.get("task"))', 'legacy_brief_title_before_task_and_chrome'),
+    (BOARD, 'if title == "none":\n            title = next',
+            'if True:\n            title = next', 'legacy_brief_title_before_task_and_chrome'),
 ]
 
 
