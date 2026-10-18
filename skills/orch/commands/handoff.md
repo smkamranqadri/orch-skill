@@ -28,7 +28,7 @@ Agents keep running. Nothing is closed, removed or committed beyond the memory s
    `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <your pane id> handoff "ctx <n>"`.
 4. Write `<dir>/handoff-<date>-<n>.md`: line one is the Next action; then paths to the ledger,
    State, briefs and reports (paths, never bodies); decisions since the last handoff; your agent-tool
-   sub-agents still running, listed as lost; the watcher's pane and pid; skills the successor
+   sub-agents still running, listed as lost; the watcher's pid (`<dir>/watcher.pid`; it is headless); skills the successor
    must load. No secrets, no session story.
 5. Leave the watcher running; it serves the successor once step 7 points it there.
 6. Start the successor in a new pane of this workspace, visible, with the same

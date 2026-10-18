@@ -70,9 +70,12 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
    (`orch-dir.sh --migrate`). Read the ledger `$D/ledger.md`. A `Ledger: minimal` ledger is
    upgraded: copy `ledger-template.md` over it, keeping Task as the first Next action and
    moving its Decisions and Done into the matching sections.
-   A ledger marked `Run closed <date>` belongs to a finished run: rename it `ledger-<date>.md`
-   (add `-2`, `-3` if that name exists), then treat it as no ledger, so the new run starts from
-   the template without the old `Run closed` or `State pointer:` lines.
+   A ledger marked `Run closed <date>` belongs to a finished run: archive it with
+   `python3 ~/.agents/skills/orch/scripts/orch-gate.py archive <D>`, which moves every file in
+   `<D>` (ledger, events.log, agents.txt, reviews.log, watcher.pid, handoffs) into
+   `<D>/run-<date>/` (`-2`, `-3` if that name exists) and keeps the agent folders, then treat it as no
+   ledger, so the new run starts from the template without the old agents, `Run closed` or
+   `State pointer:` lines.
    Pointer off: put `State pointer: off (KIS <version>)` on the line under `Updated:`; step 1.1
    reads that line, so a successor in the same run is not offered the update again.
    No ledger: copy `ledger-template.md` there, fill it from State (if any) and

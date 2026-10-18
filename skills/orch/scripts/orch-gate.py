@@ -11,8 +11,12 @@
         when it changed. A released row keeps its text until task.md launches it.
   orch-gate.py review <dir> <agent> --repo <path> --range <base>..<head> --author <cli/model>
         --reviewer <cli/model> --verdict pass|fail
-        record a diff review in <dir>/reviews.log (full shas). The reviewer must be a different
-        agent on a different model than the author.
+        record a diff review in <dir>/reviews.log (full shas). Both names resolve in the model
+        matrix (orch-models.py: any spelling of the model, or a Claude alias); the reviewer must
+        be a different model than the author, else exit 2.
+  orch-gate.py archive <dir>
+        a ledger marked `Run closed <date>`: move every file in <dir> (not folders) into
+        <dir>/run-<date>[-n]/, so the next run starts empty. Exit 2 when the run is not closed.
   orch-gate.py merge-check <dir> <agent> --repo <path> --branch <name> [--target main]
         exit 0 when the latest review passed and covers the branch from its fork point to its
         tip; 4 no review, 5 review failed, 6 review older than the branch head, 7 range does
@@ -20,12 +24,14 @@
 """
 import argparse
 import datetime
+import importlib.util
 import os
 import re
 import subprocess
 import sys
 
 ENDED = ("merged", "closed", "gone")
+NO_PATHS = ("none", "-")
 SECTIONS = ("pane agents", "sub-agents and background jobs")
 QUEUED = re.compile(r"^queued:\s*after\s+(\S+)", re.I)
 GLOB = re.compile(r"[*?\[]")
@@ -73,7 +79,7 @@ def read_tasks(d):
         word = re.match(r"[a-z]+", row["status"].lower())
         tasks.append({"name": name, "word": word.group(0) if word else "", "status": row["status"],
                       "depends": names(row.get("depends", "")), "owns": paths(row.get("owns", "")),
-                      "has_owns": "owns" in header})
+                      "writes_nothing": row.get("owns", "").strip().lower() in NO_PATHS})
     return tasks
 
 
@@ -118,13 +124,27 @@ def active(tasks, skip=None):
     return [t for t in tasks if t["word"] not in ENDED and t["name"] != skip]
 
 
-def decide(live, others, depends, owns):
-    """(verdict, blocker, reason): `live` are all active rows (dependencies), `others` those it competes with."""
+def merged(t):
+    """A dependency counts as landed when its row says merged, or closed after a merge ("closed, merged <sha>")."""
+    return t["word"] == "merged" or (t["word"] == "closed" and re.search(r"\bmerged\b", t["status"].lower()) is not None)
+
+
+def decide(live, others, depends, owns, tasks=(), writes_nothing=False):
+    """(verdict, blocker, reason): `live` are all active rows (dependencies), `others` those it competes with.
+    A task whose `owns` is none writes nothing and never conflicts; a missing or empty cell holds everything."""
     by_name = {t["name"]: t for t in live}
+    ended = {t["name"]: t for t in tasks if t["word"] in ENDED and not merged(t)}
+    for dep in depends:
+        if dep in ended:
+            return "hold", dep, f"dependency {dep} ended unmerged"
     for dep in depends:
         if dep in by_name:
             return "queue", dep, f"depends on {dep}, which has not merged"
+    if writes_nothing:
+        return "run", None, "it writes nothing"
     for o in others:
+        if o["writes_nothing"]:
+            continue
         if not o["owns"]:
             return "sequential", o["name"], f"{o['name']} records no owned paths"
         hit = first_overlap(owns, o["owns"])
@@ -143,14 +163,16 @@ def check_deps(tasks, depends, skip):
 def cmd_admit(a):
     tasks = read_tasks(a.dir)
     owns, depends = paths(a.owns), names(a.depends or "")
-    if not owns:
-        raise GateError("--owns is required: the paths or globs the task will write")
+    nothing = a.owns.strip().lower() in NO_PATHS
+    if not owns and not nothing:
+        raise GateError("--owns is required: the paths or globs the task will write, or none for a task that writes nothing")
     check_deps(tasks, depends, a.task)
-    verdict, blocker, reason = decide(active(tasks, a.task), active(tasks, a.task), depends, owns)
+    verdict, blocker, reason = decide(active(tasks, a.task), active(tasks, a.task), depends, owns, tasks, nothing)
     if verdict == "run":
         print(f"run: {reason}\nstatus: working")
         return 0
-    print(f"{verdict}: {reason}\nstatus: queued: after {blocker}")
+    ask = "; ask the user" if verdict == "hold" else ""
+    print(f"{verdict}: {reason}{ask}\nstatus: queued: after {blocker}")
     return 3
 
 
@@ -163,10 +185,12 @@ def cmd_release(a):
         if t["word"] == "queued" and m:
             live = active(tasks, t["name"])
             others = [o for o in live if o["word"] != "queued" or o in kept]
-            verdict, blocker, _ = decide(live, others, t["depends"], t["owns"])
+            verdict, blocker, _ = decide(live, others, t["depends"], t["owns"], tasks, t["writes_nothing"])
             kept.append(t)  # a released row will run, so later queued rows wait behind it too
             if verdict == "run":
                 out.append(f"release {t['name']}")
+            elif verdict == "hold":
+                out.append(f"hold {t['name']}: dependency {blocker} ended unmerged; ask the user")
             else:
                 out.append(f"hold {t['name']} after {blocker}")
                 if a.apply and blocker != m.group(1):
@@ -194,19 +218,42 @@ def git(repo, *args):
     return p.stdout.strip()
 
 
+def matrix_models():
+    """orch-models.py (the same name rules the reviewer picker uses) and the active matrix rows."""
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("orch_gate_models", os.path.join(os.path.dirname(os.path.abspath(__file__)), "orch-models.py"))
+    om = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(om)
+    f, _ = om.active_file(None)
+    try:
+        rows = om.parse(f.read_text())["rows"]
+    except OSError as exc:
+        raise GateError(f"cannot read the model matrix {f}: {exc.strerror}")
+    return om, rows, set(om.HOSTS) | {r["host"] for r in rows}
+
+
 def cmd_review(a):
     base, sep, head = a.range.partition("..")
     if not sep or not base or not head:
         raise GateError("--range must be <base>..<head>")
     if a.verdict not in ("pass", "fail"):
         raise GateError("--verdict must be pass or fail")
-    if a.author.strip().lower() == a.reviewer.strip().lower():
-        raise GateError("the reviewer must be a different agent on a different model than the author")
+    om, rows, hosts = matrix_models()
+    found = {}
+    for role, ref in (("author", a.author), ("reviewer", a.reviewer)):
+        found[role] = om.resolve(ref, rows, hosts)
+        if not found[role]:
+            raise GateError(f"--{role} {ref!r} is not in the model matrix; name it as host/model from `orch-models.py show`")
+    shared = {om.canon(r["model"]) for r in found["author"]} & {om.canon(r["model"]) for r in found["reviewer"]}
+    if shared:
+        raise GateError(f"the reviewer {a.reviewer!r} is the author's own model ({a.author!r}); "
+                        "a code review is a different model")
+    author, reviewer = (f"{found[k][0]['host']}/{found[k][0]['model']}" for k in ("author", "reviewer"))
     b, h = git(a.repo, "rev-parse", "--verify", base + "^{commit}"), git(a.repo, "rev-parse", "--verify", head + "^{commit}")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(os.path.join(a.dir, "reviews.log"), "a") as f:
-        f.write(f"{stamp} agent={a.agent} range={b}..{h} author={a.author} reviewer={a.reviewer} verdict={a.verdict}\n")
-    print(f"recorded: {a.agent} {b[:9]}..{h[:9]} reviewer {a.reviewer} {a.verdict}")
+        f.write(f"{stamp} agent={a.agent} range={b}..{h} author={author} reviewer={reviewer} verdict={a.verdict}\n")
+    print(f"recorded: {a.agent} {b[:9]}..{h[:9]} reviewer {reviewer} {a.verdict}")
     return 0
 
 
@@ -240,6 +287,27 @@ def cmd_merge_check(a):
     return 0
 
 
+def cmd_archive(a):
+    path = os.path.join(a.dir, "ledger.md")
+    try:
+        with open(path) as f:
+            closed = [m.group(1) for m in (re.match(r"^Run closed (\S+)\s*$", l) for l in f.read().splitlines()) if m]
+    except OSError as exc:
+        raise GateError(f"cannot read {path}: {exc.strerror}")
+    if not closed:
+        raise GateError("the ledger is not marked `Run closed <date>`: nothing to archive")
+    dest, n = os.path.join(a.dir, f"run-{closed[0]}"), 1
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(a.dir, f"run-{closed[0]}-{n}")
+    os.mkdir(dest)
+    moved = sorted(e for e in os.listdir(a.dir) if os.path.isfile(os.path.join(a.dir, e)))
+    for e in moved:
+        os.rename(os.path.join(a.dir, e), os.path.join(dest, e))
+    print(f"archived {len(moved)} files to {dest}")
+    return 0
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="orch-gate.py")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -258,6 +326,9 @@ def main(argv):
     s.add_argument("dir"), s.add_argument("agent"), s.add_argument("--repo", required=True)
     s.add_argument("--branch", required=True), s.add_argument("--target", default="main")
     s.set_defaults(fn=cmd_merge_check)
+    s = sub.add_parser("archive")
+    s.add_argument("dir")
+    s.set_defaults(fn=cmd_archive)
     a = p.parse_args(argv)
     try:
         return a.fn(a)
