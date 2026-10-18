@@ -38,10 +38,11 @@ has "$orch/commands/event.md" 'the ledger has no `State pointer: off` line'
 has "$orch/commands/close.md" 'A ledger with a `State pointer: off` line means State is not touched.'
 has "$orch/SKILL.md" 'notes `State pointer: off (KIS <version>)` under `Updated:` in the'
 has "$orch/SKILL.md" '(`orch-kis-version.sh` exit 2) is offered the same install.'
-# 7. a finished run does not leak into the next one (start renames a ledger marked Run closed and
+# 7. a finished run does not leak into the next one (start archives a ledger marked Run closed with its run files and
 #    starts from the template; close also runs for a live watcher; step 1.1 reads the pointer-off line)
-has "$orch/commands/start.md" 'A ledger marked `Run closed <date>` belongs to a finished run: rename it `ledger-<date>.md`'
-has "$orch/commands/start.md" 'the template without the old `Run closed` or `State pointer:` lines.'
+has "$orch/commands/start.md" 'A ledger marked `Run closed <date>` belongs to a finished run: archive it with'
+has "$orch/commands/start.md" 'orch-gate.py archive <D>`, which moves every file in'
+has "$orch/commands/start.md" 'ledger, so the new run starts from the template without the old agents, `Run closed` or'
 has "$orch/commands/start.md" 'marked `Run closed`; a `State pointer: off (KIS <v>)` line whose `<v>` is the version the'
 has "$orch/commands/start.md" 'script printed (`none` for exit 2) means the user already declined this: skip the offer and'
 has "$orch/commands/start.md" 'step 1.1'
