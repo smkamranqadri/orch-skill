@@ -14,7 +14,7 @@ check() {
 
 home="$tmp/fresh"
 install "$home"
-for name in orch session-close; do
+for name in orch; do
   link="$home/.claude/skills/$name"
   test -L "$link" || fail "fresh $name link missing"
   [[ "$(readlink "$link")" == "../../.agents/skills/$name" ]] || fail "wrong $name link target"
@@ -29,9 +29,9 @@ cmp -s "$tmp/before" "$tmp/after" || fail "correct link was recreated"
 grep -q 'Claude skill link already current:' "$log" || fail "correct link not reported"
 
 # Check must detect a missing link while the installed skill itself is current.
-unlink "$home/.claude/skills/session-close"
+unlink "$home/.claude/skills/orch"
 if check "$home"; then fail "missing link should fail check"; fi
-grep -q 'Claude skill link missing: session-close' "$log" || fail "missing link not reported"
+grep -q 'Claude skill link missing: orch' "$log" || fail "missing link not reported"
 check "$home" --no-claude-link || fail "opt-out check should ignore missing links"
 
 for kind in file directory foreign-link dangling-link; do
@@ -62,8 +62,7 @@ install "$home" --no-claude-link
 test ! -e "$home/.claude/skills" || fail "opt-out created skill links"
 check "$home" --no-claude-link || fail "opt-out check"
 home="$tmp/only"
-install "$home" --only session-close
-test -L "$home/.claude/skills/session-close" || fail "only: selected link missing"
-test ! -e "$home/.claude/skills/orch" || fail "only: unselected link created"
-check "$home" --only session-close || fail "only: check failed"
+install "$home" --only orch
+test -L "$home/.claude/skills/orch" || fail "only: selected link missing"
+check "$home" --only orch || fail "only: check failed"
 echo "skill-link tests: pass"
