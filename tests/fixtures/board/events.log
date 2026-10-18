@@ -1,0 +1,10 @@
+2026-10-17T10:00:00Z opal registered orch=wQ:p1
+2026-10-17T10:01:00Z opal working | Preserve the moonstone report | ctx 28% used
+2026-10-17T10:20:00Z opal done | Preserve the moonstone report | ctx 61% used
+2026-10-17T10:22:00Z orchestrator woken orch=wQ:p1 | opal
+2026-10-17T10:30:00Z opal mark:verified a1 | report checked | proof .orch/opal/report.md
+2026-10-17T10:31:00Z opal gone |  | ctx -
+2026-10-18T11:40:00Z ember working | Shape the ember engine | ctx 41k/1M
+2026-10-18T11:41:00Z ember mark:reported a1 | engine report received | proof .orch/ember/report.md
+2026-10-18T11:42:00Z fern blocked | Choose fern fixtures | ctx 30k/1M
+2026-10-18T11:42:01Z orchestrator woken orch=wQ:p1 | fern
