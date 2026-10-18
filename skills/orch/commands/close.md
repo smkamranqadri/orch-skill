@@ -13,23 +13,27 @@ the close asks.
 
 Full method: `~/.agents/skills/orch/SKILL.md`. The handoff command reuses steps 3, 4, 5 and 7 below.
 
-1. **Close agents** (only when a run is active). A run is active when the run dir
-   (`D=$(~/.agents/skills/orch/scripts/orch-dir.sh --check)`) holds a `ledger.md` with a row
-   whose status is not `closed`, `merged` or `gone`. None: skip to step 3. For each agent that is
+1. **Close agents** (only live ones). `D=$(~/.agents/skills/orch/scripts/orch-dir.sh --check)`.
+   For each ledger row in `D` whose status is not `closed`, `merged` or `gone` and whose agent is
    still alive, ask for its handoff note, copy its worktree's gitignored reports somewhere
    durable, then close the pane and the workspace. Agents owned by another orchestrator are
-   left alone and named. Then stop the watcher
+   left alone and named. No live agent, or no run dir: nothing to close here; go on to step 2.
+2. **End the run's records.** Runs whenever `D/ledger.md` is an agents ledger (not `Ledger:
+   minimal`) not yet marked `Run closed`, or State's `Run:` line names `D`, even when every row is already `closed` or
+   `merged` (the normal end of a run). Stop the watcher when `<D>/watcher.pid` exists
    (`kill $(cat <D>/watcher.pid)`, confirm with `kill -0`) and mark the ledger `Run closed
-   <date>`.
-2. **End the run's records** (only when step 1 ran). With `kis/`: delete the `Run:` line from
-   `kis/state/current.md`, and move the ledger's Open decisions into the plan in `kis/intent/`
-   (or `kis/intent/backlog.md` when no plan fits), each as the user's words with its date. Done
-   items already hold a proof line in State; leave them. Without `kis/`: the ledger stays as the
-   record and keeps its Open decisions and Done lines for the next session.
+   <date>`. With `kis/`: move the ledger's Open decisions into the plan in `kis/intent/` (or
+   `kis/intent/backlog.md` when no plan fits), each as the user's words with its date, and
+   delete each moved entry from the ledger so a later close cannot move it twice. Then
+   delete the `Run:` line from `kis/state/current.md` and write State's Task and Next from the ledger's
+   `Next action` line(s) and any row not yet `merged`. Done items already hold a proof line in
+   State; leave them. Without `kis/`: the ledger stays as the record and keeps its Open
+   decisions and Done lines for the next session. A `Run:` line naming another dir is another
+   session's run: keep it. Pointer off (SKILL.md): State is not touched.
 3. **Sync project memory.** With a `kis/` folder, run the KIS sync step (`/kis:sync`, or
    `.agents/skills/kis/commands/sync.md`), working from `git status` and `git diff`, not
    memory. No `kis/`: skip steps 3 to 5 and say so. A `Run:` line still in State (another
-   session's run) is kept, never rewritten.
+   session's run) is kept, never rewritten. Step 2 already restored Task and Next; sync keeps them.
 4. **Check project memory.** Run the KIS check step (`/kis:check`, or `commands/check.md`).
 5. **Apply the check.** With `apply`, apply the proposed cleanup at once; otherwise show the
    proposal and wait for a yes. Then write the State stamp as the last State write:

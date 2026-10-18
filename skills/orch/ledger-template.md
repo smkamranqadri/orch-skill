@@ -24,8 +24,8 @@ Evidence (verdict marks) lives in events.log, not here.
 ## Watcher
 pane <id>, pid <n>, wakes: <owners per agents.txt>, agents: <names> (<dir>/agents.txt), log: <dir>/events.log
 
-## Open decisions (user's words, who they apply to; flush to the KIS plan at handoff)
+## Open decisions (user's words, who they apply to; flush to the KIS plan at close)
 - <date time> "<decision>" (applies to: <stream>)
 
-## Done this run (one line each; move to KIS at handoff when the repo has kis/)
+## Done this run (one line each; merged work also has its proof line in State)
 - <date> <what, commit>

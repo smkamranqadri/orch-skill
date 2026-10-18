@@ -12,8 +12,8 @@ most of their turns, held 346 background watchers as children, needed 61 TaskSto
 next action in one compact. This skill is the mechanics of the method.
 
 Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orch:watch`,
-`/orch:event`, `/orch:close`. Codex and others: "run the orch start step" and follow
-`commands/<name>.md`.
+`/orch:event`, `/orch:close`. Codex: `/prompts:orch-start`; Command Code: `/orch-start`; agy and
+others: "run the orch start step" and follow `commands/<name>.md`.
 
 ## Modes
 
@@ -45,14 +45,16 @@ records `Plan review: <reviewer>; outcome: ready|rework; <date>`, and `check` re
 Every orch step that writes `kis/state/current.md` (`start`, `event`, `handoff`, `close`) follows it:
 
 1. While the run is active State holds one line `Run: orch run active; live record at <abs path
-   of the ledger>` and no Task, Next or status copied from the ledger. Written by `start`,
-   removed by `close` only; `handoff` keeps it.
+   of the ledger>` and no Task, Next or status copied from the ledger; `start` moves State's
+   Task and Next into the ledger when it writes the line. Removed by `close` only; `handoff` keeps it.
 2. Each merge adds one proof line to State: `Merged: <task> <short sha>; proof <command: result>`.
    `event` writes it in the merge turn.
 3. After the last State edit of a step, run `.agents/skills/kis/scripts/state-stamp.sh <project
    root>` and write its output verbatim as the single `Stamp:` line near the top of State.
-4. `close` flushes the ledger's Open decisions to Intent, removes the `Run:` line, restores Task
-   and Next from the ledger, then stamps. `handoff` passes the decisions on in its packet.
+4. `close` flushes the ledger's Open decisions to Intent (once; it deletes what it moved),
+   removes the `Run:` line, restores Task and Next from the ledger, then stamps. It does this
+   whenever the run exists, also when every agent is already closed. `handoff` leaves decisions
+   in the ledger and passes them on in its packet.
 5. Pointer off or no KIS: State is never touched by a run; the ledger is the whole record.
    Ledger and State never disagree about what is merged.
 
