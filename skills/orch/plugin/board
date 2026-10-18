@@ -66,6 +66,51 @@ def wrap(text, width):
     return lines + [text]
 
 
+def clip(text, width):
+    text = clean(text)
+    if cells(text) <= width:
+        return text
+    result = ""
+    for char in text:
+        if cells(result + char) > width - 1:
+            break
+        result += char
+    return result.rstrip() + "…"
+
+
+def hanging(text, width, indent):
+    lines, line = [], ""
+    for word in clean(text).split():
+        gap = " " if line.strip() else ""
+        if line.strip() and cells(line + gap + word) > width:
+            lines.append(line)
+            line = indent + clip(word, width - cells(indent))
+        else:
+            line += gap + clip(word, width - cells(line + gap))
+    return lines + [line]
+
+
+def age(seconds):
+    hours, minutes = int(seconds) // 3600, int(seconds) % 3600 // 60
+    if hours >= 24:
+        return f"{hours // 24}d {hours % 24:02d}h"
+    return f"{hours}h{minutes:02d}m"
+
+
+def brief_title(directory, path):
+    path = clean(path)
+    if path == "none":
+        return "none"
+    path = Path(path).expanduser()
+    bases = (directory, directory.parent, directory.parent.parent)
+    candidates = [path] if path.is_absolute() else [base / path for base in bases]
+    for candidate in candidates:
+        for line in read(candidate).splitlines():
+            if line.startswith("# "):
+                return clean(re.sub(r"^Brief:\s*", "", line[2:]))
+    return "none"
+
+
 def when(t, now):
     local = t.astimezone(now.tzinfo)
     if local.date() == now.date():
@@ -79,12 +124,13 @@ def ledger(text):
     for line in text.splitlines():
         if line.startswith("# Orchestrator ledger:"):
             repo = clean(line.split(":", 1)[1])
-        match = re.match(r"Next action(?: \(([^)]+)\))?:\s*(.*)$", line)
-        if match:
-            nexts.append((match[1] or "none", clean(match[2])))
-        match = re.search(r"\bby ([\w.-]+).*?\b(w[^\s,;()]+:p[^\s,;()]+)", line)
-        if line.startswith("Updated:") and match:
-            names[match[2]] = match[1]
+        if not section:
+            match = re.match(r"Next action(?: \(([^)]+)\))?:\s*(.*)$", line)
+            if match:
+                nexts.append((match[1] or "none", clean(match[2])))
+            match = re.search(r"\bby ([\w.-]+), (w[^\s,;()]+:p[^\s,;()]+)(?=$|[\s,;.])", line)
+            if line.startswith("Updated:") and match:
+                names[match[2]] = match[1]
         if line.startswith("## "):
             section, header = line[3:].strip().lower(), None
         if section != "pane agents" or not line.lstrip().startswith("|"):
@@ -156,7 +202,9 @@ def snapshot(directory, now=None, live_names=None):
         states[name] = state
         if latest:
             since[name] = latest["t"]
-        title = clean(row.get("title") or row.get("task"))
+        title = brief_title(directory, row.get("brief"))
+        if title == "none":
+            title = clean(row.get("task"))
         if title == "none":
             title = next((clean(e["title"]) for e in reversed(state_events)
                           if clean(e["title"]) != "none"), name)
@@ -170,8 +218,8 @@ def snapshot(directory, now=None, live_names=None):
         deps = [] if depends == "none" else re.split(r"[,\s]+", depends)
         started = "none"
         if latest:
-            age = max(0, int((now - latest["t"]).total_seconds()))
-            started = f"{age // 3600}h{age % 3600 // 60:02d}m | since {when(latest['t'], now)}"
+            seconds = max(0, int((now - latest["t"]).total_seconds()))
+            started = f"{age(seconds)} | since {when(latest['t'], now)}"
         tasks.append(dict(name=name, title=title, state=state, model=clean(row.get("kind/model")),
                           pane=clean(row.get("pane")), owner=owner_name(owners.get(name) or row.get("owner"), names),
                           age=started, evidence=evidence, context=ctx, depends=deps, row=row))
@@ -180,6 +228,8 @@ def snapshot(directory, now=None, live_names=None):
     needs = watch.needs_you(events, set(owners) | active, states, since, now, waiting=waiting, usage=usage_text)
     need_lines = []
     for stamp, message in needs:
+        message = re.sub(r"\b(\d+)h(\d\d)m\b",
+                         lambda m: age(int(m[1]) * 3600 + int(m[2]) * 60), message)
         need_lines.append((when(stamp, now) + " " if stamp else "") + message)
     return dict(repo=repo, now=now, tasks=tasks, events=events, usage=usage_text,
                 nexts=[(owner_name(owner, names), action) for owner, action in nexts],
@@ -205,7 +255,7 @@ def task_lines(task):
             "Context: " + task["context"], "Depends: " + (", ".join(task["depends"]) or "none")]
 
 
-def recent(events, now):
+def recent(events, now, titles=None):
     lines, day = [], None
     for event in events[-8:]:
         event_day = event["t"].astimezone(now.tzinfo).date()
@@ -214,7 +264,8 @@ def recent(events, now):
             lines.append("[" + ("Today " if day == now.date() else "") + str(day) + "]")
         detail = event["kind"]
         if detail == "state":
-            detail = event["state"] + ": " + clean(event["title"])
+            title = (titles or {}).get(event["agent"], clean(event["title"]))
+            detail = event["state"] + ": " + title
         elif detail == "mark":
             detail = f"{event['tier']}: {event['what']} | proof {clean(event['proof'])}"
         elif detail == "woken":
@@ -227,14 +278,20 @@ def render(data, width=80, selected=None, card=None):
     width = max(20, width)
     lines, positions = [], {}
 
-    def add(text, style=""):
-        lines.extend((part, [(0, cells(part), style)]) for part in wrap(text, width))
+    def add(text, style="", cut=False, indent=None):
+        parts = wrap(text, width)
+        if cut:
+            parts = [clip(text, width)]
+        elif indent is not None:
+            parts = hanging(text, width, indent)
+        lines.extend((part, [(0, cells(part), style)]) for part in parts)
 
     add(f"Orch | {data['repo']} | {data['now'].strftime('%Y-%m-%d %H:%M:%S %Z')}")
     add("Usage: " + data["usage"])
     for owner, action in data["nexts"] or [("none", "none")]:
-        add(f"Next action ({owner}): {action}")
-    add("Needs-you: " + ("; ".join(data["needs"]) or "none"), "blocked" if data["needs"] else "")
+        label = "Next action:" if owner == "none" else f"Next action ({owner}):"
+        add(f"{label} {action}")
+    add("Needs-you: " + ("; ".join(data["needs"]) or "none"), "blocked" if data["needs"] else "", indent=" " * 11)
     for warning in data["warnings"]:
         add("Notice: " + warning, "blocked")
     add("Card" if card else "Tasks")
@@ -289,8 +346,9 @@ def render(data, width=80, selected=None, card=None):
                         x += box_width + 2
                     lines.append(("  ".join(parts), spans))
         add("Recent")
-        for line in recent(data["events"], data["now"]):
-            add(line)
+        titles = {task["name"]: task["title"] for task in tasks}
+        for line in recent(data["events"], data["now"], titles):
+            add(line, cut=True)
     add("Keys: Tab/j/k/arrows select | Enter card | Esc back | PgUp/PgDn scroll | q quit")
     return lines, positions
 

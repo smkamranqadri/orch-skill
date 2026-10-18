@@ -16,6 +16,7 @@ import subprocess
 import termios
 import sys
 import tempfile
+import textwrap
 import tomllib
 import unittest
 from unittest.mock import Mock, patch
@@ -87,7 +88,7 @@ class PluginTests(unittest.TestCase):
                          "11:42:00 fern is blocked and needs you",
                          "waiting on user: approve fern's fixture choice", "usage ASK: codex"])
         strip = self.render().split("Needs-you: ", 1)[1].split("\nTasks", 1)[0]
-        self.assertEqual(" ".join(strip.splitlines()), "; ".join(self.data["needs"]))
+        self.assertEqual(" ".join(line.strip() for line in strip.splitlines()), "; ".join(self.data["needs"]))
 
     def test_closed_title_evidence_and_card(self):
         opal = next(t for t in self.data["tasks"] if t["name"] == "opal")
@@ -95,7 +96,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(opal["context"], "61% used")
         self.assertEqual(opal["pane"], "none")
         self.assertEqual(opal["owner"], "captain (wQ:p1)")
-        self.assertEqual(opal["age"], "25h29m | since 2026-10-17 10:31:00")
+        self.assertEqual(opal["age"], "1d 01h | since 2026-10-17 10:31:00")
         self.assertEqual(opal["evidence"], "verified a1: report checked | proof .orch/opal/report.md")
         with (self.run / "events.log").open("a") as stream:
             stream.write("2026-10-18T11:59:00Z silt done | An earlier cycle | ctx 10% used\n")
@@ -155,7 +156,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(data["tasks"], [])
         self.assertEqual(data["warnings"], ["ledger.md missing or unreadable"])
         text = "\n".join(t for t, _ in board.render(data)[0])
-        self.assertRegex(text, r"(?m)^Next action \(none\): none$")
+        self.assertRegex(text, r"(?m)^Next action: none$")
         self.assertRegex(text, r"(?m)^Tasks\nnone\nRecent\nnone$")
         self.assertRegex(text, r"(?m)^Needs-you: none$")
         ledger_path = self.run / "ledger.md"
@@ -185,8 +186,8 @@ class PluginTests(unittest.TestCase):
 
     def test_explicit_titles_and_run_override(self):
         path = self.run / "ledger.md"
-        text = path.read_text().replace("| owns |", "| owns | title |")
-        text = text.replace("|---|---|---|---|---|---|---|---|---|---|---|---|", "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        text = path.read_text().replace("| owns |", "| owns | task |")
+        text = text.replace("|" + "---|" * 11, "|" + "---|" * 12)
         for filename, title in (("engine.py", "Ember task"), ("foliage.py", "Fern task"),
                                 ("notes.md", "Opal task"), ("layers.py", "Silt task")):
             text = text.replace(filename + " |", filename + " | " + title + " |")
@@ -199,6 +200,118 @@ class PluginTests(unittest.TestCase):
         missing = self.command("--open", env=dict(self.env, HERDR_ENV="1"))
         self.assertEqual(missing.returncode, 1)
         self.assertEqual(missing.stderr, "orch board: board action needs a pane context or ORCH_RUN_DIR\n")
+
+    def legacy_run(self):
+        destination = self.root / "legacy"
+        shutil.copytree(ROOT / "tests/fixtures/board-legacy", destination)
+        return destination / "moonwell.reports/orch"
+
+    def test_legacy_brief_title_before_task_and_chrome(self):
+        directory = self.legacy_run()
+        data = board.snapshot(directory, NOW)
+        task = data["tasks"][0]
+        self.assertEqual(task["name"], "leaf-queue")
+        self.assertEqual(task["title"], "Resume leaf queue (#143 + #128)")
+        for width in (80, 140):
+            text = "\n".join(t for t, _ in board.render(data, width)[0])
+            self.assertRegex(text, r"(?m)^\| Resume leaf queue \(#143 \+ #128\) +\|.*$")
+            self.assertRegex(text, r"(?m)^2026-10-09 13:43:19 leaf-queue done: Resume leaf queue \(#143 \+ #128\)$")
+            self.assertNotIn("leaf-queu…", text)
+        path = directory / "ledger.md"
+        text = path.read_text().replace("| last event |", "| last event | task |")
+        text = text.replace("|" + "---|" * 8, "|" + "---|" * 9)
+        text = text.replace("merged; worktree and branch removed |", "merged; worktree and branch removed | Task fallback |")
+        path.write_text(text)
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"], "Resume leaf queue (#143 + #128)")
+        brief = directory.parent / "leaf-queue/brief-resume.md"
+        brief.write_text("An introduction.\n## Not the task title\n# Brief: First task heading\n# Second heading\n")
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"], "First task heading")
+        brief.write_text("An introduction.\n## No task heading here\n")
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"], "Task fallback")
+        brief.unlink()
+        (directory / "none").write_text("# Incorrect title from a placeholder path\n")
+        self.assertEqual(board.brief_title(directory, None), "none")
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"], "Task fallback")
+        path.write_text(text.replace("| Task fallback |", "| none |"))
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"],
+                         "⌘ Command Code · leaf-queu… · fixture-flash-(latest)")
+        absolute = self.root / "absolute-brief.md"
+        absolute.write_text("# Brief: Absolute task heading\n")
+        path.write_text(text.replace("../moonwell.reports/leaf-queue/brief-resume.md", str(absolute)))
+        self.assertEqual(board.snapshot(directory, NOW)["tasks"][0]["title"], "Absolute task heading")
+
+    def test_legacy_owner_regex_and_header_next(self):
+        directory = self.legacy_run()
+        data = board.snapshot(directory, NOW)
+        self.assertEqual(data["nexts"], [("none", "none - the run is complete; optional checks only."),
+                         ("name unavailable (w2:p1T)", "SESSION CLOSED; keep the reports.")])
+        text = "\n".join(t for t, _ in board.render(data, 140)[0])
+        self.assertRegex(text, r"(?m)^Next action: none - the run is complete; optional checks only\.$")
+        self.assertRegex(text, r"(?m)^Next action \(name unavailable \(w2:p1T\)\): SESSION CLOSED; keep the reports\.$")
+        self.assertNotIn("Next action (none)", text)
+        self.assertNotIn("archived leaf-queue", text)
+        path = directory / "ledger.md"
+        path.write_text(path.read_text().replace("by the Claude orchestrator (pane w2:p1T)", "by captain, w2:p1T"))
+        self.assertEqual(board.snapshot(directory, NOW)["nexts"][1][0], "captain (w2:p1T)")
+
+    def test_legacy_ages_at_day_boundary(self):
+        data = board.snapshot(self.legacy_run(), NOW)
+        self.assertEqual(data["tasks"][0]["age"], "8d 22h | since 2026-10-09 13:43:19")
+        self.assertEqual(data["needs"][0], "2026-10-07 06:29:00 session-bell finished 11d 05h ago, no verdict marked")
+        self.assertEqual(board.age(24 * 3600 - 1), "23h59m")
+        self.assertEqual(board.age(24 * 3600), "1d 00h")
+        self.assertEqual(board.age(269 * 3600 + 31 * 60), "11d 05h")
+        path = self.run / "events.log"
+        with path.open("a") as stream:
+            stream.write("2026-10-18T11:59:00Z ember mark:reported a1 | recent report | proof -\n")
+        self.assertEqual(board.snapshot(self.run, NOW)["tasks"][0]["age"], "0h20m | since 11:40:00")
+
+    def test_legacy_recent_clip_and_needs_hanging(self):
+        data = board.snapshot(self.legacy_run(), NOW)
+        full = "2026-10-07 06:29:00 session-bell done: ⌘ Command Code · session-bell · fixture-flash-(latest)"
+        for width in (80, 140):
+            text = "\n".join(t for t, _ in board.render(data, width)[0])
+            lines = text.splitlines()
+            recent = lines[lines.index("Recent") + 1:-1]
+            self.assertEqual(len(recent), 4)
+            self.assertEqual(recent[1], full if width == 140 else full[:79] + "…")
+            self.assertTrue(all(board.cells(line) <= width for line in lines))
+            needs_start = next(i for i, line in enumerate(lines) if line.startswith("Needs-you:"))
+            needs = lines[needs_start:lines.index("Tasks")]
+            self.assertTrue(all(line.startswith(" " * 11) for line in needs[1:]))
+            self.assertEqual(" ".join(line.strip() for line in needs), "Needs-you: " + "; ".join(data["needs"]))
+            expected = textwrap.wrap("Needs-you: " + "; ".join(data["needs"]), width=width,
+                                     subsequent_indent=" " * 11, break_long_words=False, break_on_hyphens=False)
+            self.assertEqual(needs, expected)
+        card = "\n".join(t for t, _ in board.render(data, 80, card="session-bell")[0])
+        self.assertIn(full, " ".join(card.splitlines()))
+        self.assertEqual(board.clip("月" * 50, 80), "月" * 39 + "…")
+        self.assertEqual(board.hanging("Needs-you: " + "x" * 100, 80, " " * 11),
+                         ["Needs-you:", " " * 11 + "x" * 68 + "…"])
+
+    def test_fixture_separator_counts(self):
+        fixtures = [FIXTURE / "ledger.md", ROOT / "tests/fixtures/board-legacy/moonwell.reports/orch/ledger.md"]
+        for fixture in fixtures:
+            rows = [board.watch.split_row(line) for line in fixture.read_text().splitlines() if line.startswith("|")]
+            self.assertTrue(rows)
+            self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
+        self.assertEqual(len(board.watch.split_row((FIXTURE / "ledger.md").read_text().splitlines()[8])), 11)
+
+    def test_hook_is_consumed_and_truncated_by_merged_watcher(self):
+        watcher = board.watch.Watcher(str(self.run))
+        self.assertEqual(Path(watcher.signal), self.cache / "events.signal")
+        result = self.hook("pane.agent_status_changed", {"pane_id": "wQ:p2", "agent_status": "blocked"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        watcher.read_signal()
+        self.assertEqual(watcher.signalled, {"wQ:p2": "blocked"})
+        with Path(watcher.signal).open("a") as stream:
+            stream.write(json.dumps({"pane": "padding", "padding": "x" * (1 << 20)}) + "\n")
+        result = self.hook("pane.closed", {"pane_id": "wQ:p2"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        watcher.read_signal()
+        self.assertEqual(watcher.signalled["wQ:p2"], None)
+        self.assertEqual(Path(watcher.signal).stat().st_size, 0)
+        self.assertEqual(watcher.signal_pos, 0)
 
     def test_graph_order_cycles_and_selection(self):
         tasks = list(reversed(self.data["tasks"]))
