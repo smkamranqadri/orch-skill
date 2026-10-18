@@ -1,8 +1,8 @@
 # Design workflow: two paths, one review
 
-Any screen a person will see is designed and approved before its code (preference 1). The
+Any screen a person will see is designed and approved before its code. The
 design stream is the first stream of a feature; implementation briefs point at the approved
-exports, never at prose (coordination rule 3). This reference says how, with and without pen.dev,
+exports, never at prose. This reference says how, with and without pen.dev,
 and what the user gets to review. The design brief points here.
 
 ## Which path
@@ -19,9 +19,9 @@ the session, or the `pen` CLI answers `pen --version`, or `/Applications/Pen.app
 ## The Pencil path
 
 1. The design agent (the `designer` sub-agent, or a pane agent on Opus for new design and Sonnet
-   for edits, preference 29) reads `Gotchas: Pencil MCP` first when lore notes are present.
+   for edits) reads the project's Pencil MCP notes first when it has them.
    Every screen group gets a desktop frame and a phone frame at 390 wide; copy is true to what the
-   product does and carries no placeholders (preferences 1 and 2).
+   product does and carries no placeholders.
 2. Frames are named `<Layout> · <state>` (`Desktop 1280 · editor`, `Viewport 390 × 844 · editor`).
    Before frames come from a read-only snapshot of the real app, carried unchanged into the after
    frames (the last tartib round fell short of this: its before frames were reconstructions, and
@@ -44,9 +44,9 @@ The round dir is `.orch/<agent>/round-<n>/`, next to the agent's brief.
 
 `python3 ~/.agents/skills/orch/scripts/design-pages.py check <dir>`, then `review <dir>` and
 `prototype <dir>`. Both are local HTML files that open from disk; nothing is published unless the
-user is away from the machine and asks for a link (coordination rule 30).
+user is away from the machine and asks for a link.
 
-- **review.html** is the round's review (preferences 7 and 8): only the changed screens, each
+- **review.html** is the round's review: only the changed screens, each
   with its id, one sentence, the user's feedback above it, before and after side by side with the
   phone next to the desktop, and a "review these first" list at the top. A module's first round
   shows every screen once; later rounds show only what changed. The user answers in chat by id:
@@ -74,7 +74,7 @@ paths. After the user answers, the next round's `review.json` carries their word
 ## Approval and after
 
 A module's screens are approved once, on one review page that shows all of them; a revision shows
-only the changed screens (preference 8). Approval is the user's words in chat ("all approved",
+only the changed screens. Approval is the user's words in chat ("all approved",
 or per id). The orchestrator records it in the ledger's Open decisions and, with KIS, in the
 plan. Implementation briefs then point at `exports/<frameId>.png` of the approved frames and at
 `prototype.html` for flow, never at prose descriptions of the design.
