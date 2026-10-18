@@ -13,7 +13,10 @@ The status cell starts with one fixed word so `check` can read it: `working`, `d
 `closed`, `gone`, `open: next cycle <what>`, or `queued: after <task>` (held by the split gate: no pane yet).
 Any text follows after a comma or colon. Evidence (verdict marks) lives in events.log, not here.
 `depends`: task names that must merge first; `owns`: paths or globs the task writes (both feed
-`scripts/orch-gate.py`; `none` for no dependency). A task is a row, named by its agent.
+`scripts/orch-gate.py`). `depends: none` = no dependency. `owns: none` (or `-`) = the task writes
+nothing, such as a diff reviewer, and never holds another task; an empty `owns` cell holds every
+other task. A dependency counts as landed when its row says `merged` or `closed, merged <sha>`.
+A task is a row, named by its agent.
 
 | name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event | depends | owns |
 |---|---|---|---|---|---|---|---|---|---|---|
