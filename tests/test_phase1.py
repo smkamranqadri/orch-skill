@@ -216,6 +216,13 @@ else: print(json.dumps({"result":{}}))
   self.assertNotIn('session-a/broken-writer',self.state()['agents'])
   branch=subprocess.run(['git','-C',str(self.repo),'branch','--list','orch/broken-writer'],text=True,capture_output=True,env=self.env); self.assertEqual(branch.stdout,'')
   self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
+ def test_worktree_rollback_retains_unmerged_branch_and_cleanup_record(self):
+  self.reg(); current=subprocess.run(['git','-C',str(self.repo),'branch','--show-current'],text=True,capture_output=True,check=True,env=self.env).stdout.strip()
+  subprocess.run(['git','-C',str(self.repo),'switch','-qc','unmerged-base'],check=True,env=self.env); (self.repo/'unmerged-fictional.txt').write_text('branch-only commit')
+  subprocess.run(['git','-C',str(self.repo),'add','unmerged-fictional.txt'],check=True,env=self.env); subprocess.run(['git','-C',str(self.repo),'commit','-qm','fictional unmerged base'],check=True,env=self.env); subprocess.run(['git','-C',str(self.repo),'switch','-q',current],check=True,env=self.env)
+  self.runcli('spawn','unsafe-rollback','--role','build','--kind','claude','--where','worktree','--base','unmerged-base','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_START':'1'})
+  a=self.state()['agents']['session-a/unsafe-rollback']; self.assertEqual(a['state'],'cleanup'); self.assertEqual(a['created'],['branch:orch/unsafe-rollback'])
+  branch=subprocess.run(['git','-C',str(self.repo),'branch','--list','orch/unsafe-rollback'],text=True,capture_output=True,env=self.env); self.assertEqual(branch.stdout.strip(),'orch/unsafe-rollback')
  def test_close_worktree_preflight_does_not_stop(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'untracked-fictional.txt').write_text('unsaved')
   n=len(self.calls()); p=self.runcli('close','writer',ok=False); self.assertIn('dirty paths: ?? untracked-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
