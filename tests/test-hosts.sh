@@ -128,6 +128,15 @@ diff -r --exclude=__pycache__ "$repo_root/skills/orch" "$home/.agents/skills/orc
 run update --source "$repo_root" --home "$home" --hosts all || fail "second update"
 hasnt "Retired session-close package: $home/.agents/skills/session-close"
 
+# 6b. update alone removes a leftover when orch itself is already current
+old_home "$home" 1.0.2
+if run check --source "$repo_root" --home "$home" --hosts all; then fail "leftover with a current orch should fail check"; fi
+has "Already current: orch"
+has "session-close leftover: package $home/.agents/skills/session-close (update removes it)"
+run update --source "$repo_root" --home "$home" --hosts all || fail "update with a current orch"
+has "Retired session-close package: $home/.agents/skills/session-close"
+test ! -e "$home/.agents/skills/session-close" -a ! -L "$home/.claude/skills/session-close" || fail "leftover remains after update"
+
 # 7. handoff and close work with session-close gone: they name no retired or lore step, and every
 #    installed path they cite exists in the upgraded home
 for f in handoff close; do
@@ -138,6 +147,16 @@ for f in handoff close; do
   done
 done
 grep -q 'commands/close.md' "$home/.agents/skills/orch/commands/handoff.md" || fail "handoff does not point at orch close"
+# close carries the decisions it took over from session-close and the plan: stamp via the helper,
+# Run pointer removal, decisions to Intent, no forced worktree removal, commit only as rules allow
+close="$home/.agents/skills/orch/commands/close.md"
+grep -q -F '.agents/skills/kis/scripts/state-stamp.sh <project root>' "$close" || fail "close does not write the stamp through the helper"
+grep -q -F 'delete the `Run:` line' "$close" || fail "close does not remove the Run pointer"
+grep -q -F 'into the plan in `kis/intent/`' "$close" || fail "close does not flush decisions to Intent"
+grep -q -F 'Never `git worktree remove --force`' "$close" || fail "close allows forced worktree removal"
+grep -q -F 'a rule against committing wins' "$close" || fail "close does not defer to a no-commit rule"
+if grep -q -i 'retro' "$close"; then fail "close still runs a retro"; fi
+grep -q -F '.agents/skills/kis/scripts/state-stamp.sh' "$home/.agents/skills/orch/commands/handoff.md" || fail "handoff does not write the stamp"
 
 # 8. every shipped session-close version is recognised; modified or foreign content is kept
 for v in 1.0.0 1.0.1 1.0.2; do
@@ -164,7 +183,7 @@ run install --source "$repo_root" --home "$home" --only orch --hosts none || fai
 has "Kept $home/.claude/skills/session-close (not the link orch shipped for session-close; remove it by hand)"
 [[ "$(readlink "$home/.claude/skills/session-close")" == "$home/other" ]] || fail "foreign session-close link changed"
 home="$tmp/h8s"; mkdir -p "$home/.agents/skills" "$home/other"
-echo mine > "$home/other/SKILL.md"
+cp "$fx/SKILL-1.0.2.md" "$home/other/SKILL.md"
 ln -s "$home/other" "$home/.agents/skills/session-close"
 run install --source "$repo_root" --home "$home" --only orch --hosts none || fail "install over symlinked package"
 test -L "$home/.agents/skills/session-close" -a -f "$home/other/SKILL.md" || fail "symlinked package was removed"
