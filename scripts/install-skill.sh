@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Install the skills in this repo (skills/*) into a user's home: ~/.agents/skills/<name>,
 # plus Claude discovery links ~/.claude/skills/<name>, the command link ~/.claude/commands/orch,
-# and orch's four named sub-agent
-# definitions ~/.claude/agents/<name>.md (copied, never overwritten). Run from a source clone only.
+# orch's four named sub-agent definitions ~/.claude/agents/<name>.md (copied, never overwritten),
+# and orch's commands for the other hosts: Codex prompts, Command Code commands, an agy skill
+# link. It also retires the session-close skill that orch:close replaced. Run from a source
+# clone only.
 set -euo pipefail
 
 usage() {
   cat <<'USAGE'
 Usage:
-  install-skill.sh --source <repo-root> [--home <dir>] [--force] [--force-agents] [--no-claude-link] [--agents-only] [--only <name>]
+  install-skill.sh --source <repo-root> [--home <dir>] [--force] [--force-agents] [--force-prompts]
+                   [--no-claude-link]
+                   [--agents-only|--wire-only] [--hosts <list>] [--only <name>]
+  install-skill.sh --source <repo-root> [--home <dir>] [--hosts <list>] --report
 
 Options:
   --source <path>    Source repo root containing skills/<name>/SKILL.md. Also ORCH_SKILL_SOURCE.
@@ -16,9 +21,17 @@ Options:
   --force            Replace an existing ~/.agents/skills/<name> (a .tgz backup is kept).
   --force-agents     Replace a different ~/.claude/agents/<name>.md (copy kept in ~/.agents/).
                      Without it a different file is kept and reported, never overwritten.
+  --force-prompts    Replace a Codex or Command Code prompt that orch did not ship (copy kept in
+                     ~/.agents/). Without it a different file is kept and reported; a copy orch
+                     shipped earlier is always replaced, with a backup.
   --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
   --agents-only      Install only the sub-agent definitions; leave the skills alone.
-  --only <name>      Install only this skill (orch or session-close). Repeatable.
+  --wire-only        Install only the retirement and the per-host wiring; leave the skills alone.
+  --hosts <list>     Hosts to wire orch commands into besides Claude: auto (default: those whose
+                     folder exists or whose binary is on PATH), all, none, or a comma list of
+                     codex, cmd, agy.
+  --report           Print one status line per host item and retired leftover; change nothing.
+  --only <name>      Install only this skill (orch). Repeatable.
   -h, --help         Show this help.
 USAGE
 }
@@ -30,7 +43,11 @@ home_dir="${HOME:-}"
 force="false"
 claude_link="true"
 force_agents="false"
+force_prompts="false"
 agents_only="false"
+wire_only="false"
+report="false"
+hosts="auto"
 only=()
 
 while [[ $# -gt 0 ]]; do
@@ -39,7 +56,11 @@ while [[ $# -gt 0 ]]; do
     --home) [[ $# -ge 2 ]] || die "--home requires a path"; home_dir="$2"; shift 2 ;;
     --force) force="true"; shift ;;
     --force-agents) force_agents="true"; shift ;;
+    --force-prompts) force_prompts="true"; shift ;;
     --agents-only) agents_only="true"; shift ;;
+    --wire-only) wire_only="true"; shift ;;
+    --report) report="true"; shift ;;
+    --hosts) [[ $# -ge 2 ]] || die "--hosts requires auto, all, none or a list"; hosts="$2"; shift 2 ;;
     --no-claude-link) claude_link="false"; shift ;;
     --only) [[ $# -ge 2 ]] || die "--only requires a skill name"; only+=("$2"); shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -76,6 +97,260 @@ wanted() {
 }
 
 skills_dir="$home_dir/.agents/skills"
+
+# --- retirement of session-close (replaced by orch:close) ---------------------------------
+# The installer removes only what it shipped: the discovery links with their exact shipped
+# targets, and the package when it is one SKILL.md whose sha256 is a version this repo shipped
+# (1.0.0, 1.0.1, 1.0.2). Anything else is the user's and is kept and reported.
+retired_hashes="3de7cc86230eb354ff60f84b2280a17facb5a3c028f5d749a4c5d820ab75a525 7feedfd1560e54a02cd86786878400941d1b52b5a0d7a5787caf90ea3960948c 2539ed9151a951dbe3330fabf3ecd9604674602e1bfd188176c1dea9867829bb"
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# Prints "<path>\t<expected link target>" per retired discovery link location.
+retired_link_paths() {
+  [[ "$claude_link" == "true" ]] && printf '%s\t%s\n' "$home_dir/.claude/skills/session-close" "../../.agents/skills/session-close"
+  printf '%s\t%s\n' "$home_dir/.gemini/config/skills/session-close" "../../../.agents/skills/session-close"
+  return 0
+}
+
+# "gone", "ours" (exactly what was shipped) or "foreign" for a retired link path.
+retired_link_state() {
+  local path="$1" target="$2"
+  if [[ ! -e "$path" && ! -L "$path" ]]; then echo gone
+  elif [[ -L "$path" && "$(readlink "$path")" == "$target" ]]; then echo ours
+  else echo foreign; fi
+}
+
+# "gone", "ours" (shipped, unmodified) or "foreign" for the retired package.
+retired_package_state() {
+  local dest="$skills_dir/session-close" h
+  if [[ ! -e "$dest" && ! -L "$dest" ]]; then echo gone; return; fi
+  if [[ -L "$dest" || ! -d "$dest" || ! -f "$dest/SKILL.md" ]]; then echo foreign; return; fi
+  [[ "$(find "$dest" -mindepth 1 | wc -l | tr -d ' ')" == 1 ]] || { echo foreign; return; }
+  h="$(sha256_of "$dest/SKILL.md")"
+  [[ " $retired_hashes " == *" $h "* ]] && echo ours || echo foreign
+}
+
+retire_session_close() {
+  local path target state
+  while IFS=$'\t' read -r path target; do
+    state="$(retired_link_state "$path" "$target")"
+    case "$state" in
+      ours) rm -f "$path"; echo "Retired session-close link: $path" ;;
+      foreign) echo "Kept $path (not the link orch shipped for session-close; remove it by hand)" ;;
+    esac
+  done < <(retired_link_paths)
+  case "$(retired_package_state)" in
+    ours) rm -rf "$skills_dir/session-close"; echo "Retired session-close package: $skills_dir/session-close" ;;
+    foreign) echo "Kept $skills_dir/session-close (modified or not shipped by orch; orch:close replaces it, remove it by hand)" ;;
+  esac
+}
+
+# --- shipped prompt copies ----------------------------------------------------------------
+# The Codex and Command Code prompts are copies, so a file at that path may be the user's own.
+# A copy counts as shipped when its sha256 is what this installer recorded for that path in
+# ~/.agents/orch-shipped.tsv, or one of the command versions earlier installers copied (list
+# below, frozen). A shipped copy is replaced (a backup is kept); any other file is kept and
+# reported unless --force. Shipped copies whose command no longer exists are removed on wiring.
+shipped_prompt_hashes="065874d8ead76667afb49882e4aafc59f6dc84c6bcea5ea3d11e2e89b99d07b2 2b86dd5744b104a6caa00e1ed199f6babf8cbb9c98ccf64db3ad36b19f37f0e0 2fdfbf795830945d3e9c100a83f015e54c65ab51bdcc2e2a9a8eb33ef9191250 51d78d584ce49e981191ef7af3b21fb2b4ca989add76b895ff9397a147554ac7 583f9962709010ca5eea31d189b379e452b3b503ed781a4f00c9b6c115079f11 5a8da3c96c2437ee381a66bcafe03a6c60f0199719c14ef80698d588ad82b25a 699d14b188cba775ce7da3f4c00ae3afdae2ef2d66c6a8aa1e05b5cf92154693 728284d390e888a8c9e19ed17d2f39ccefc3735323f36c4f538fb27439f915a7 728f2920da14b9019638869e694424a1b176c7a263f997baca49a7157dca5cc5 76e95eef727c6385e813208b8d24f2179467e7ef2c12f95f8329bcf8862dae58 8bcee1d695b6778cbda8b8ff9d27751ff444398c0ca1a566661e1253df0e6919 9b69d5d5e806d37b27661b152408b1e79edaa50719560b4b03992ca28f95cfd0 c76e162c4ed83d906aa617e6f7f77d203af073385a909a8d47ab1f1bd5d4565b cd027270ef7207d54459f12941ae2716bfe8550b4c5fb749fe5c65a0c4fdd0a1 d507ca0c9b91ac2e998e6bea8599ff3f5b3645bef019c8e989518f833b06fe7d d935c6e4abff1b6551dee1e1141f2e76fd20e27bb308d38c0dc147a139c6c39b e49ed71d38f454ddedff5f4fddff6ca38af6b7386a7cee7e6a8b120ca6835f65 ec5542a7b45f164acdf8bfdf37b07182d86f1ebe0cd52e8b68f92074412b673a"
+manifest="$home_dir/.agents/orch-shipped.tsv"
+
+manifest_hash() {  # <path> -> the sha256 recorded for it, or nothing
+  [[ -f "$manifest" ]] || return 0
+  awk -F'\t' -v p="$1" '$2 == p { h = $1 } END { if (h != "") print h }' "$manifest"
+}
+
+is_shipped() {  # <path of a plain file>
+  local h mh
+  h="$(sha256_of "$1")"; mh="$(manifest_hash "$1")"
+  [[ -n "$mh" && "$h" == "$mh" ]] || [[ " $shipped_prompt_hashes " == *" $h "* ]]
+}
+
+manifest_record() {  # <path of a plain file>: remember its hash as shipped
+  local tmp
+  mkdir -p "$(dirname "$manifest")"
+  tmp="$(mktemp "$manifest.XXXXXX")"
+  { [[ -f "$manifest" ]] && awk -F'\t' -v p="$1" '$2 != p' "$manifest"; printf '%s\t%s\n' "$(sha256_of "$1")" "$1"; } > "$tmp"
+  mv "$tmp" "$manifest"
+}
+
+manifest_forget() {  # <path>
+  local tmp
+  [[ -f "$manifest" ]] || return 0
+  tmp="$(mktemp "$manifest.XXXXXX")"
+  awk -F'\t' -v p="$1" '$2 != p' "$manifest" > "$tmp"
+  mv "$tmp" "$manifest"
+}
+
+# One backup folder per run, so an update that replaces several copies leaves one place to look.
+prompt_backup_dir="$home_dir/.agents/orch-prompt-backups/$(date +%Y%m%d-%H%M%S)"
+
+backup_prompt() {  # <path of a plain file> -> prints the backup path
+  local host; host="$(basename "$(dirname "$(dirname "$1")")")"
+  local b="$prompt_backup_dir/${host#.}-$(basename "$1")"
+  mkdir -p "$prompt_backup_dir"
+  cp "$1" "$b"
+  echo "$b"
+}
+
+# --- per-host wiring of the orch commands ---------------------------------------------------
+# Claude: ~/.claude/commands/orch -> the commands folder (/orch:start, /orch:close).
+# Codex: ~/.codex/prompts/orch-<name>.md copies (/prompts:orch-start). Command Code:
+# ~/.commandcode/commands/orch-<name>.md copies (/orch-start). agy has no custom slash commands:
+# it discovers the orch skill through ~/.gemini/config/skills/orch and runs a command by name
+# ("run the orch start step"). Copies carry no link into the package, so check compares bytes.
+real_home="$(cd "${HOME:-/}" 2>/dev/null && pwd -P || true)"
+codex_home="$home_dir/.codex"
+if [[ -n "${CODEX_HOME:-}" && "$home_dir" == "$real_home" ]]; then codex_home="$CODEX_HOME"; fi
+cmd_dir="$home_dir/.commandcode/commands"
+codex_dir="$codex_home/prompts"
+agy_link="$home_dir/.gemini/config/skills/orch"
+agy_target="../../../.agents/skills/orch"
+
+host_on() {
+  case "$hosts" in
+    all) return 0 ;;
+    none) return 1 ;;
+    auto)
+      case "$1" in
+        codex) [[ -d "$codex_home" ]] || command -v codex >/dev/null 2>&1 ;;
+        cmd) [[ -d "$home_dir/.commandcode" ]] || command -v cmd >/dev/null 2>&1 ;;
+        agy) [[ -d "$home_dir/.gemini" ]] || command -v agy >/dev/null 2>&1 ;;
+        *) return 1 ;;
+      esac ;;
+    *) [[ ",$hosts," == *",$1,"* ]] ;;
+  esac
+}
+
+command_files() { local f; for f in "$source_root"/skills/orch/commands/*.md; do [[ -f "$f" ]] && echo "$f"; done; return 0; }
+
+copy_state() {  # <source file> <dest file>: current | stale (a shipped older copy) | differs | missing
+  if [[ ! -e "$2" && ! -L "$2" ]]; then echo missing
+  elif [[ -f "$2" && ! -L "$2" ]] && cmp -s "$1" "$2"; then echo current
+  elif [[ -f "$2" && ! -L "$2" ]] && is_shipped "$2"; then echo stale
+  else echo differs; fi
+}
+
+# Shipped orch-*.md copies in <dir> whose command is gone from the source. Never a user file.
+orphan_copies() {  # <dir>
+  local f
+  [[ -d "$1" ]] || return 0
+  for f in "$1"/orch-*.md; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    [[ -f "$source_root/skills/orch/commands/$(basename "$f" | sed 's/^orch-//')" ]] && continue
+    is_shipped "$f" && echo "$f"
+  done
+  return 0
+}
+
+# orch-*.md files in <dir> that are not shipped: no source command, not a copy orch wrote. They are
+# the user's, kept as they are, and named so they are not a surprise.
+unshipped_copies() {  # <dir>
+  local f
+  [[ -d "$1" ]] || return 0
+  for f in "$1"/orch-*.md; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    [[ -f "$source_root/skills/orch/commands/$(basename "$f" | sed 's/^orch-//')" ]] && continue
+    is_shipped "$f" || echo "$f"
+  done
+  return 0
+}
+
+install_command_copies() {  # <label: "Codex prompt" | "Command Code command"> <dest dir>
+  local label="$1" dir="$2" f dest state backup
+  mkdir -p "$dir"
+  while IFS= read -r f; do
+    dest="$dir/orch-$(basename "$f")"
+    state="$(copy_state "$f" "$dest")"
+    case "$state" in
+      current)
+        [[ "$(manifest_hash "$dest")" == "$(sha256_of "$dest")" ]] || manifest_record "$dest"
+        echo "$label already current: $dest" ;;
+      missing) cp "$f" "$dest"; manifest_record "$dest"; echo "$label installed: $dest" ;;
+      stale|differs)
+        if [[ ! -f "$dest" || -L "$dest" ]]; then
+          echo "Kept your existing $label path: $dest (not a plain file; not overwritten)"
+        elif [[ "$state" == stale || "$force_prompts" == "true" ]]; then
+          backup="$(backup_prompt "$dest")"
+          cp "$f" "$dest"; manifest_record "$dest"
+          echo "$label updated: $dest (previous kept at $backup)"
+        else
+          echo "Kept your different $label: $dest (not shipped by orch; --force-prompts replaces it)"
+        fi ;;
+    esac
+  done < <(command_files)
+  while IFS= read -r dest; do
+    backup="$(backup_prompt "$dest")"
+    rm -f "$dest"; manifest_forget "$dest"
+    echo "$label removed: $dest (its command no longer exists; previous kept at $backup)"
+  done < <(orphan_copies "$dir")
+  while IFS= read -r dest; do
+    echo "$label kept (not shipped): $dest (no orch command by that name; left as it is)"
+  done < <(unshipped_copies "$dir")
+}
+
+agy_link_state() {
+  if [[ -L "$agy_link" ]] && [[ "$(readlink "$agy_link")" == "$agy_target" ]]; then echo current
+  elif [[ -e "$agy_link" || -L "$agy_link" ]]; then echo differs
+  else echo missing; fi
+}
+
+install_agy_link() {
+  case "$(agy_link_state)" in
+    current) echo "agy skill link already current: $agy_link" ;;
+    missing)
+      mkdir -p "$(dirname "$agy_link")"
+      ln -s "$agy_target" "$agy_link"
+      echo "agy skill link: $agy_link -> $agy_target" ;;
+    differs) echo "Kept your existing agy skill path: $agy_link (not overwritten)" ;;
+  esac
+}
+
+wire_hosts() {
+  if host_on codex; then
+    install_command_copies "Codex prompt" "$codex_dir"
+    echo "Codex usage: /prompts:orch-start /prompts:orch-close (custom prompts are deprecated upstream; the orch skill in ~/.agents/skills also loads by name)"
+  else echo "Codex commands: skipped (not installed; --hosts all forces)"; fi
+  if host_on cmd; then
+    install_command_copies "Command Code command" "$cmd_dir"
+    echo "Command Code usage: /orch-start /orch-close"
+  else echo "Command Code commands: skipped (not installed; --hosts all forces)"; fi
+  if host_on agy; then
+    install_agy_link
+    echo "agy usage: no custom slash commands; say \"run the orch start step\" or \"run the orch close step\""
+  else echo "agy skill link: skipped (not installed; --hosts all forces)"; fi
+}
+
+# Tab-separated lines: "<host>\t<path>\t<current|stale|differs|missing|orphan|kept>" per wired item, and
+# "retired\t<link|package>\t<path>\t<ours|foreign>" per leftover of session-close. Hosts that are
+# not selected print nothing. Changes nothing.
+report_wiring() {
+  local f dest path target state
+  if host_on codex; then
+    while IFS= read -r f; do dest="$codex_dir/orch-$(basename "$f")"; printf 'codex\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
+    while IFS= read -r dest; do printf 'codex\t%s\torphan\n' "$dest"; done < <(orphan_copies "$codex_dir")
+    while IFS= read -r dest; do printf 'codex\t%s\tkept\n' "$dest"; done < <(unshipped_copies "$codex_dir")
+  fi
+  if host_on cmd; then
+    while IFS= read -r f; do dest="$cmd_dir/orch-$(basename "$f")"; printf 'cmd\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
+    while IFS= read -r dest; do printf 'cmd\t%s\torphan\n' "$dest"; done < <(orphan_copies "$cmd_dir")
+    while IFS= read -r dest; do printf 'cmd\t%s\tkept\n' "$dest"; done < <(unshipped_copies "$cmd_dir")
+  fi
+  if host_on agy; then printf 'agy\t%s\t%s\n' "$agy_link" "$(agy_link_state)"; fi
+  while IFS=$'\t' read -r path target; do
+    state="$(retired_link_state "$path" "$target")"
+    [[ "$state" == gone ]] || printf 'retired\tlink\t%s\t%s\n' "$path" "$state"
+  done < <(retired_link_paths)
+  state="$(retired_package_state)"
+  [[ "$state" == gone ]] || printf 'retired\tpackage\t%s\t%s\n' "$skills_dir/session-close" "$state"
+  return 0
+}
+
+if [[ "$report" == "true" ]]; then report_wiring; exit 0; fi
+
 mkdir -p "$skills_dir"
 installed_any="false"
 
@@ -108,7 +383,7 @@ install_agents() {
 }
 
 for src in "$source_root"/skills/*/; do
-  [[ "$agents_only" == "true" ]] && break
+  [[ "$agents_only" == "true" || "$wire_only" == "true" ]] && break
   name="$(basename "$src")"
   wanted "$name" || continue
   [[ -f "$src/SKILL.md" ]] || die "skills/$name has no SKILL.md"
@@ -144,9 +419,11 @@ for src in "$source_root"/skills/*/; do
   fi
 done
 
-[[ "$installed_any" == "true" || "$agents_only" == "true" ]] || die "nothing matched --only"
+[[ "$installed_any" == "true" || "$agents_only" == "true" || "$wire_only" == "true" ]] || die "nothing matched --only"
 
-if [[ "$claude_link" == "true" ]] && wanted orch; then
+if [[ "$wire_only" == "true" ]]; then
+  :
+elif [[ "$claude_link" == "true" ]] && wanted orch; then
   install_agents
 else
   echo "Claude agents: skipped"
@@ -165,4 +442,11 @@ if [[ "$claude_link" == "true" ]] && wanted orch && [[ -d "$skills_dir/orch/comm
   echo "Claude commands link: $link -> ../../.agents/skills/orch/commands"
 else
   echo "Claude commands link: skipped"
+fi
+
+if wanted orch; then
+  retire_session_close
+  wire_hosts
+else
+  echo "Retirement and host wiring: skipped (orch not selected)"
 fi

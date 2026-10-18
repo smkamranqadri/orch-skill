@@ -75,7 +75,7 @@ out_bytes="$("$S" | wc -c | tr -d ' ')"
 
 # Live, read-only, only inside Herdr with agents.
 unset ORCH_AGENTS_FIXTURE_LIST ORCH_AGENTS_FIXTURE_PANES
-if [[ "${HERDR_ENV:-}" == "1" ]] && command -v herdr >/dev/null 2>&1; then
+if [[ -z "${ORCH_TEST_NO_LIVE:-}" && "${HERDR_ENV:-}" == "1" ]] && command -v herdr >/dev/null 2>&1; then
   full_bytes="$(herdr agent list 2>/dev/null | wc -c | tr -d ' ')"
   live_bytes="$("$S" | wc -c | tr -d ' ')"
   [[ "$live_bytes" -lt "$full_bytes" ]] || fail "live projection ($live_bytes) not smaller than herdr ($full_bytes)"

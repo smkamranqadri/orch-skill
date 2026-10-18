@@ -19,11 +19,20 @@ prompt can carry several agents.
    registrations. Read only your `orch=<owner>` entries in wake.md (legacy entries belong to
    the default owner). Preserve other owners' entries; process only your owned agents.
    Recheck ownership before acting: a handoff may have moved an agent since the prompt.
-2. For each agent named, read its verdict, not its output (rule 3): `herdr agent read <agent>
+2. For each agent named, read its verdict, not its output: `herdr agent read <agent>
    --source recent-unwrapped --lines 15 | tail -10`, or the handoff's `## Result` section.
    - finished with plan questions: `commands/task.md` step 9 (relay them to the user).
-   - finished with a report: verify it (coordination rule 35) when the user has asked for a
+   - finished with a report: verify it when the user has asked for a
      merge; otherwise record it and tell the user in one line.
+   - **Diff review before any merge.** The reviewer is a different agent on a different model than the
+     builder (the same host is fine; `review` refuses the builder's own model under any spelling,
+     and a name not in the model matrix: use `host/model` from `orch-models.py show`). It reads `git diff <fork point>..<branch tip>` and the
+     brief; on its verdict record it:
+     `python3 ~/.agents/skills/orch/scripts/orch-gate.py review <dir> <agent> --repo <worktree> --range <fork point>..<tip> --author <cli/model> --reviewer <cli/model> --verdict pass|fail`
+     (a fail is `sent-back`: re-prompt the builder, then review again). Immediately before the
+     merge: `python3 ~/.agents/skills/orch/scripts/orch-gate.py merge-check <dir> <agent> --repo <worktree> --branch <branch>`.
+     Merge only on exit 0. Exit 4 no review, 5 review failed, 6 a commit came after the review,
+     7 the review does not start at the branch's fork point: do not merge; get a new review.
    - Mark every verdict in the same turn, one short command each (`<dir>` is the run dir):
      `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`. Tiers: `reported` (the agent
      says done; not yet checked), `verified` (you re-ran the proof; `--proof` the log),
@@ -43,19 +52,28 @@ prompt can carry several agents.
    - `herdr agent prompt <agent> "/exit"`, then `herdr worktree remove --workspace <ws>` (merged
      work only; with unmerged commits, keep the worktree and say so), and `git branch -d <branch>`
      (never `-D`).
-   - Ledger: row status "closed", with the merge commit. Mark it: `merged` when it merged,
+   - Ledger: row status "closed, merged <short sha>" (the gate reads "merged" to release tasks that
+     depend on it; an abandoned stream is "closed: abandoned"). Mark it: `merged` when it merged,
      then `closed` after the remove; a multi-cycle stream gets `open` ("next cycle: <what>")
      instead, which holds the not-closed rules off until its next state change.
    Before ending any event turn run `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` and fix
    what it names for your rows (a row that is "done" or "merged" but neither "closed" nor
    "open: next cycle ..." is a missed step). Its exit is 1 with findings, 3 when the ledger
    cannot be parsed.
-4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/` and this event merged or
-   closed work, rewrite `kis/state/current.md` in the same turn, inline (it is a few lines, not
-   a sub-agent job): Task, Status, Proof as recorded in the ledger, and Next equal to the
-   ledger's Next action for this owner. Preserve other owners' current State entries. The ledger and State must never disagree about what is merged; a
-   handoff is too late to fix it. When the status space exists, give its task a one-line thought
-   through a sub-agent (rule 49).
+4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/`, State
+   is KIS >= 0.11 and the ledger has no `State pointer: off` line (SKILL.md, State contract) and this event
+   merged work: in the same turn, inline (a few lines, not a sub-agent job), add one proof line
+   `Merged: <task> <short sha>; proof <command: result>` to `kis/state/current.md`, leave the
+   `Run:` line and every other line alone, then write the stamp: run
+   `.agents/skills/kis/scripts/state-stamp.sh <project root>` and put its output verbatim as the
+   single `Stamp:` line near the top of State. Pointer off or no KIS: do not touch State. The
+   ledger and State must never disagree about what is merged; a handoff is too late to fix it.
+   When the status space exists, give its task a one-line thought through a sub-agent.
+   After a merge, release held work: `python3 ~/.agents/skills/orch/scripts/orch-gate.py release <dir> --apply`.
+   For each `release <name>`: launch it by `commands/task.md` steps 4 to 8 from the brief in its
+   row (the row's status becomes `working`, its last event "released: <blocker> merged"). A
+   `hold <name> after <task>` stays queued; `--apply` already rewrote its blocker. A
+   `hold <name>: dependency <task> ended unmerged` line: tell the user in your reply; do not launch.
 5. Reply in at most five lines: what changed, and what you need from the user, if anything.
    Then end the turn. Never wait in the foreground for the next event: the watcher will
    prompt again.

@@ -51,15 +51,13 @@ elif args[:2]==['agent','prompt']: sys.exit(0)
 ''')
         fake.chmod(0o755)
         env = {k: v for k, v in os.environ.items() if not k.startswith('HERDR_')}
+        self.cache = self.root / 'cache'
         env.update(PATH=str(self.bin) + os.pathsep + os.environ['PATH'], VIS_TEST_DIR=str(self.root),
-                   PYTHONDONTWRITEBYTECODE='1')
+                   PYTHONDONTWRITEBYTECODE='1', XDG_CACHE_HOME=str(self.cache), ORCH_USAGE_CACHE_DIR=str(self.cache / 'orch'))
         self.envpatch = patch.dict(os.environ, env, clear=True)
         self.envpatch.start()
         self.addCleanup(self.envpatch.stop)
         self.write_live()
-        patcher = patch.object(m.Watcher, 'refresh_usage', return_value=False)
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def write_live(self):
         (self.root / 'live.json').write_text(json.dumps(self.live))
@@ -355,10 +353,24 @@ class BoardTests(Base):
         self.assertTrue(any(r.endswith('a verified: suite 399 pass') for r in w.recent))
         self.assertTrue(any(r.endswith('a sent back: mutant survived') for r in w.recent))
         m.cmd_mark(str(self.d), ['a', 'merged', 'abc'])
-        w.owners = m.registrations(str(self.d))
-        w.poll()
+        w = m.Watcher(str(self.d))   # the board is rebuilt from the log each time
         self.assertTrue(any(r.endswith('a merged: abc') for r in w.recent))
-        self.assertEqual(len(w.recent), 5)
+        self.assertEqual(len(w.recent), 4)   # the finish and three marks
+
+    def test_cli_board_reads_the_usage_cache_and_collects_nothing(self):
+        self.setup_agent()
+        (self.cache / 'orch').mkdir(parents=True)
+        seeded = {'claude': {'cli': 'claude', 'status': 'ok', 'five_hour': {'used_pct': 25}, 'seven_day': {'used_pct': 94}}}
+        (self.cache / 'orch' / 'usage.json').write_text(json.dumps(seeded))
+        r = self.run_cli('board', str(self.d), '--now', '2026-10-13T10:11:00Z')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('usage claude 25%/94% ASK · codex ? · cmd ?', r.stdout.splitlines())
+        self.assertEqual(json.loads((self.cache / 'orch' / 'usage.json').read_text()), seeded)
+
+    def test_the_watcher_loop_never_collects_usage(self):
+        source = SCRIPT.read_text()
+        self.assertNotIn('"collect"', source)
+        self.assertFalse(hasattr(m.Watcher, 'refresh_usage'))
 
     def test_cli_board_accepts_now(self):
         self.setup_agent()
@@ -369,7 +381,7 @@ class BoardTests(Base):
 
 
 class CheckTests(Base):
-    def make_run(self, rows=(), nexts=('o1',), watcher=None, pad=0, agents=(), events=()):
+    def make_run(self, rows=(), nexts=('o1',), pid=True, pad=0, agents=(), events=()):
         lines = ['# Orchestrator ledger: test', 'Updated: now']
         lines += [f'Next action ({o}): do the next thing' if o else '' for o in nexts]
         lines += ['Waiting on user: none', '', '## Pane agents',
@@ -377,12 +389,13 @@ class CheckTests(Base):
                   '|---|---|---|---|---|---|---|---|']
         for name, status in rows:
             lines.append(f'| {name} | claude/sonnet | - | wt / br | .orch/{name}/brief.md | .orch/{name}/handoff.md | {status} | 10-13 10:00 x |')
-        lines += ['', '## Sub-agents and background jobs', '| name | type | status |', '|---|---|---|', '',
-                  '## Watcher', watcher if watcher is not None else
-                  f'pane wX:p1, pid {os.getpid()}, agents: {" ".join(n for n, _ in agents) or "none"} (.orch/agents.txt), log: .orch/events.log']
+        lines += ['', '## Sub-agents and background jobs', '| name | type | status |', '|---|---|---|']
         lines += [f'- filler {i}' for i in range(pad)]
         (self.d / 'ledger.md').write_text('\n'.join(lines) + '\n')
         (self.d / 'agents.txt').write_text(''.join(f'{n} orch={o}\n' for n, o in agents))
+        (self.d / 'watcher.pid').unlink(missing_ok=True)
+        if pid is not None:   # True: this process, which is alive
+            (self.d / 'watcher.pid').write_text(f'{os.getpid() if pid is True else pid}\n')
         if events:
             self.log(*events)
         (self.d / 'orchestrator').write_text('o1\n')
@@ -407,13 +420,15 @@ class CheckTests(Base):
         with patch.object(m, 'pid_alive', return_value=False):
             code, lines, _ = self.check('--offline')
         self.assertEqual(code, 1)
-        self.assertEqual(self.rules(lines), ['ledger-length', 'not-closed', 'not-closed', 'not-closed', 'watcher', 'watcher', 'log'])
+        self.assertEqual(self.rules(lines), ['ledger-length', 'not-closed', 'not-closed', 'not-closed', 'watcher', 'log'])
         self.assertIn('ledger has 79 lines, the limit is 60', lines[0])
         self.assertEqual([l.split(': ')[0] for l in lines[1:4]], ['w3:pZ'] * 3)
         self.assertEqual(sorted(l.split('] ')[1].split(':')[0] for l in lines[1:4]), ['ctx-trims', 'lore-ids', 'tartib-search'])
-        self.assertIn('watcher pid 59865 is not alive', lines[4])
-        self.assertIn("lists agents none but agents.txt holds ['ctx-trims', 'lore-ids', 'tartib-search', 'visibility']", lines[5])
-        self.assertIn('events.log has 7 unparseable line(s); first at line 103', lines[6])
+        # The fixture ledger still has its old `## Watcher` section (pid 59865): it is ignored, and
+        # the copied run has no watcher.pid.
+        self.assertIn('## Watcher', (self.d / 'ledger.md').read_text())
+        self.assertIn('watcher.pid is missing', lines[4])
+        self.assertIn('events.log has 7 unparseable line(s); first at line 103', lines[5])
         # Four of them are the hand-written "2026-10-09 22:01 ..." lines.
         self.assertEqual(sum(1 for l in (FIX / 'events.log').read_text().splitlines() if re.match(r'^\d{4}-\d\d-\d\d \d\d:\d\d ', l)), 4)
 
@@ -474,12 +489,37 @@ class CheckTests(Base):
 
     def test_watcher_rules(self):
         self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))
         with patch.object(m, 'pid_alive', return_value=False):
-            self.assertEqual(self.rules(self.check('--offline')[1]), ['watcher'])
-        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], watcher='pane wX:p1, agents: a (.orch/agents.txt)')
-        self.assertIn('has no pid', self.check('--offline')[1][0])
-        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], watcher=f'pane wX:p1, pid {os.getpid()}, agents: a, b (.orch/agents.txt), log: x')
-        self.assertIn("['a', 'b'] but agents.txt holds ['a']", self.check('--offline')[1][0])
+            code, lines, _ = self.check('--offline')
+        self.assertEqual((code, self.rules(lines)), (1, ['watcher']))
+        self.assertEqual(lines[0], f'run: [watcher] watcher pid {os.getpid()} is not alive')
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')], pid=None)
+        self.assertEqual(self.check('--offline')[1],
+                         ['run: [watcher] agents are registered but watcher.pid is missing or has no pid'])
+        (self.d / 'watcher.pid').write_text('junk\n')
+        self.assertIn('watcher.pid is missing or has no pid', self.check('--offline')[1][0])
+
+    def test_no_registered_agents_needs_no_watcher(self):
+        self.make_run(rows=[('a', 'closed: merged abc')], agents=[], pid=None)
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))
+
+    def test_old_ledger_with_a_watcher_section_still_reads(self):
+        self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
+        with (self.d / 'ledger.md').open('a') as f:
+            f.write('\n## Watcher\npane wX:p1, pid 1, agents: zzz (.orch/agents.txt), log: .orch/events.log\n')
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))   # its pid and agents are not read
+
+    def test_queued_row_needs_no_registration(self):
+        self.make_run(rows=[('a', 'working'), ('b', 'queued: after a')], agents=[('a', 'o1')])
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))
+        self.make_run(rows=[('b', 'queued: after a')], agents=[], pid=None)
+        self.assertEqual(self.check('--offline'), (0, ['check: clean'], ''))
+        # Only the exact held-task form is accepted; anything else not registered is still a finding.
+        for status in ('queued', 'queued: soon', 'queued:after a', 'waiting: after a'):
+            self.make_run(rows=[('b', status)], agents=[], pid=None)
+            code, lines, _ = self.check('--offline')
+            self.assertEqual((code, self.rules(lines)), (1, ['row-unregistered']), status)
 
     def test_owner_liveness_and_offline(self):
         self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
@@ -507,7 +547,6 @@ class CheckTests(Base):
         self.make_run(rows=[('a', 'working')], agents=[('a', 'o1')])
         good = (self.d / 'ledger.md').read_text()
         for broken, why in ((good.replace('## Pane agents', '## Agents'), 'no Pane agents table'),
-                            (good.replace('## Watcher', '## Watching'), 'no Watcher section'),
                             (good.replace('| working |', '| working | extra |'), 'cells'),
                             (good.replace('| name |', '| who |'), 'header')):
             (self.d / 'ledger.md').write_text(broken)
@@ -685,6 +724,7 @@ class TemplateTests(Base):
         self.assertEqual(ledger['rows']['code']['status'], 'working')
         self.assertEqual(ledger['rows']['code']['owner'], 'w5:p2')
         self.assertIn('at most 60 lines', template)
+        self.assertNotIn('## Watcher', template)
         for word in ('working', 'done', 'merged', 'closed', 'gone', 'open: next cycle'):
             self.assertIn(word, template)
 
@@ -698,14 +738,16 @@ class TemplateTests(Base):
             for needle in needles:
                 self.assertIn(needle, text, f'{name} lacks {needle!r}')
         skill = (ROOT / 'skills/orch/SKILL.md').read_text()
-        self.assertIn('version: "0.10.0"', skill)
+        self.assertIn('version: "0.12.0"', skill)
+        tools = (ROOT / 'skills/orch/references/tools.md').read_text()
+        self.assertIn('references/tools.md', skill)
         for needle in ('orch-watch.py mark', 'orch-watch.py check', 'orch-watch.py show', 'orch-watch.py stats',
                        'references/visibility.md'):
-            self.assertIn(needle, skill)
+            self.assertIn(needle, skill + tools)
         ref = (ROOT / 'skills/orch/references/visibility.md').read_text()
         for tier in m.TIERS:
             self.assertIn(f'`{tier}`', ref)
-        for rule in ('ledger-length', 'next-action', 'no-row', 'row-unregistered', 'not-closed', 'watcher', 'owner-dead', 'log'):
+        for rule in ('ledger-length', 'next-action', 'no-row', 'row-unregistered', 'not-closed', 'watcher', 'owner-dead', 'log', 'plan-review'):
             self.assertIn(f'`{rule}`', ref)
 
 

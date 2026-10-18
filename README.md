@@ -1,17 +1,17 @@
 # orch-skill
 
-Source repository for two user-scope agent skills:
+Source repository for the **orch** user-scope agent skill: one front door for any repo.
+`orch:start` opens a session (project memory first when the repo has `kis/`; many coding agents
+in Herdr panes only in Agents mode) and `orch:close` ends it (close agents, sync and check
+memory, clean merged worktrees and branches, commit and push as your rules allow). In Agents mode
+the run is kept in a ledger on disk with a watcher outside the session, and the orchestrator hands
+off at about 150k context instead of compacting.
 
-- **orch**: run many coding agents (Claude Code, Codex, Command Code, agy, in Herdr panes) from a
-  replaceable orchestrator: a run ledger on disk, a watcher outside the session, hand off at
-  about 150k context instead of compacting.
-- **session-close**: the fixed end-of-session routine (project memory sync and check, close
-  agents, update the project's Tartib space, retrospective, commit and push).
-
-Nothing here is a live install. The installer copies `skills/<name>/` to `~/.agents/skills/<name>`
-and links `~/.claude/commands/orch`, which is where Claude Code, Codex and other hosts look. It also
-copies orch's four sub-agent definitions (`worker`, `explorer`, `researcher`, `designer`) to
-`~/.claude/agents/`; a file of yours with the same name is kept, never overwritten.
+Nothing here is a live install. The installer copies `skills/orch/` to `~/.agents/skills/orch` and
+wires its commands into each host (below). It also copies orch's four sub-agent definitions
+(`worker`, `explorer`, `researcher`, `designer`) to `~/.claude/agents/`; a file of yours with the
+same name is kept, never overwritten. The old `session-close` skill is retired: install and update
+remove its links and its unmodified package, and keep and report anything you changed.
 
 ## Install
 
@@ -21,21 +21,32 @@ curl -fsSL https://raw.githubusercontent.com/smkamranqadri/orch-skill/main/boots
 ```
 
 From a local clone: `./bootstrap.sh install --source .`. Flags: `--force` to replace an existing
-install (a `.tgz` backup is written to `~/.agents/`; it also replaces a different sub-agent file, keeping a copy there), `--only orch` or `--only session-close`,
-`--no-claude-link` (also skips the sub-agents), `--home <dir>` to install somewhere other than `$HOME`.
+install (a `.tgz` backup is written to `~/.agents/`; it also replaces a different sub-agent file or Codex/Command Code prompt, keeping a copy there), `--only orch`,
+`--no-claude-link` (also skips the sub-agents), `--hosts auto|all|none|codex,cmd,agy` (default `auto`:
+the hosts installed here), `--home <dir>` to install somewhere other than `$HOME`.
 
 ## Check and update
 
 ```bash
-./bootstrap.sh check --source .    # exit 0 when every installed skill equals the source
+./bootstrap.sh check --source .    # exit 0 when the install, the host wiring and the retirement are current
 ./bootstrap.sh update --source .   # replace the ones that differ, backup kept
 ```
 
 ## Use
 
-Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:event`, `/orch:watch`,
-`/orch:handoff`, `/session-close`. Codex and others: "run the orch start step" and follow
-`~/.agents/skills/orch/commands/<name>.md`. The method is in `skills/orch/SKILL.md`.
+| Host | Start | Close | Where the installer puts it |
+|---|---|---|---|
+| Claude Code | `/orch:start` | `/orch:close` | `~/.claude/commands/orch` (link) |
+| Codex | `/prompts:orch-start` | `/prompts:orch-close` | `~/.codex/prompts/orch-<name>.md` (copies) |
+| Command Code | `/orch-start` | `/orch-close` | `~/.commandcode/commands/orch-<name>.md` (copies) |
+| agy | "run the orch start step" | "run the orch close step" | `~/.gemini/config/skills/orch` (link; agy has no custom slash commands) |
+
+The other commands are `task`, `status`, `event`, `watch` and `handoff`, named the same way. The
+method is in `skills/orch/SKILL.md`; every command body is in `~/.agents/skills/orch/commands/`.
+Codex and Command Code copies are not links. `bootstrap.sh update` refreshes a copy orch shipped
+(recorded in `~/.agents/orch-shipped.tsv`, a backup kept in `~/.agents/`) and removes a shipped copy
+whose command was dropped. A file there that orch did not ship is kept and reported; `install --force`
+replaces it, keeping a copy. `check` reports all three.
 
 ## Development
 

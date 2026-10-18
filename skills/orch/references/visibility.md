@@ -32,7 +32,7 @@ owner pane) are allowed.
 
 EVID is the latest mark of the agent's current life: `◆ verified`, `◇ reported`, `! asserted`,
 `↩ a2` (sent back, attempt 2), `⇢ merged`, `✓ closed`, `○ open`, blank before any mark. Recent
-shows marks as "lore-ids verified: suite 399 pass".
+shows marks as "web-ids verified: suite 399 pass".
 
 NEEDS YOU sits above the table, is omitted when empty, shows five lines and "+n more", oldest
 first. It lists:
@@ -60,10 +60,11 @@ guesses). `--offline` skips the owner-pane liveness check.
 |---|---|
 | `ledger-length` | the ledger is over 60 lines |
 | `next-action` | a registered owner has no `Next action (<owner>):` line, or it is empty |
+| `plan-review` | a `Ledger: minimal` ledger names a written `Plan:` but its `Plan review:` lacks `outcome: ready` (minimal ledgers are checked for this, `ledger-length` and `next-action` only; they have no watcher) |
 | `no-row` | a registered agent has no row in Pane agents |
-| `row-unregistered` | a row not `closed` or `gone` whose agent is not registered |
+| `row-unregistered` | a row not `closed`, `gone` or `queued: after <task>` whose agent is not registered |
 | `not-closed` | the row says done/merged/verified, or the latest mark is verified/merged, and it is neither `closed` nor `open: next cycle` |
-| `watcher` | the Watcher line's pid is dead, or its agents differ from agents.txt |
+| `watcher` | agents are registered and `<dir>/watcher.pid` is missing or its pid is dead (an old ledger's `## Watcher` section is ignored) |
 | `owner-dead` | an owner pane is not live |
 | `log` | events.log has lines outside its grammar (hand-written lines, a date without a time zone), counted with the first example |
 
@@ -79,5 +80,5 @@ and the last events, in 15 lines at most.
 `$ORCH stats <dir> [agent]`: per agent the working time, finishes, attempts, the mean
 finish-to-wake and finish-to-first-mark delays (with how many finishes had one) and closed or not;
 run totals and the context at each `handoff` mark. These are the exit numbers of the replaceable
-orchestrator experiment (coordination rule 51) except the orchestrator's maximum context between
+orchestrator experiment except the orchestrator's maximum context between
 handoffs, which events.log cannot hold.
