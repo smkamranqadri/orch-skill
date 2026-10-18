@@ -65,12 +65,36 @@ eq "$(chk "$tmp/m6" | head -1)" 'run: [ledger-length] ledger has 69 lines, the l
 # A full ledger (no Ledger: minimal line) is still checked as before: no Pane agents table, exit 3.
 mkdir -p "$tmp/full"; printf '# Orchestrator ledger\nNext action (w1:p1): x\n' > "$tmp/full/ledger.md"
 eq "$(chk "$tmp/full" | sed 's/^.*|//')" '3' "full ledger still needs its table"
-# The shipped template, filled in, is a minimal ledger that check accepts.
+# The shipped template, with only Task and Next filled (as start.md says), is clean: it ships
+# `Plan: none` and `Plan review: none`, so a one-line fix needs no plan or review.
 mkdir -p "$tmp/tpl"
 sed -e 's/<project>/demo/' -e 's/<one line>/t/' -e 's/<one line; never empty>/go/' \
-    -e 's/^Plan: .*/Plan: none/' -e 's/^Plan review: .*/Plan review: none/' \
     "$orch/ledger-minimal-template.md" > "$tmp/tpl/ledger.md"
-eq "$(chk "$tmp/tpl")" 'check: clean|0' "filled minimal template"
+eq "$(chk "$tmp/tpl")" 'check: clean|0' "template with Task and Next only"
+grep -q -x 'Plan: none' "$tmp/tpl/ledger.md" || fail "template does not ship 'Plan: none'"
+grep -q -x 'Plan review: none' "$tmp/tpl/ledger.md" || fail "template does not ship 'Plan review: none'"
+# The review gate takes only an exact outcome: the format placeholder, a prefix match and a
+# blocked review do not satisfy it; ready and a user waiver do.
+G="run: [plan-review] written plan plan.md has no recorded review with 'outcome: ready'; review it before implementing|1"
+mk "$tmp/g1" 'x' plan.md 'reviewer x; outcome: ready|rework; 2026-10-18'; eq "$(chk "$tmp/g1")" "$G" "format placeholder ready|rework"
+mk "$tmp/g2" 'x' plan.md 'reviewer x; outcome: ready-ish; 2026-10-18'; eq "$(chk "$tmp/g2")" "$G" "ready-ish"
+mk "$tmp/g3" 'x' plan.md 'blocked; reviewer stalled; 2026-10-18'; eq "$(chk "$tmp/g3")" "$G" "blocked review"
+mk "$tmp/g4" 'x' plan.md 'reviewer x; outcome: ready'; eq "$(chk "$tmp/g4")" 'check: clean|0' "ready at end of line"
+mk "$tmp/g5" 'x' plan.md 'reviewer x; outcome: waived; 2026-10-18'; eq "$(chk "$tmp/g5")" 'check: clean|0' "user waiver"
+mk "$tmp/g6" 'x' plan.md 'reviewer x; outcome:ready ; 2026-10-18'; eq "$(chk "$tmp/g6")" 'check: clean|0' "spacing around ready"
+
+# --- start.md and SKILL.md: Fast mode writes no plan, the reviewer is proposed not launched, a
+# review that cannot run is recorded and the user asked ---
+st="$orch/commands/start.md"; sk="$orch/SKILL.md"
+for f in "$st" "$sk"; do
+  grep -q -F 'Fast-mode work (a small, obvious fix)' "$f" || fail "$(basename "$f"): Fast-mode work needs no plan"
+  grep -q -F 'blocked' "$f" || fail "$(basename "$f"): a review that cannot run is recorded as blocked"
+  grep -q -F 'review later, waive' "$f" || fail "$(basename "$f"): the user is asked review later, waive or stop"
+done
+grep -q -F 'and launch it only after they approve' "$st" || fail "start.md: reviewer launched only after approval"
+grep -q -F 'is proposed to the user and launched only after approval' "$sk" || fail "SKILL.md: reviewer launched only after approval"
+grep -q -F 'never' "$st" && grep -q -F 'start another CLI on your own' "$st" || fail "start.md: never auto-launch a reviewer"
+grep -q -F 'never on your own' "$sk" || fail "SKILL.md: never auto-launch a reviewer"
 
 # --- the files this layer owns: no lore command, retro step or rule numbers ---
 owned=("$orch/SKILL.md" "$orch/commands/start.md" "$orch/commands/status.md" "$orch/commands/task.md"

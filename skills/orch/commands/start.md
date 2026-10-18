@@ -31,12 +31,18 @@ below. Herdr is needed only in Agents mode; the other modes never touch it.
 user's words. Otherwise read it and report Task, Next action, Plan review, Decisions, Done in
 five lines. Run `python3 ~/.agents/skills/orch/scripts/orch-watch.py check $D`.
 
-Plan review (no KIS): a written plan (a file the session or an agent wrote, not a chat
-sketch) is reviewed before any implementation. Propose the reviewer to the user (a different
-CLI than the plan's author; harness, model and effort, with a reason) and wait for approval,
-run the review read-only, relay the findings, and record `Plan:` and `Plan review: <reviewer>;
-outcome: ready|rework; <date>` in the ledger. Do not implement while `check` reports
-`[plan-review]`; `outcome: rework` goes back to the author, then a new review.
+Plan review (no KIS). Fast-mode work (a small, obvious fix) needs no written plan: leave
+`Plan: none` and `Plan review: none`, and never write a plan file just to satisfy `check`. When
+the session wrote a plan for Standard or Phase work (a file, not a chat sketch), it is reviewed
+before any implementation. Propose the reviewer to the user (a different CLI than the plan's
+author; harness, model and effort, with a reason) and launch it only after they approve; never
+start another CLI on your own. Run the review read-only, relay the findings, and record `Plan:`
+and `Plan review: <reviewer>; outcome: ready|rework; <date>` in the ledger (pick one outcome).
+Do not implement while `check` reports `[plan-review]`; `outcome: rework` goes back to the
+author, then a new review. If the review cannot run (the reviewer stalls, times out or is
+missing), do not wait on it: write `Plan review: blocked; <reason>; <date>` in the ledger and ask
+the user once: review later, waive (record `outcome: waived` with their words under Decisions),
+or stop.
 
 ## 3. Agents mode (Herdr required)
 
