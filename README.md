@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/smkamranqadri/orch-skill/main/boots
 ```
 
 From a local clone: `./bootstrap.sh install --source .`. Flags: `--force` to replace an existing
-install (a `.tgz` backup is written to `~/.agents/`; it also replaces a different sub-agent file, keeping a copy there), `--only orch`,
+install (a `.tgz` backup is written to `~/.agents/`; it also replaces a different sub-agent file or Codex/Command Code prompt, keeping a copy there), `--only orch`,
 `--no-claude-link` (also skips the sub-agents), `--hosts auto|all|none|codex,cmd,agy` (default `auto`:
 the hosts installed here), `--home <dir>` to install somewhere other than `$HOME`.
 
@@ -43,7 +43,10 @@ the hosts installed here), `--home <dir>` to install somewhere other than `$HOME
 
 The other commands are `task`, `status`, `event`, `watch` and `handoff`, named the same way. The
 method is in `skills/orch/SKILL.md`; every command body is in `~/.agents/skills/orch/commands/`.
-Codex and Command Code copies are not links: `bootstrap.sh update` refreshes them.
+Codex and Command Code copies are not links. `bootstrap.sh update` refreshes a copy orch shipped
+(recorded in `~/.agents/orch-shipped.tsv`, a backup kept in `~/.agents/`) and removes a shipped copy
+whose command was dropped. A file there that orch did not ship is kept and reported; `install --force`
+replaces it, keeping a copy. `check` reports all three.
 
 ## Development
 

@@ -10,7 +10,8 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  install-skill.sh --source <repo-root> [--home <dir>] [--force] [--force-agents] [--no-claude-link]
+  install-skill.sh --source <repo-root> [--home <dir>] [--force] [--force-agents] [--force-prompts]
+                   [--no-claude-link]
                    [--agents-only|--wire-only] [--hosts <list>] [--only <name>]
   install-skill.sh --source <repo-root> [--home <dir>] [--hosts <list>] --report
 
@@ -20,6 +21,9 @@ Options:
   --force            Replace an existing ~/.agents/skills/<name> (a .tgz backup is kept).
   --force-agents     Replace a different ~/.claude/agents/<name>.md (copy kept in ~/.agents/).
                      Without it a different file is kept and reported, never overwritten.
+  --force-prompts    Replace a Codex or Command Code prompt that orch did not ship (copy kept in
+                     ~/.agents/). Without it a different file is kept and reported; a copy orch
+                     shipped earlier is always replaced, with a backup.
   --no-claude-link   Skip ~/.claude/skills links, commands link and agent definitions.
   --agents-only      Install only the sub-agent definitions; leave the skills alone.
   --wire-only        Install only the retirement and the per-host wiring; leave the skills alone.
@@ -39,6 +43,7 @@ home_dir="${HOME:-}"
 force="false"
 claude_link="true"
 force_agents="false"
+force_prompts="false"
 agents_only="false"
 wire_only="false"
 report="false"
@@ -51,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --home) [[ $# -ge 2 ]] || die "--home requires a path"; home_dir="$2"; shift 2 ;;
     --force) force="true"; shift ;;
     --force-agents) force_agents="true"; shift ;;
+    --force-prompts) force_prompts="true"; shift ;;
     --agents-only) agents_only="true"; shift ;;
     --wire-only) wire_only="true"; shift ;;
     --report) report="true"; shift ;;
@@ -143,6 +149,49 @@ retire_session_close() {
   esac
 }
 
+# --- shipped prompt copies ----------------------------------------------------------------
+# The Codex and Command Code prompts are copies, so a file at that path may be the user's own.
+# A copy counts as shipped when its sha256 is what this installer recorded for that path in
+# ~/.agents/orch-shipped.tsv, or one of the command versions earlier installers copied (list
+# below, frozen). A shipped copy is replaced (a backup is kept); any other file is kept and
+# reported unless --force. Shipped copies whose command no longer exists are removed on wiring.
+shipped_prompt_hashes="065874d8ead76667afb49882e4aafc59f6dc84c6bcea5ea3d11e2e89b99d07b2 2b86dd5744b104a6caa00e1ed199f6babf8cbb9c98ccf64db3ad36b19f37f0e0 2fdfbf795830945d3e9c100a83f015e54c65ab51bdcc2e2a9a8eb33ef9191250 51d78d584ce49e981191ef7af3b21fb2b4ca989add76b895ff9397a147554ac7 583f9962709010ca5eea31d189b379e452b3b503ed781a4f00c9b6c115079f11 5a8da3c96c2437ee381a66bcafe03a6c60f0199719c14ef80698d588ad82b25a 699d14b188cba775ce7da3f4c00ae3afdae2ef2d66c6a8aa1e05b5cf92154693 728284d390e888a8c9e19ed17d2f39ccefc3735323f36c4f538fb27439f915a7 728f2920da14b9019638869e694424a1b176c7a263f997baca49a7157dca5cc5 76e95eef727c6385e813208b8d24f2179467e7ef2c12f95f8329bcf8862dae58 8bcee1d695b6778cbda8b8ff9d27751ff444398c0ca1a566661e1253df0e6919 9b69d5d5e806d37b27661b152408b1e79edaa50719560b4b03992ca28f95cfd0 c76e162c4ed83d906aa617e6f7f77d203af073385a909a8d47ab1f1bd5d4565b cd027270ef7207d54459f12941ae2716bfe8550b4c5fb749fe5c65a0c4fdd0a1 d507ca0c9b91ac2e998e6bea8599ff3f5b3645bef019c8e989518f833b06fe7d d935c6e4abff1b6551dee1e1141f2e76fd20e27bb308d38c0dc147a139c6c39b e49ed71d38f454ddedff5f4fddff6ca38af6b7386a7cee7e6a8b120ca6835f65 ec5542a7b45f164acdf8bfdf37b07182d86f1ebe0cd52e8b68f92074412b673a"
+manifest="$home_dir/.agents/orch-shipped.tsv"
+
+manifest_hash() {  # <path> -> the sha256 recorded for it, or nothing
+  [[ -f "$manifest" ]] || return 0
+  awk -F'\t' -v p="$1" '$2 == p { h = $1 } END { if (h != "") print h }' "$manifest"
+}
+
+is_shipped() {  # <path of a plain file>
+  local h mh
+  h="$(sha256_of "$1")"; mh="$(manifest_hash "$1")"
+  [[ -n "$mh" && "$h" == "$mh" ]] || [[ " $shipped_prompt_hashes " == *" $h "* ]]
+}
+
+manifest_record() {  # <path of a plain file>: remember its hash as shipped
+  local tmp
+  mkdir -p "$(dirname "$manifest")"
+  tmp="$(mktemp "$manifest.XXXXXX")"
+  { [[ -f "$manifest" ]] && awk -F'\t' -v p="$1" '$2 != p' "$manifest"; printf '%s\t%s\n' "$(sha256_of "$1")" "$1"; } > "$tmp"
+  mv "$tmp" "$manifest"
+}
+
+manifest_forget() {  # <path>
+  local tmp
+  [[ -f "$manifest" ]] || return 0
+  tmp="$(mktemp "$manifest.XXXXXX")"
+  awk -F'\t' -v p="$1" '$2 != p' "$manifest" > "$tmp"
+  mv "$tmp" "$manifest"
+}
+
+backup_prompt() {  # <path of a plain file> -> prints the backup path
+  local b="$home_dir/.agents/prompt-backup-$(date +%Y%m%d-%H%M%S)-$(basename "$(dirname "$(dirname "$1")")")-$(basename "$1")"
+  mkdir -p "$home_dir/.agents"
+  cp "$1" "$b"
+  echo "$b"
+}
+
 # --- per-host wiring of the orch commands ---------------------------------------------------
 # Claude: ~/.claude/commands/orch -> the commands folder (/orch:start, /orch:close).
 # Codex: ~/.codex/prompts/orch-<name>.md copies (/prompts:orch-start). Command Code:
@@ -174,26 +223,53 @@ host_on() {
 
 command_files() { local f; for f in "$source_root"/skills/orch/commands/*.md; do [[ -f "$f" ]] && echo "$f"; done; return 0; }
 
-copy_state() {  # <source file> <dest file>: current | differs | missing
+copy_state() {  # <source file> <dest file>: current | stale (a shipped older copy) | differs | missing
   if [[ ! -e "$2" && ! -L "$2" ]]; then echo missing
   elif [[ -f "$2" && ! -L "$2" ]] && cmp -s "$1" "$2"; then echo current
+  elif [[ -f "$2" && ! -L "$2" ]] && is_shipped "$2"; then echo stale
   else echo differs; fi
 }
 
+# Shipped orch-*.md copies in <dir> whose command is gone from the source. Never a user file.
+orphan_copies() {  # <dir>
+  local f
+  [[ -d "$1" ]] || return 0
+  for f in "$1"/orch-*.md; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    [[ -f "$source_root/skills/orch/commands/$(basename "$f" | sed 's/^orch-//')" ]] && continue
+    is_shipped "$f" && echo "$f"
+  done
+  return 0
+}
+
 install_command_copies() {  # <label: "Codex prompt" | "Command Code command"> <dest dir>
-  local label="$1" dir="$2" f dest state
+  local label="$1" dir="$2" f dest state backup
   mkdir -p "$dir"
   while IFS= read -r f; do
     dest="$dir/orch-$(basename "$f")"
     state="$(copy_state "$f" "$dest")"
     case "$state" in
-      current) echo "$label already current: $dest" ;;
-      missing) cp "$f" "$dest"; echo "$label installed: $dest" ;;
-      differs)
-        if [[ -f "$dest" && ! -L "$dest" ]]; then cp "$f" "$dest"; echo "$label updated: $dest"
-        else echo "Kept your existing $label path: $dest (not a plain file; not overwritten)"; fi ;;
+      current)
+        [[ "$(manifest_hash "$dest")" == "$(sha256_of "$dest")" ]] || manifest_record "$dest"
+        echo "$label already current: $dest" ;;
+      missing) cp "$f" "$dest"; manifest_record "$dest"; echo "$label installed: $dest" ;;
+      stale|differs)
+        if [[ ! -f "$dest" || -L "$dest" ]]; then
+          echo "Kept your existing $label path: $dest (not a plain file; not overwritten)"
+        elif [[ "$state" == stale || "$force_prompts" == "true" ]]; then
+          backup="$(backup_prompt "$dest")"
+          cp "$f" "$dest"; manifest_record "$dest"
+          echo "$label updated: $dest (previous kept at $backup)"
+        else
+          echo "Kept your different $label: $dest (not shipped by orch; --force-prompts replaces it)"
+        fi ;;
     esac
   done < <(command_files)
+  while IFS= read -r dest; do
+    backup="$(backup_prompt "$dest")"
+    rm -f "$dest"; manifest_forget "$dest"
+    echo "$label removed: $dest (its command no longer exists; previous kept at $backup)"
+  done < <(orphan_copies "$dir")
 }
 
 agy_link_state() {
@@ -228,16 +304,18 @@ wire_hosts() {
   else echo "agy skill link: skipped (not installed; --hosts all forces)"; fi
 }
 
-# Tab-separated lines: "<host>\t<path>\t<current|differs|missing>" per wired item, and
+# Tab-separated lines: "<host>\t<path>\t<current|stale|differs|missing|orphan>" per wired item, and
 # "retired\t<link|package>\t<path>\t<ours|foreign>" per leftover of session-close. Hosts that are
 # not selected print nothing. Changes nothing.
 report_wiring() {
   local f dest path target state
   if host_on codex; then
     while IFS= read -r f; do dest="$codex_dir/orch-$(basename "$f")"; printf 'codex\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
+    while IFS= read -r dest; do printf 'codex\t%s\torphan\n' "$dest"; done < <(orphan_copies "$codex_dir")
   fi
   if host_on cmd; then
     while IFS= read -r f; do dest="$cmd_dir/orch-$(basename "$f")"; printf 'cmd\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
+    while IFS= read -r dest; do printf 'cmd\t%s\torphan\n' "$dest"; done < <(orphan_copies "$cmd_dir")
   fi
   if host_on agy; then printf 'agy\t%s\t%s\n' "$agy_link" "$(agy_link_state)"; fi
   while IFS=$'\t' read -r path target; do
