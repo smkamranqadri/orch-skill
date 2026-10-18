@@ -1,0 +1,40 @@
+{
+  "id": "cli:agent:get",
+  "result": {
+    "agent": {
+      "agent": "claude",
+      "agent_session": {
+        "agent": "claude",
+        "kind": "id",
+        "source": "herdr:claude",
+        "value": "fixture-claude-session"
+      },
+      "agent_status": "idle",
+      "completion_seq": 5,
+      "cwd": "/workspace/fixture-project",
+      "focused": true,
+      "foreground_cwd": "/workspace/fixture-project",
+      "interactive_ready": true,
+      "name": "quartz-builder",
+      "pane_id": "w2:p1",
+      "revision": 37,
+      "state_change_seq": 5,
+      "tab_id": "w2:t1",
+      "terminal_id": "term_65e22dd6a510b2",
+      "terminal_title": "\u2733 Fixture complete",
+      "terminal_title_stripped": "Fixture complete",
+      "tokens": {
+        "group": "orch-phase2-fixtures",
+        "harness_logo": "\ue1a0",
+        "logo": "\ue1a0",
+        "sort_key": "000029872564",
+        "state_idle_fresh": "\ue1c2",
+        "tab_key": "000029872565-w2:t1-1-000029872564",
+        "title_idle_fresh": "Fixture complete",
+        "ws_key": "000029872565-w2-1-000029872565-w2"
+      },
+      "workspace_id": "w2"
+    },
+    "type": "agent_info"
+  }
+}

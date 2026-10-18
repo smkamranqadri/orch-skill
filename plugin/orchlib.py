@@ -38,13 +38,17 @@ def save_registry(path,data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def herdr(*args,check=True,missing_workspace_ok=False):
+def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False):
     p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
         fail(f"herdr {' '.join(map(str,args))} failed: {error}")
-    if p.returncode: return None
+    if p.returncode:
+        if not return_errors: return None
+        output=(p.stdout or p.stderr).strip()
+        try: return json.loads(output)
+        except json.JSONDecodeError: return {"error":{"code":"command_failed","message":output or f"exit {p.returncode}"}}
     if not p.stdout.strip(): return {}
     try: return json.loads(p.stdout)
     except json.JSONDecodeError: return {"raw":p.stdout.strip()}
@@ -66,7 +70,8 @@ def deliver(data):
         if not key.startswith(session): continue
         if orch.get("gone") or not orch.get("queue"): continue
         live=herdr("agent","get",orch["pane"],check=False) or {}
-        status=(result(live,"result","agent").get("status") or result(live,"result").get("status") or "unknown")
+        live_agent=result(live,"result","agent")
+        status=live_agent.get("agent_status") or live_agent.get("status") or result(live,"result").get("agent_status") or result(live,"result").get("status") or "unknown"
         if status not in ("idle","done"): continue
         message="\n".join(orch["queue"])
         if herdr("agent","prompt",orch["pane"],message,check=False) is not None:

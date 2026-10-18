@@ -1,0 +1,14 @@
+{"data":{"agent":"claude","agent_status":"idle","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent_status":"unknown","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"idle","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"working","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"done","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"claude","agent_status":"idle","pane_id":"w2:p1","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"codex","agent_status":"idle","pane_id":"w2:p2","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"codex","agent_status":"working","pane_id":"w2:p2","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"codex","agent_status":"idle","pane_id":"w2:p2","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"sample-worker","agent_status":"blocked","pane_id":"w2:p3","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"agent":"sample-worker","agent_status":"unknown","pane_id":"w2:p3","workspace_id":"w2"},"event":"pane.agent_status_changed"}
+{"data":{"pane_id":"w2:p1","type":"pane_closed","workspace_id":"w2"},"event":"pane_closed"}
+{"data":{"pane_id":"w2:p2","type":"pane_closed","workspace_id":"w2"},"event":"pane_closed"}
+{"data":{"pane_id":"w2:p3","type":"pane_closed","workspace_id":"w2"},"event":"pane_closed"}
