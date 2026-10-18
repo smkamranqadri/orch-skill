@@ -250,6 +250,7 @@ case "$command_name" in
           missing) echo "$label missing: $path"; rc=1 ;;
           stale) echo "$label outdated: $path (a shipped older copy; update replaces it and keeps a backup)"; rc=1 ;;
           orphan) echo "$label stale: $path (its command no longer exists; update removes it and keeps a backup)"; rc=1 ;;
+          kept) echo "$label kept (not shipped): $path (no orch command by that name; left as it is)" ;;
           differs)
             if [[ "$host" == agy ]]; then echo "$label differs: $path (existing path kept)"
             else echo "$label differs: $path (not shipped by orch; kept; install --force replaces it)"; fi

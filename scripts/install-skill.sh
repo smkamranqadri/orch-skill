@@ -185,9 +185,13 @@ manifest_forget() {  # <path>
   mv "$tmp" "$manifest"
 }
 
+# One backup folder per run, so an update that replaces several copies leaves one place to look.
+prompt_backup_dir="$home_dir/.agents/orch-prompt-backups/$(date +%Y%m%d-%H%M%S)"
+
 backup_prompt() {  # <path of a plain file> -> prints the backup path
-  local b="$home_dir/.agents/prompt-backup-$(date +%Y%m%d-%H%M%S)-$(basename "$(dirname "$(dirname "$1")")")-$(basename "$1")"
-  mkdir -p "$home_dir/.agents"
+  local host; host="$(basename "$(dirname "$(dirname "$1")")")"
+  local b="$prompt_backup_dir/${host#.}-$(basename "$1")"
+  mkdir -p "$prompt_backup_dir"
   cp "$1" "$b"
   echo "$b"
 }
@@ -242,6 +246,19 @@ orphan_copies() {  # <dir>
   return 0
 }
 
+# orch-*.md files in <dir> that are not shipped: no source command, not a copy orch wrote. They are
+# the user's, kept as they are, and named so they are not a surprise.
+unshipped_copies() {  # <dir>
+  local f
+  [[ -d "$1" ]] || return 0
+  for f in "$1"/orch-*.md; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    [[ -f "$source_root/skills/orch/commands/$(basename "$f" | sed 's/^orch-//')" ]] && continue
+    is_shipped "$f" || echo "$f"
+  done
+  return 0
+}
+
 install_command_copies() {  # <label: "Codex prompt" | "Command Code command"> <dest dir>
   local label="$1" dir="$2" f dest state backup
   mkdir -p "$dir"
@@ -270,6 +287,9 @@ install_command_copies() {  # <label: "Codex prompt" | "Command Code command"> <
     rm -f "$dest"; manifest_forget "$dest"
     echo "$label removed: $dest (its command no longer exists; previous kept at $backup)"
   done < <(orphan_copies "$dir")
+  while IFS= read -r dest; do
+    echo "$label kept (not shipped): $dest (no orch command by that name; left as it is)"
+  done < <(unshipped_copies "$dir")
 }
 
 agy_link_state() {
@@ -304,7 +324,7 @@ wire_hosts() {
   else echo "agy skill link: skipped (not installed; --hosts all forces)"; fi
 }
 
-# Tab-separated lines: "<host>\t<path>\t<current|stale|differs|missing|orphan>" per wired item, and
+# Tab-separated lines: "<host>\t<path>\t<current|stale|differs|missing|orphan|kept>" per wired item, and
 # "retired\t<link|package>\t<path>\t<ours|foreign>" per leftover of session-close. Hosts that are
 # not selected print nothing. Changes nothing.
 report_wiring() {
@@ -312,10 +332,12 @@ report_wiring() {
   if host_on codex; then
     while IFS= read -r f; do dest="$codex_dir/orch-$(basename "$f")"; printf 'codex\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
     while IFS= read -r dest; do printf 'codex\t%s\torphan\n' "$dest"; done < <(orphan_copies "$codex_dir")
+    while IFS= read -r dest; do printf 'codex\t%s\tkept\n' "$dest"; done < <(unshipped_copies "$codex_dir")
   fi
   if host_on cmd; then
     while IFS= read -r f; do dest="$cmd_dir/orch-$(basename "$f")"; printf 'cmd\t%s\t%s\n' "$dest" "$(copy_state "$f" "$dest")"; done < <(command_files)
     while IFS= read -r dest; do printf 'cmd\t%s\torphan\n' "$dest"; done < <(orphan_copies "$cmd_dir")
+    while IFS= read -r dest; do printf 'cmd\t%s\tkept\n' "$dest"; done < <(unshipped_copies "$cmd_dir")
   fi
   if host_on agy; then printf 'agy\t%s\t%s\n' "$agy_link" "$(agy_link_state)"; fi
   while IFS=$'\t' read -r path target; do
