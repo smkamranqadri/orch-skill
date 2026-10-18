@@ -68,7 +68,7 @@ if run check --source "$repo_root" --home "$home" --hosts all; then fail "check 
 has "Command Code command differs: $home/.commandcode/commands/orch-start.md (not shipped by orch; kept; install --force replaces it)"
 run install --source "$repo_root" --home "$home" --hosts all --force || fail "install --force over an edited prompt"
 cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.commandcode/commands/orch-start.md" || fail "--force did not restore the cmd command"
-grep -l -x '# drift' "$home"/.agents/prompt-backup-* >/dev/null 2>&1 || fail "--force kept no copy of the edited prompt"
+grep -l -x '# drift' "$home"/.agents/orch-prompt-backups/*/* >/dev/null 2>&1 || fail "--force kept no copy of the edited prompt"
 run check --source "$repo_root" --home "$home" --hosts all || fail "check should pass after update and --force repaired the wiring"
 
 # 3. a second install is idempotent: identical copies are not rewritten, the link keeps its inode
@@ -219,13 +219,13 @@ rm "$home/.codex/prompts/orch-task.md"
 run update --source "$repo_root" --home "$home" --hosts all || fail "update beside the user's prompts"
 grep -q -x 'my own prompt' "$home/.codex/prompts/orch-start.md" || fail "update overwrote the user's codex prompt"
 test -f "$home/.codex/prompts/orch-task.md" || fail "update did not restore the missing prompt"
-test -z "$(ls "$home"/.agents/prompt-backup-* 2>/dev/null)" || fail "a backup was made for a file that was kept"
+test -z "$(ls "$home"/.agents/orch-prompt-backups/*/* 2>/dev/null)" || fail "a backup was made for a file that was kept"
 inst() { "$repo_root/scripts/install-skill.sh" "$@" >"$log" 2>&1; }
 inst --source "$repo_root" --home "$home" --hosts all --only orch --force || fail "install-skill --force"
 grep -q -x 'my own prompt' "$home/.codex/prompts/orch-start.md" || fail "--force alone (skill replace) overwrote the user's prompt"
 inst --source "$repo_root" --home "$home" --hosts all --force-prompts --wire-only || fail "install-skill --force-prompts"
 cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "--force-prompts did not replace the prompt"
-grep -q -x 'my own prompt' "$home"/.agents/prompt-backup-*orch-start.md || fail "--force-prompts kept no copy of the user's prompt"
+grep -q -x 'my own prompt' "$home"/.agents/orch-prompt-backups/*/*orch-start.md || fail "--force-prompts kept no copy of the user's prompt"
 
 # 11. a shipped older copy is replaced with a backup; a command dropped from the source takes its
 #     shipped copy with it, and a user's orch-<name>.md with no source command is left alone
@@ -235,28 +235,40 @@ bs="$src/bootstrap.sh"; srun() { "$bs" "$@" --no-herdr >"$log" 2>&1; }
 home="$tmp/h11"
 srun install --source "$src" --home "$home" --hosts all || fail "install from the temp source"
 echo "my own, unrelated" > "$home/.codex/prompts/orch-mine.md"
+echo "my own cmd, unrelated" > "$home/.commandcode/commands/orch-mine.md"
 echo "a line the next release adds" >> "$src/skills/orch/commands/start.md"
 rm "$src/skills/orch/commands/old.md"
 if srun check --source "$src" --home "$home" --hosts all; then fail "check should flag the outdated and the dropped prompts"; fi
 has "Codex prompt outdated: $home/.codex/prompts/orch-start.md (a shipped older copy; update replaces it and keeps a backup)"
 has "Codex prompt stale: $home/.codex/prompts/orch-old.md (its command no longer exists; update removes it and keeps a backup)"
 has "Command Code command stale: $home/.commandcode/commands/orch-old.md (its command no longer exists; update removes it and keeps a backup)"
-if grep -q 'orch-mine' "$log"; then fail "check reported a user file"; fi
+has "Codex prompt kept (not shipped): $home/.codex/prompts/orch-mine.md (no orch command by that name; left as it is)"
+has "Command Code command kept (not shipped): $home/.commandcode/commands/orch-mine.md (no orch command by that name; left as it is)"
+[[ "$(grep -c 'orch-mine' "$log")" == 2 ]] || fail "each user file is not reported exactly once: $(grep 'orch-mine' "$log")"
+[[ "$(grep -c 'kept (not shipped)' "$log")" == 2 ]] || fail "check reported a shipped copy as the user's: $(grep 'kept (not shipped)' "$log")"
+if grep -E '(stale|outdated|differs).*orch-mine' "$log"; then fail "check treated the user's file as a shipped one"; fi
 srun update --source "$src" --home "$home" --hosts all || fail "update from the temp source"
 cmp -s "$src/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "update did not replace the shipped older copy"
 grep -q -x "a line the next release adds" "$home/.codex/prompts/orch-start.md" || fail "new text missing after update"
 test ! -e "$home/.codex/prompts/orch-old.md" -a ! -e "$home/.commandcode/commands/orch-old.md" || fail "update left a dropped command's prompt"
-grep -q -x '# a command that will go away' "$home"/.agents/prompt-backup-*orch-old.md || fail "no backup of the removed prompt"
+grep -q -x '# a command that will go away' "$home"/.agents/orch-prompt-backups/*/*orch-old.md || fail "no backup of the removed prompt"
 test -f "$home/.codex/prompts/orch-mine.md" || fail "update removed a user file"
+# the update's backups share one folder (start replaced for two hosts, old removed for two hosts)
+[[ "$(ls -d "$home"/.agents/orch-prompt-backups/*/ | wc -l | tr -d ' ')" == 1 ]] || fail "update wrote more than one backup folder: $(ls "$home"/.agents)"
+[[ "$(ls "$home"/.agents/orch-prompt-backups/*/ | wc -l | tr -d ' ')" == 4 ]] || fail "expected 4 backups in one folder: $(ls "$home"/.agents/orch-prompt-backups/*/)"
+test -z "$(ls "$home"/.agents/prompt-backup-* 2>/dev/null)" || fail "backups still land loose in ~/.agents"
+grep -q -x "Codex prompt kept (not shipped): $home/.codex/prompts/orch-mine.md (no orch command by that name; left as it is)" "$log" || fail "update did not name the user's file"
+grep -q -x "Command Code command kept (not shipped): $home/.commandcode/commands/orch-mine.md (no orch command by that name; left as it is)" "$log" || fail "update did not name the user's cmd file"
+[[ "$(grep -c 'kept (not shipped)' "$log")" == 2 ]] || fail "update reported a shipped copy as the user's: $(grep 'kept (not shipped)' "$log")"
 grep -q -x "my own, unrelated" "$home/.codex/prompts/orch-mine.md" || fail "update changed a user file"
-n="$(grep -l -v 'a line the next release adds' "$home"/.agents/prompt-backup-*orch-start.md | wc -l | tr -d ' ')"
+n="$(grep -l -v 'a line the next release adds' "$home"/.agents/orch-prompt-backups/*/*orch-start.md | wc -l | tr -d ' ')"
 [[ "$n" -ge 1 ]] || fail "no backup of the replaced prompt"
 srun check --source "$src" --home "$home" --hosts all || fail "check should pass after the update"
 # a copy of an older release made before the manifest existed is still recognised as shipped
 home="$tmp/h11b"; mkdir -p "$home/.codex/prompts"
 cp "$repo_root/tests/fixtures/prompts/orch-start-bfcb091.md" "$home/.codex/prompts/orch-start.md"
 run install --source "$repo_root" --home "$home" --hosts codex || fail "install over an older shipped copy"
-has "Codex prompt updated: $home/.codex/prompts/orch-start.md (previous kept at $(ls "$home"/.agents/prompt-backup-*orch-start.md))"
+has "Codex prompt updated: $home/.codex/prompts/orch-start.md (previous kept at $(ls "$home"/.agents/orch-prompt-backups/*/*orch-start.md))"
 cmp -s "$repo_root/skills/orch/commands/start.md" "$home/.codex/prompts/orch-start.md" || fail "the older shipped copy was not replaced"
 
 # 12. with the orch skill already current, update still repairs an outdated copy and drops an orphan
