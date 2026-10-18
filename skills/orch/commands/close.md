@@ -23,8 +23,8 @@ Full method: `~/.agents/skills/orch/SKILL.md`. The handoff command reuses steps 
    (`kill -0 $(cat <D>/watcher.pid)`), or State's `Run:` line names `D`, even when every row is already `closed` or
    `merged` (the normal end of a run). Stop the watcher when `<D>/watcher.pid` exists
    (`kill $(cat <D>/watcher.pid)`, confirm with `kill -0`) and put `Run closed <date>` on its
-   own line under `Updated:` in the ledger (`start` renames a ledger carrying it before the next
-   run). With `kis/`: move the ledger's Open decisions into the plan in `kis/intent/` (or
+   own line under `Updated:` in the ledger (`start` archives a ledger carrying it with `orch-gate.py archive`, into `run-<date>/`, before the
+   next run). With `kis/`: move the ledger's Open decisions into the plan in `kis/intent/` (or
    `kis/intent/backlog.md` when no plan fits), each as the user's words with its date, and
    delete each moved entry from the ledger so a later close cannot move it twice. Then
    delete the `Run:` line from `kis/state/current.md` and write State's Task and Next from the ledger's
