@@ -15,7 +15,7 @@ This project uses KIS memory under `kis/`. Knowledge = stable facts. Intent = go
 
 # Agent Instructions
 
-This repository is the **source** of the orch and session-close skills. Nothing here is a live
+This repository is the **source** of the orch skill (session-close is retired; the installer removes it). Nothing here is a live
 install: `skills/` sits outside every host's discovery path. To use them, install into a home
 with `bootstrap.sh`.
 
@@ -23,10 +23,9 @@ with `bootstrap.sh`.
 
 ```text
 skills/orch/           the orch package, and what ships
-skills/session-close/  the session-close package
 docs/research/         research behind orch's design; not installed
 tests/                 installer tests, never installed
-scripts/               install-skill.sh, run from a source clone only
+scripts/               install-skill.sh (install, retire session-close, wire hosts), run from a source clone only
 bootstrap.sh           one-command install, check, update
 kis/                   this repo's own project memory (read kis/state first)
 ```

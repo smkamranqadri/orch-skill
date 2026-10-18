@@ -63,12 +63,12 @@ test -f "$home/.claude/agents/explorer.md" || fail "update did not restore a mis
 cmp -s "$repo_root/skills/orch/agents/worker.md" "$home/.claude/agents/worker.md" || fail "--force did not replace the agent"
 grep -q "my own worker" "$home"/.agents/agent-worker-backup-*.md || fail "--force kept no copy of the old agent"
 
-# 4. the opt-out skips them, and so does installing only the other skill
+# 4. the opt-out skips them, also together with --only orch
 home="$tmp/home4"; mkdir -p "$home"
 "$b" install --source "$repo_root" --home "$home" --no-herdr --no-claude-link >"$log" 2>&1 || fail "install --no-claude-link failed"
 test ! -e "$home/.claude/agents" || fail "--no-claude-link should skip the agents"
 home="$tmp/home5"; mkdir -p "$home"
-"$b" install --source "$repo_root" --home "$home" --no-herdr --only session-close >"$log" 2>&1 || fail "install --only session-close failed"
-test ! -e "$home/.claude/agents" || fail "--only session-close should skip the agents"
+"$b" install --source "$repo_root" --home "$home" --no-herdr --only orch --no-claude-link >"$log" 2>&1 || fail "install --only orch --no-claude-link failed"
+test ! -e "$home/.claude/agents" || fail "--no-claude-link with --only orch should skip the agents"
 
 echo "agent tests: pass"
