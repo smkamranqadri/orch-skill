@@ -627,7 +627,7 @@ class Watcher:
         now = now or self.clock()
         events, _ = parse_log(self.dir)
         orch = (read_lines(os.path.join(self.dir, "orchestrator")) or ["none"])[0]
-        out = [f"orch watcher · {os.path.basename(os.path.dirname(os.path.abspath(self.dir))).removesuffix(".reports")}"
+        out = [f"orch watcher · {os.path.basename(os.path.dirname(os.path.abspath(self.dir)))}"
                f" · {dt.datetime.now().strftime('%H:%M')} · {self.orch_note or 'orchestrator: ' + orch}"]
         if self.usage:
             out.append(self.usage[:width])
