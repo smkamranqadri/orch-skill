@@ -290,13 +290,31 @@ def load_prices(path):
 def canon(m):
     s = m.strip().lower()
     s = s.rsplit("/", 1)[-1]
+    s = re.sub(r"\[[^\]]*\]", "", s)
     s = re.sub(r"[\s-]*\(latest\)", "", s)
     s = re.sub(r"[\s-]*\((minimal|low|medium|high|xhigh|max)\)$", "", s)
     s = re.sub(r"\s+(minimal|low|medium|high|xhigh|max|ultra)$", "", s)
     s = re.sub(r"-(minimal|low|medium|high|xhigh)$", "", s)
     s = re.sub(r"[\s._]+", "-", s)
     s = re.sub(r"^claude-", "", s)
-    return re.sub(r"-+", "-", s).strip("-")
+    s = re.sub(r"-+", "-", s).strip("-")
+    return re.sub(r"-\d{8}$", "", s)
+
+
+CLAUDE_ALIASES = {"opus", "sonnet", "haiku", "fable"}
+
+
+def resolve(ref, rows, hosts):
+    """The matrix rows a name refers to: host/model, a bare model in any spelling canon folds
+    (Claude Code's `[1m]` ids, dated ids), or a Claude alias (opus, sonnet, haiku, fable)."""
+    host, model = split_ref(ref.strip(), hosts)
+    c = canon(model)
+    if not c:
+        return []
+    hit = [r for r in rows if host in (None, r["host"]) and canon(r["model"]) == c]
+    if not hit and c in CLAUDE_ALIASES and host in (None, "claude"):
+        hit = [r for r in rows if r["host"] == "claude" and canon(r["model"]).split("-")[0] == c]
+    return hit
 
 
 def split_ref(ref, hosts):
@@ -339,7 +357,7 @@ def cmd_rebuild(a):
         st, fresh = {"head": seed["head"], "plans": {}, "rows": [], "picks": [], "other": seed["other"]}, True
     seed_good = {(r["host"], r["model"]): r["good"] for r in seed["rows"]}
     rows = {(r["host"], r["model"]): r for r in st["rows"]}
-    today_s, report, problems = today(), [], []
+    today_s, report, problems, report_picks = today(), [], [], []
     prices, failed_src, price_problems = ({}, [], [])
     if a.prices:
         try:
@@ -350,7 +368,7 @@ def cmd_rebuild(a):
     problems += price_problems
 
     disc = discover_all(a.claude_models)
-    not_installed, unreachable, kept_missing = [], [], []
+    not_installed, unreachable, kept_missing, new_keys = [], [], [], set()
     for host in HOSTS:
         d = disc[host]
         if "error" in d:
@@ -366,6 +384,7 @@ def cmd_rebuild(a):
                              "source": "none", "priced": "-", "good": seed_good.get(key, ""),
                              "measured": "", "seen": "-"}
                 st["rows"].append(rows[key])
+                new_keys.add(key)
                 added += 1
             rows[key]["efforts"] = m["efforts"]
             rows[key]["seen"] = today_s
@@ -402,6 +421,20 @@ def cmd_rebuild(a):
                 why = cand_problem(c, st["rows"])
                 if why:
                     problems.append(f"pick {p['job']}: {c['text']} {why}")
+        # a model first seen this run (a CLI that was unreachable at the first rebuild) joins the
+        # shipped candidates for its job: appended to Alternatives, or a new job row; First choice stays
+        for sp in seed["picks"]:
+            mine = next((p for p in st["picks"] if p["job"] == sp["job"]), None)
+            have = {(c["host"], canon(c["model"])) for c in cands(mine, hosts_all)} if mine else set()
+            new = [c for c in cands(sp, set(HOSTS)) if (c["host"], c["model"]) in new_keys
+                   and not cand_problem(c, st["rows"]) and (c["host"], canon(c["model"])) not in have]
+            if mine is None and new:
+                st["picks"].append({"job": sp["job"], "first": new[0]["text"],
+                                    "alts": "; ".join(c["text"] for c in new[1:])})
+            elif new:
+                mine["alts"] = "; ".join([a.strip() for a in mine["alts"].split(";") if a.strip()]
+                                         + [c["text"] for c in new])
+            report_picks += [f"PICK ADDED {sp['job']}: {c['text']} (now installed)" for c in new]
 
     write_atomic(dest, render(st))
 
@@ -421,6 +454,7 @@ def cmd_rebuild(a):
     for h in HOSTS:
         if "error" not in disc[h] and h not in st["plans"]:
             out.append(f"PLAN UNKNOWN {h}: ask the user, then rebuild with --plan {h}=NAME")
+    out += report_picks
     out += [f"PROBLEM {p}" for p in problems]
     print("\n".join(out))
     bad = unreachable or failed_src or problems or any(
@@ -473,7 +507,12 @@ def cmd_pick(a):
         if not a.builder:
             print("code-review needs --builder <host/model>: the reviewer must be a different model", file=sys.stderr)
             return 64
-        builder = split_ref(a.builder, hosts)
+        rows_b = resolve(a.builder, st["rows"], hosts)
+        if not rows_b:
+            print(f"--builder {a.builder!r} is not in the matrix; name it as host/model from "
+                  "`orch-models.py show`", file=sys.stderr)
+            return 64
+        builder = ({canon(r["model"]) for r in rows_b}, rows_b[0]["model"])
     if a.job == PLAN_REVIEW:
         if not a.author:
             print("plan-review needs --author <host>: the reviewer must be a different CLI", file=sys.stderr)
@@ -484,18 +523,23 @@ def cmd_pick(a):
             return 64
 
     def refusal(host, model):
-        if builder and canon(model) == canon(builder[1]):
+        if builder and canon(model) in builder[0]:
             return f"reviewer model {model} is the builder's own model ({builder[1]})"
         if author and host == author:
             return f"reviewer CLI {host} is the plan author's CLI"
         return None
 
     if a.reviewer:
-        host, model = split_ref(a.reviewer, hosts)
-        why = refusal(host, model)
-        if why:
-            print(f"REFUSED: {why}", file=sys.stderr)
-            return 1
+        found = resolve(a.reviewer, st["rows"], hosts) if a.job in (CODE_REVIEW, PLAN_REVIEW) else []
+        if a.job in (CODE_REVIEW, PLAN_REVIEW) and not found:
+            print(f"{'REFUSED: ' if author else ''}--reviewer {a.reviewer!r} is not in the matrix; "
+                  "name it as host/model from `orch-models.py show`", file=sys.stderr)
+            return 1 if author else 64
+        for r in found:
+            why = refusal(r["host"], r["model"])
+            if why:
+                print(f"REFUSED: {why}", file=sys.stderr)
+                return 1
         print(f"OK: {a.reviewer} may review")
         return 0
     for c in cands(pick, hosts):
