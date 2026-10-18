@@ -1,26 +1,31 @@
 # Current
 
-- Stamp: main af8dade be32462f93a8
-- Branch: `main`. Source: orch 0.10.0, session-close 1.0.2, vendored KIS 0.11.0 (byte-identical
-  to tag v0.11.0, vendored from GitHub 2026-10-18).
-- Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
-  Mode: Phase. Status: phases 0 and 1 done. KIS 0.11.0 released 2026-10-18: one squashed commit
-  `f3b17bb` on KIS main, tag v0.11.0, pushed (verified from origin); all 9 KIS gates green on it.
-  Six review rounds (last verdict ship); live anchor checks: Claude, Codex, agy turn 1, cmd turn 2.
-- Blocker: none. This plan re-reviewed 2026-10-18 by Codex gpt-6.1-sol (high): pass 1 rework
-  (1 blocker, 11 major, 2 minor), pass 2 after fixes 13 of 14 resolved, the last fixed; recorded in
-  the plan's `## Review` (hash 2c86ee76814e), `plan-review.sh check` ok, mutant refused.
+- Stamp: main c63c4cd fd2131ae3782
+- Branch: `main` (local, NOT pushed): c63c4cd merges phases 2-3. orch 0.12.0 installed in the real
+  home 2026-10-18 (`bootstrap.sh update --source .`, check rc 0; Codex prompts, cmd commands, agy skill
+  link wired). Vendored KIS 0.11.0. Board plugin linked in the real Herdr from the p3 worktree path
+  (`herdr plugin unlink orch` to remove; relink from skills/orch/plugin before deleting worktrees).
+- Task: plan `kis/intent/plan-2026-10-17-orch-front-door.md`, Mode Phase. Phases 0-3 done (2-3 merged;
+  the last fix commits 33012a5..4187677, 0d86a47, 6c750c3, dbc6518 passed tests and coordinator reruns
+  but had no separate review, stopped to save quota). Phase 2 live: Claude, Codex, cmd pass start, fix,
+  close and recovery headless; agy (gpt-oss) treats "orch" as a shell binary (open). Phase 3 live run in
+  Herdr not done (event hook verified firing on a real Herdr event).
+- Blocker: none.
+- Next: phase 4, owner decision 2026-10-18 "move all, delete nothing": per repo (example-app, tartib,
+  anjuman-sadat-una-junagadh) move `<repo>.reports/orch/` to `<repo>/.orch/run-legacy/` and every other
+  folder in `<repo>.reports/` to `<repo>/.orch/legacy/` (same disk, rename); the stale wakes (example-app
+  4, tartib 2, from 2026-10-09) are archived, not replayed; no legacy watcher is running; repair KIS files
+  citing the old path (example-app: kis/intent/roadmap.md, kis/intent/feedback-r1.md,
+  kis/state/current.md, kis/knowledge/technical.md; tartib: kis/state/current.md,
+  kis/intent/space-descriptions.md); check each repaired target resolves; remove only the then-empty
+  `.reports` dir; verify `orch:start` recovers each. Then remove the legacy path from orch-dir.sh,
+  start.md, SKILL.md and the watcher (one small builder), tests green. Then phase 5 (probes updated per
+  [3.11], rerun; ask the owner about quota first: cmd and agy live runs cost 1-3.5M tokens each).
+  Owner's quota is low: prefer the cheapest path and say the cost before any agent or live run.
 - Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
   `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
   Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
   model; the same host is fine. Picks come from `kis/knowledge/models.md`.
-- Next: phase 2 and phase 3 are built, merged and green on branch `p3` (worktree
-  ../orch-skill.wt/p3, orch 0.12.0, 20 test files, 37 commits ahead of main; NOT merged to main).
-  Open: (1) review of the last fixes (`orch-rev-p3b`, Opus, brief ../orch-skill.wt/briefs/review-p3b.md;
-  it waits on the Claude usage limit, reset 17:30); (2) phase 2 live acceptance rerun with a reviewed
-  fixture plan; (3) phase 3 live acceptance in Herdr (needs the owner's yes: `herdr plugin link`
-  writes the real ~/.config/herdr/plugins); then merge p3 to main. Reviews and briefs are in
-  ../orch-skill.wt/reviews and ../orch-skill.wt/briefs. Agent `orch-board` (Codex) idles for reuse.
 - Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
   memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
   cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run
