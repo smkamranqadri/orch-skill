@@ -38,9 +38,12 @@ def save_registry(path,data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def herdr(*args,check=True):
+def herdr(*args,check=True,missing_workspace_ok=False):
     p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
-    if check and p.returncode: fail(f"herdr {' '.join(map(str,args))} failed: {(p.stderr or p.stdout).strip()}")
+    if check and p.returncode:
+        error=(p.stderr or p.stdout).strip()
+        if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
+        fail(f"herdr {' '.join(map(str,args))} failed: {error}")
     if p.returncode: return None
     if not p.stdout.strip(): return {}
     try: return json.loads(p.stdout)
@@ -103,15 +106,15 @@ def register(name=None):
     with locked() as d:
         if key in d["orchs"] and not d["orchs"][key].get("gone"):
             deliver(d); return
+        session=os.environ["HERDR_SESSION"] + "/"
+        for old_key,entry in d["orchs"].items():
+            if not old_key.startswith(session) or entry.get("project")!=project or entry.get("gone"): continue
+            listing=herdr("pane","list","--workspace",entry["workspace"],missing_workspace_ok=True)
+            if listing.get("missing_workspace") or entry.get("pane") not in pane_ids(listing): entry["gone"]=True
         if key in d["orchs"]:
             d["orchs"][key].update({"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False})
         else:
             d["orchs"][key]={"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False,"queue":[]}
-        session=os.environ["HERDR_SESSION"] + "/"
-        for old_key,entry in d["orchs"].items():
-            if not old_key.startswith(session) or entry.get("project")!=project or entry.get("gone"): continue
-            listing=herdr("pane","list","--workspace",entry["workspace"])
-            if entry.get("pane") not in pane_ids(listing): entry["gone"]=True
         orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
         old_owners={a.get("orch") for a in orphaned}
         for old_key in old_owners: d["orchs"][key]["queue"].extend(d["orchs"][old_key].get("queue",[]))

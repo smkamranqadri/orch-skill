@@ -6,7 +6,7 @@ class PhaseOne(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(); self.root=pathlib.Path(self.tmp.name)
   self.home=self.root/'state'; self.home.mkdir(); self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'; self.resources=self.home/'herdr-resources.json'; self.resources.write_text(json.dumps({'panes':{},'tabs':{}}))
   scrubbed=os.environ.copy()
-  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION'):
+  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR'):
    scrubbed.pop(name,None)
   self.env=scrubbed|{'HOME':str(self.userhome),'GIT_CONFIG_GLOBAL':str(self.userhome/'gitconfig'),'GIT_CONFIG_SYSTEM':os.devnull,'XDG_CONFIG_HOME':str(self.userhome/'config'),'PATH':str(self.bin)+os.pathsep+scrubbed['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1'}
   fake=self.bin/'herdr'
@@ -25,6 +25,8 @@ if args[:2]==["agent","start"] and os.environ.get("CHECK_RESOURCE"):
  if not ok: sys.exit(4)
 if os.environ.get("FAIL_START")=="1" and args[:2]==["agent","start"]: print("simulated failure",file=sys.stderr); sys.exit(3)
 if args[:2] in (["pane","close"],["tab","close"],["workspace","close"]) and os.environ.get("FAIL_CLOSE")==args[-1]: print("simulated close failure",file=sys.stderr); sys.exit(3)
+if args[:2]==["pane","list"] and os.environ.get("MISSING_WORKSPACE")==args[-1]: print("workspace not found",file=sys.stderr); sys.exit(3)
+if args[:2]==["pane","list"] and os.environ.get("PANE_LIST_ERROR")==args[-1]: print("simulated listing error",file=sys.stderr); sys.exit(4)
 if args[:2]==["pane","list"]: print(json.dumps({"result":{"panes":[{"pane_id":"p1"}]}}))
 elif args[:2]==["pane","layout"]: print(json.dumps({"result":{"pane":{"width":120,"height":40}}}))
 elif args[:2]==["pane","split"]:
@@ -87,6 +89,14 @@ else: print(json.dumps({"result":{}}))
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])
+ def test_missing_workspace_marks_owner_gone_and_adopts(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/old']={'project':str(self.repo),'pane':'p9','workspace':'missing-ws','gone':False,'queue':['old queue']}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/old','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','MISSING_WORKSPACE':'missing-ws','ORCH_STATUS':'working'})
+  d=self.state(); self.assertTrue(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertIn('session-a/p2',d['orchs'])
+ def test_other_workspace_listing_error_does_not_complete_registration(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/old']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/old','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  p=self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','PANE_LIST_ERROR':'ws-old'},ok=False); self.assertIn('simulated listing error',p.stderr); self.assertNotIn('session-a/p2',self.state()['orchs'])
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertTrue(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2')
  def test_linked_worktree_project_resolution(self):
   wt=self.root/'linked'; subprocess.run(['git','-C',str(self.repo),'worktree','add','-qb','linked',str(wt)],check=True,env=self.env)
   self.reg('p1','linked-session',cwd=wt); self.assertEqual(self.state()['orchs']['linked-session/p1']['project'],str(self.repo))
