@@ -61,7 +61,9 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
    set Next action to "ask the user for the first assignment", print the board, and ask in one
    line; then `/orch:task` does the rest.
 2. State pointer (KIS >= 0.11 only, and not "pointer off"): set State's `Run:` line to
-   `Run: orch run active; live record at <abs path of $D/ledger.md>`, then write the stamp
+   `Run: orch run active; live record at <abs path of $D/ledger.md>` (absolute on purpose: a
+   linked worktree shares the main checkout's `.orch/`). First move State's Task and Next into
+   the ledger's Next action, so State holds neither during the run; then write the stamp
    (SKILL.md, State contract). Pointer off or no KIS: write nothing into State.
 3. Reconcile your owned rows with `scripts/orch-agents.sh` and `git worktree list`. Fix only
    yours. Do not claim live agents owned elsewhere or adopt every agent with no row. Joining an

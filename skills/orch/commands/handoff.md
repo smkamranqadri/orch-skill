@@ -17,9 +17,8 @@ Agents keep running. Nothing is closed, removed or committed beyond the memory s
    (`~/.agents/skills/orch/commands/close.md`, steps 3, 4, 5 and 7): KIS sync, KIS check, apply
    (when the repo has `kis/`), and the project's status space (when the notes
    MCP is present); each absent one is skipped in one line. The run is not ending, so keep the
-   `Run:` line in State and add only proof lines for merged work. Flush applied decisions from the
-   ledger's Open decisions into the KIS plan, or leave them in the ledger without KIS; the
-   packet in step 4 passes the rest on.
+   `Run:` line in State and add only proof lines for merged work. Decisions stay in the ledger's
+   Open decisions and go into the packet in step 4; only `close` flushes them to Intent.
 2. Write the stamp last, after the final State edit: `.agents/skills/kis/scripts/state-stamp.sh
    <project root>`, its output verbatim as the one `Stamp:` line in State.
 3. Update only your ledger rows and `Next action (<owner>):`. Refuse to continue while your
