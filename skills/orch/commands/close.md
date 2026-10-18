@@ -29,7 +29,7 @@ Full method: `~/.agents/skills/orch/SKILL.md`. The handoff command reuses steps 
    `Next action` line(s) and any row not yet `merged`. Done items already hold a proof line in
    State; leave them. Without `kis/`: the ledger stays as the record and keeps its Open
    decisions and Done lines for the next session. A `Run:` line naming another dir is another
-   session's run: keep it. Pointer off (SKILL.md): State is not touched.
+   session's run: keep it. A ledger with a `State pointer: off` line means State is not touched.
 3. **Sync project memory.** With a `kis/` folder, run the KIS sync step (`/kis:sync`, or
    `.agents/skills/kis/commands/sync.md`), working from `git status` and `git diff`, not
    memory. No `kis/`: skip steps 3 to 5 and say so. A `Run:` line still in State (another

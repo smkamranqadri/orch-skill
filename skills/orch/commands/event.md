@@ -51,7 +51,7 @@ prompt can carry several agents.
    "open: next cycle ..." is a missed step). Its exit is 1 with findings, 3 when the ledger
    cannot be parsed.
 4. Update only your ledger rows and `Next action (<owner>):` line. When the repo has `kis/`, State
-   is KIS >= 0.11 and the run is not "pointer off" (SKILL.md, State contract) and this event
+   is KIS >= 0.11 and the ledger has no `State pointer: off` line (SKILL.md, State contract) and this event
    merged work: in the same turn, inline (a few lines, not a sub-agent job), add one proof line
    `Merged: <task> <short sha>; proof <command: result>` to `kis/state/current.md`, leave the
    `Run:` line and every other line alone, then write the stamp: run

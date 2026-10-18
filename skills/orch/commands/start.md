@@ -12,9 +12,10 @@ below. Herdr is needed only in Agents mode; the other modes never touch it.
 
 - **Repo has `kis/`**: version check, then KIS's start.
   1. `~/.agents/skills/orch/scripts/orch-kis-version.sh`. Exit 0: go on. Exit 3 (below 0.11.0, or
-     unreadable): offer that repo's one-line update (`bootstrap.sh update` from KIS's README, run
-     from the repo) and continue on the old version if the user declines. Declined: remember
-     "pointer off" for this run (SKILL.md, State contract).
+     unreadable) or exit 2 with `kis/` present (no `.agents/skills/kis`): offer that repo's
+     one-line update or install (`bootstrap.sh update` from KIS's README, run from the repo) and
+     continue without it if the user declines. Declined: "pointer off" for this run (SKILL.md,
+     State contract); an Agents run records it in the ledger (step 3.1).
   2. Run the repo's KIS start step, `.agents/skills/kis/commands/start.md`, unchanged: it reads
      State (and follows a `Run:` pointer), prints its report and proposes a mode.
   3. Reuse that report's one mode proposal and its single confirmation. Add one mode to the
@@ -62,6 +63,8 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
    (`orch-dir.sh --migrate`). Read the ledger `$D/ledger.md`. A `Ledger: minimal` ledger is
    upgraded: copy `ledger-template.md` over it, keeping Task as the first Next action and
    moving its Decisions and Done into the matching sections.
+   Pointer off: put `State pointer: off (KIS <version>)` on the line under `Updated:`; a ledger
+   that has it is never offered the update again by a successor.
    No ledger: copy `ledger-template.md` there, fill it from State (if any) and
    `scripts/orch-agents.sh`, and set your Next action from State's Next. No State or no Next:
    set Next action to "ask the user for the first assignment", print the board, and ask in one

@@ -31,7 +31,9 @@ only. Outside it the whole footprint is `commands/start.md` and, with no KIS, th
 **KIS version.** `scripts/orch-kis-version.sh` reads the repo's vendored KIS: 0.11.0 or newer
 follows a `Run:` pointer; below that, `start` offers the repo's one-line update and continues if
 declined. Declined: an Agents run keeps its record in the ledger only and writes nothing into
-State ("pointer off").
+State ("pointer off"), and notes `State pointer: off (KIS <version>)` under `Updated:` in the
+ledger so `event`, `close` and a successor read it there. A repo with `kis/` but no vendored KIS
+package (`orch-kis-version.sh` exit 2) is offered the same install.
 
 **Minimal ledger** (no KIS, no agents): `ledger-minimal-template.md` holds Task, Next action,
 Plan and Plan review, Decisions, Done; no pane, owner or watcher fields. `orch-watch.py check`

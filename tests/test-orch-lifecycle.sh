@@ -30,4 +30,22 @@ has "$orch/commands/start.md" "First move State's Task and Next into"
 has "$orch/SKILL.md" "\`start\` moves State's"
 # 5. SKILL.md names the per-host invocations
 has "$orch/SKILL.md" 'Codex: `/prompts:orch-start`; Command Code: `/orch-start`'
+# 6. exit 2 with kis/ present is offered the install; pointer off is recorded in the ledger and read
+#    by event and close; the helper still reports exit 2 for a repo with kis/ and no package
+has "$orch/commands/start.md" 'or exit 2 with `kis/` present (no `.agents/skills/kis`): offer that repo'"'"'s'
+has "$orch/commands/start.md" 'put `State pointer: off (KIS <version>)` on the line under `Updated:`'
+has "$orch/commands/event.md" 'the ledger has no `State pointer: off` line'
+has "$orch/commands/close.md" 'A ledger with a `State pointer: off` line means State is not touched.'
+has "$orch/SKILL.md" 'notes `State pointer: off (KIS <version>)` under `Updated:` in the'
+has "$orch/SKILL.md" '(`orch-kis-version.sh` exit 2) is offered the same install.'
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/kisdir/kis/state"; echo x > "$tmp/kisdir/kis/state/current.md"
+out="$("$orch/scripts/orch-kis-version.sh" "$tmp/kisdir")" && rc=0 || rc=$?
+[[ "$out|$rc" == 'kis none|2' ]] || fail "kis/ without a package: expected [kis none|2], got [$out|$rc]"
+# a full ledger with the pointer-off line still checks like one without it
+mkdir -p "$tmp/led"; cp "$repo_root"/tests/fixtures/visibility/* "$tmp/led/"
+a="$(python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
+sed -i '2a State pointer: off (KIS 0.10.1)' "$tmp/led/ledger.md"
+b="$(python3 "$orch/scripts/orch-watch.py" check "$tmp/led" --offline | sed 's/ledger has [0-9]* lines/ledger has N lines/')"
+[[ "$a" == "$b" ]] || fail "the pointer-off header line changed check output"
 echo "ok: lifecycle"
