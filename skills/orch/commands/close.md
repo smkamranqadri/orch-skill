@@ -19,10 +19,12 @@ Full method: `~/.agents/skills/orch/SKILL.md`. The handoff command reuses steps 
    durable, then close the pane and the workspace. Agents owned by another orchestrator are
    left alone and named. No live agent, or no run dir: nothing to close here; go on to step 2.
 2. **End the run's records.** Runs whenever `D/ledger.md` is an agents ledger (not `Ledger:
-   minimal`) not yet marked `Run closed`, or State's `Run:` line names `D`, even when every row is already `closed` or
+   minimal`) not yet marked `Run closed`, or `<D>/watcher.pid` names a live process
+   (`kill -0 $(cat <D>/watcher.pid)`), or State's `Run:` line names `D`, even when every row is already `closed` or
    `merged` (the normal end of a run). Stop the watcher when `<D>/watcher.pid` exists
-   (`kill $(cat <D>/watcher.pid)`, confirm with `kill -0`) and mark the ledger `Run closed
-   <date>`. With `kis/`: move the ledger's Open decisions into the plan in `kis/intent/` (or
+   (`kill $(cat <D>/watcher.pid)`, confirm with `kill -0`) and put `Run closed <date>` on its
+   own line under `Updated:` in the ledger (`start` renames a ledger carrying it before the next
+   run). With `kis/`: move the ledger's Open decisions into the plan in `kis/intent/` (or
    `kis/intent/backlog.md` when no plan fits), each as the user's words with its date, and
    delete each moved entry from the ledger so a later close cannot move it twice. Then
    delete the `Run:` line from `kis/state/current.md` and write State's Task and Next from the ledger's

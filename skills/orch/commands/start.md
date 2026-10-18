@@ -12,12 +12,19 @@ below. Herdr is needed only in Agents mode; the other modes never touch it.
 
 - **Repo has `kis/`**: version check, then KIS's start.
   1. `~/.agents/skills/orch/scripts/orch-kis-version.sh`. Exit 0: go on. Exit 3 (below 0.11.0, or
-     unreadable) or exit 2 with `kis/` present (no `.agents/skills/kis`): offer that repo's
-     one-line update or install (`bootstrap.sh update` from KIS's README, run from the repo) and
-     continue without it if the user declines. Declined: "pointer off" for this run (SKILL.md,
-     State contract); an Agents run records it in the ledger (step 3.1).
-  2. Run the repo's KIS start step, `.agents/skills/kis/commands/start.md`, unchanged: it reads
-     State (and follows a `Run:` pointer), prints its report and proposes a mode.
+     unreadable) or exit 2 with `kis/` present (no `.agents/skills/kis`): before offering, read
+     `$(~/.agents/skills/orch/scripts/orch-dir.sh --check)/ledger.md` if it exists and is not
+     marked `Run closed`; a `State pointer: off (KIS <v>)` line whose `<v>` is the version the
+     script printed (`none` for exit 2) means the user already declined this: skip the offer and
+     treat it as declined. Otherwise offer that repo's one-line update or install
+     (`bootstrap.sh update` from KIS's README, run from the repo) and continue without it if the
+     user declines. Declined: "pointer off" for this run (SKILL.md, State contract); an Agents
+     run records it in the ledger (step 3.1). Declined at exit 2 there is no KIS start step to
+     run: say so in one line, read `kis/state/current.md` directly (if it exists) for Task and
+     Next, report them, propose the mode as step 3 does, and skip step 2.
+  2. Run the repo's KIS start step, `.agents/skills/kis/commands/start.md`, unchanged (not after a
+     declined exit 2): it reads State (and follows a `Run:` pointer), prints its report and
+     proposes a mode.
   3. Reuse that report's one mode proposal and its single confirmation. Add one mode to the
      list: **Agents** (several agents in Herdr panes with a watcher). Never ask a second mode
      question. Fast, Standard and Phase continue as KIS says; nothing below runs.
@@ -63,8 +70,11 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
    (`orch-dir.sh --migrate`). Read the ledger `$D/ledger.md`. A `Ledger: minimal` ledger is
    upgraded: copy `ledger-template.md` over it, keeping Task as the first Next action and
    moving its Decisions and Done into the matching sections.
-   Pointer off: put `State pointer: off (KIS <version>)` on the line under `Updated:`; a ledger
-   that has it is never offered the update again by a successor.
+   A ledger marked `Run closed <date>` belongs to a finished run: rename it `ledger-<date>.md`
+   (add `-2`, `-3` if that name exists), then treat it as no ledger, so the new run starts from
+   the template without the old `Run closed` or `State pointer:` lines.
+   Pointer off: put `State pointer: off (KIS <version>)` on the line under `Updated:`; step 1.1
+   reads that line, so a successor in the same run is not offered the update again.
    No ledger: copy `ledger-template.md` there, fill it from State (if any) and
    `scripts/orch-agents.sh`, and set your Next action from State's Next. No State or no Next:
    set Next action to "ask the user for the first assignment", print the board, and ask in one
