@@ -1,0 +1,145 @@
+import json, os, pathlib, subprocess, tempfile, unittest
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+CLI=ROOT/'plugin'/'orch'
+class PhaseOne(unittest.TestCase):
+ def setUp(self):
+  self.tmp=tempfile.TemporaryDirectory(); self.root=pathlib.Path(self.tmp.name)
+  self.home=self.root/'state'; self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'
+  fake=self.bin/'herdr'
+  fake.write_text('''#!/usr/bin/env python3
+import json,os,sys,subprocess
+args=sys.argv[1:]
+with open(os.environ["CALLS"],"a") as f:f.write(json.dumps(args)+"\\n")
+if args[:2]==["agent","start"] and os.environ.get("CHECK_RESOURCE"):
+ d=json.load(open(os.path.join(os.environ["XDG_STATE_HOME"],"orch","registry.json")))
+ entry=d["agents"].get(os.environ["HERDR_SESSION"]+"/"+args[2],{})
+ ok=entry.get("state")=="starting" and "pane:newpane" in entry.get("created",[])
+ open(os.environ["CHECK_RESOURCE"],"w").write("yes" if ok else "no")
+ if not ok: sys.exit(4)
+if os.environ.get("FAIL_START")=="1" and args[:2]==["agent","start"]: print("simulated failure",file=sys.stderr); sys.exit(3)
+if args[:2]==["pane","list"]: print(json.dumps({"result":{"panes":[{"pane_id":"p1"}]}}))
+elif args[:2]==["pane","layout"]: print(json.dumps({"result":{"pane":{"width":120,"height":40}}}))
+elif args[:2]==["pane","split"]:
+ if os.environ.get("CHECK_RESERVATION"):
+  d=json.load(open(os.path.join(os.environ["XDG_STATE_HOME"],"orch","registry.json"))); entry=d["agents"].get(os.environ["HERDR_SESSION"]+"/reserved",{})
+  ok=entry.get("state")=="starting" and entry.get("created")==[]
+  open(os.environ["CHECK_RESERVATION"],"w").write("yes" if ok else "no")
+  if not ok: sys.exit(4)
+ print(json.dumps({"result":{"pane":{"pane_id":"newpane"}}}))
+elif args[:2]==["tab","create"]: print(json.dumps({"result":{"root_pane":{"pane_id":"tabpane"},"tab":{"tab_id":"newtab"}}}))
+elif args[:2]==["worktree","create"]:
+ cwd=args[args.index("--cwd")+1]; branch=args[args.index("--branch")+1]; base=args[args.index("--base")+1]; path=args[args.index("--path")+1]
+ subprocess.run(["git","-C",cwd,"worktree","add","-qb",branch,path,base],check=True)
+ open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
+ print(json.dumps({"result":{"root_pane":{"pane_id":"wtpane"},"workspace":{"workspace_id":"wtws"},"worktree":{"path":path}}}))
+elif args[:2]==["worktree","remove"]:
+ path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read()
+ subprocess.run(["git","-C",os.getcwd(),"worktree","remove",path],check=True)
+ print(json.dumps({"result":{}}))
+elif args[:2]==["plugin","pane"]: print(json.dumps({"result":{"pane":{"pane_id":"board"}}}))
+elif args[:2]==["agent","list"]: print(json.dumps({"result":{"agents":[{"name":os.environ["LIVE_AGENT"]}] if os.environ.get("LIVE_AGENT") else []}}))
+elif args[:2]==["agent","get"]: print(json.dumps({"result":{"agent":{"status":os.environ.get("ORCH_STATUS","idle")}}}))
+elif args[:2]==["agent","prompt"] and os.environ.get("FAIL_PROMPT")=="1": print("prompt failed",file=sys.stderr); sys.exit(2)
+else: print(json.dumps({"result":{}}))
+'''); fake.chmod(0o755)
+  self.repo=self.root/'repo'; self.repo.mkdir(); subprocess.run(['git','init','-q',str(self.repo)],check=True); subprocess.run(['git','-C',str(self.repo),'config','user.email','test@example.invalid'],check=True); subprocess.run(['git','-C',str(self.repo),'config','user.name','Fictional Tester'],check=True)
+  (self.repo/'seed.txt').write_text('seed\n'); subprocess.run(['git','-C',str(self.repo),'add','seed.txt'],check=True); subprocess.run(['git','-C',str(self.repo),'commit','-qm','seed'],check=True)
+  self.env=os.environ|{'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1'}
+ def tearDown(self): self.tmp.cleanup()
+ def runcli(self,*args,ok=True,env=None,cwd=None):
+  p=subprocess.run([str(CLI),*args],cwd=cwd or self.repo,env=env or self.env,text=True,capture_output=True)
+  if ok: self.assertEqual(p.returncode,0,p.stderr)
+  else: self.assertNotEqual(p.returncode,0,p.stdout)
+  return p
+ def calls(self): return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
+ def state(self): return json.loads((self.home/'orch/registry.json').read_text())
+ def reg(self,pane='p1',session='session-a'):
+  e=self.env|{'HERDR_PANE_ID':pane,'HERDR_SESSION':session}; self.runcli('register',env=e)
+ def spawn(self,name='worker',where='pane',kind='claude',extra=()):
+  brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
+  return self.runcli('spawn',name,'--role','build','--kind',kind,'--where',where,'--brief',str(brief),*extra)
+ def test_two_registers_idempotence_adoption_and_sessions(self):
+  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right','--cwd',str(self.repo)],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
+  self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
+ def test_liveness_reconcile_marks_missing_orch_gone(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])
+ def test_linked_worktree_project_resolution(self):
+  wt=self.root/'linked'; subprocess.run(['git','-C',str(self.repo),'worktree','add','-qb','linked',str(wt)],check=True)
+  self.reg('p1','linked-session'); self.assertEqual(self.state()['orchs']['linked-session/p1']['project'],str(self.repo))
+ def test_register_reconcile_adopts_queue_and_notices(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/p1']['gone']=True; d['orchs']['session-a/p1']['queue']=['old queued item']; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/p1','project':str(self.repo),'pane':'p9','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertEqual(d['orchs']['session-a/p2']['queue'][0],'old queued item'); self.assertEqual(d['orchs']['session-a/p2']['queue'][1],'[orch] ghost done · pane p9 · read: herdr agent read ghost')
+ def test_spawn_locations_flags_host_argv_and_role(self):
+  self.reg(); self.spawn(extra=('--model','sonnet-fake','--effort','medium')); c=self.calls()
+  self.assertIn(['pane','split','--pane','p1','--direction','right','--cwd',str(self.repo),'--no-focus'],c)
+  self.assertIn(['agent','start','worker','--kind','claude','--pane','newpane','--','--model','sonnet-fake','--effort','medium'],c)
+  d=self.state()['agents']['session-a/worker']; self.assertEqual(d['role'],'build'); self.assertEqual(d['state'],'live')
+  self.spawn('tabber','tab','codex',('--model','fake-codex','--effort','low')); c=self.calls()
+  self.assertIn(['tab','create','--workspace','ws1','--cwd',str(self.repo),'--label','tabber','--no-focus'],c)
+  self.assertIn(['agent','start','tabber','--kind','codex','--pane','tabpane','--','-m','fake-codex','-c','model_reasoning_effort=low'],c)
+ def test_worktree_spawn_and_writer_refusal(self):
+  self.reg(); self.spawn('writer','worktree'); d=self.state()['agents']['session-a/writer']; self.assertTrue(d['writes']); self.assertEqual(d['branch'],'orch/writer')
+  self.assertIn(['worktree','create','--workspace','ws1','--cwd',str(self.repo),'--branch','orch/writer','--base','HEAD','--path','../repo.wt/writer','--label','writer','--no-focus'],self.calls())
+  self.spawn('writer2','pane',extra=('--writes',))
+  self.runcli('spawn','writer3','--role','build','--kind','claude','--where','pane','--writes','--brief',str(self.root/'brief.txt'),ok=False)
+ def test_duplicate_live_herdr_agent_name_refused_exactly(self):
+  self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); e=self.env|{'LIVE_AGENT':'occupied'}
+  p=self.runcli('spawn','occupied','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
+  self.assertEqual(p.stderr.strip(),'orch: agent already exists in Herdr: occupied')
+  self.runcli('spawn','occupied-extra','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),env=e)
+ def test_parallel_writers_same_tree_allow_only_one(self):
+  self.reg(); brief=self.root/'brief.txt'; brief.write_text('Build fictional component')
+  argv=[str(CLI),'spawn','parallel','--role','build','--kind','claude','--where','pane','--writes','--brief',str(brief)]
+  procs=[subprocess.Popen(argv,cwd=self.repo,env=self.env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE) for _ in range(2)]
+  results=[p.communicate()+(p.returncode,) for p in procs]; self.assertEqual(sorted(r[2] for r in results),[0,1])
+ def test_duplicate_and_outside_herdr_errors(self):
+  self.reg(); self.spawn(); self.runcli('spawn','worker','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False)
+  e=self.env.copy(); del e['HERDR_ENV']; p=self.runcli('list',env=e,ok=False); self.assertEqual(p.stderr.strip(),'orch: must run inside Herdr (HERDR_ENV is unset)')
+ def test_list_role_idle_filters(self):
+  self.reg(); self.spawn(); d=self.state(); d['agents']['session-a/worker']['status']='idle'; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  p=self.runcli('list','--idle','--role','build'); self.assertEqual(p.stdout.splitlines(),['build\tworker\tidle\tpane'])
+  p=self.runcli('list','--idle','--role','review'); self.assertEqual(p.stdout,'')
+ def test_cli_retries_queue_only_when_orch_is_idle_or_done(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/p1']['queue']=['[orch] reviewer done · pane p2 · read: herdr agent read reviewer']; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.runcli('list',env=self.env|{'ORCH_STATUS':'working'}); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],['[orch] reviewer done · pane p2 · read: herdr agent read reviewer'])
+  self.runcli('list',env=self.env|{'ORCH_STATUS':'idle'}); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],[])
+  self.assertIn(['agent','prompt','p1','[orch] reviewer done · pane p2 · read: herdr agent read reviewer'],self.calls())
+ def test_failed_delivery_keeps_queue(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/p1']['queue']=['queued notice']; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  self.runcli('list',env=self.env|{'FAIL_PROMPT':'1'},ok=True); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],['queued notice'])
+ def test_unregistered_caller_is_refused(self):
+  p=self.runcli('list',ok=False); self.assertEqual(p.stderr.strip(),'orch: caller is not a registered orch')
+ def test_deregister_marks_gone(self):
+  self.reg(); self.runcli('deregister'); self.assertTrue(self.state()['orchs']['session-a/p1']['gone'])
+ def test_start_sees_durable_starting_reservation_and_created_pane(self):
+  self.reg(); marker=self.root/'reservation'; (self.root/'brief.txt').write_text('Build fictional widget')
+  resource=self.root/'resource'; self.runcli('spawn','reserved','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),env=self.env|{'CHECK_RESERVATION':str(marker),'CHECK_RESOURCE':str(resource)})
+  self.assertEqual(marker.read_text(),'yes'); self.assertEqual(resource.read_text(),'yes')
+ def test_spawn_failure_rolls_back_created_resources(self):
+  self.reg(); e=self.env|{'FAIL_START':'1'}; p=self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
+  self.assertNotIn('session-a/broken',self.state()['agents']); self.assertIn(['pane','close','--pane','newpane'],self.calls())
+ def test_close_worktree_preflight_does_not_stop(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'untracked-fictional.txt').write_text('unsaved')
+  n=len(self.calls()); p=self.runcli('close','writer',ok=False); self.assertIn('dirty paths: ?? untracked-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
+ def test_close_refuses_unmerged_branch(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'change.txt').write_text('change')
+  subprocess.run(['git','-C',str(wt),'add','change.txt'],check=True); subprocess.run(['git','-C',str(wt),'commit','-qm','unmerged fictional change'],check=True)
+  n=len(self.calls()); p=self.runcli('close','writer',ok=False); self.assertIn('unmerged commits:',p.stderr); self.assertEqual(len(self.calls()),n)
+ def test_discard_overrides_close_preflight(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'change.txt').write_text('unmerged change')
+  subprocess.run(['git','-C',str(wt),'add','change.txt'],check=True); subprocess.run(['git','-C',str(wt),'commit','-qm','unmerged fictional change'],check=True)
+  self.runcli('close','writer','--discard'); self.assertEqual(self.state()['agents']['session-a/writer']['state'],'closed')
+  self.assertIn(['worktree','remove','--workspace','wtws'],self.calls())
+ def test_close_only_created_and_discard_override(self):
+  self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber','--keep-checkout'); c=self.calls(); self.assertIn(['agent','send-keys','tabber','ctrl+c'],c); self.assertIn(['pane','close','--pane','tabpane'],c); self.assertIn(['tab','close','--tab','newtab'],c)
+ def test_python_version_guard(self):
+  import sys
+  sys.path.insert(0,str(ROOT/'plugin'))
+  import orchlib
+  old=orchlib.sys.version_info
+  try:
+   orchlib.sys.version_info=(3,10)
+   with self.assertRaises(SystemExit): orchlib.require_runtime()
+  finally: orchlib.sys.version_info=old; sys.path.remove(str(ROOT/'plugin'))
+if __name__=='__main__': unittest.main()
