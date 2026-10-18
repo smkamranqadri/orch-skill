@@ -32,9 +32,10 @@ from pathlib import Path
 args=sys.argv[1:]; d=Path(os.environ['WATCH_TEST_DIR'])
 with (d/'calls.jsonl').open('a') as f: f.write(json.dumps(args)+'\\n')
 live=json.loads((d/'live.json').read_text())
+if args[:2]==['agent','list'] and (d/'down').exists(): sys.exit(1)
 if args[:2]==['agent','list']: print(json.dumps({'result':{'agents':list(live.values())}}))
 elif args[:2]==['agent','read']:
-    print('› '+('typed question' if live.get(args[2],{}).get('typing') else ''))
+    print('no input box here' if live.get(args[2],{}).get('nobox') else '› '+('typed question' if live.get(args[2],{}).get('typing') else ''))
 elif args[:2]==['agent','prompt']:
     sys.exit(1 if live.get(args[2],{}).get('reject') else 0)
 ''')
@@ -290,6 +291,78 @@ elif args[:2]==['agent','prompt']:
         self.assertEqual([e[1] for e in w.pending],['a'])
         self.agent('old'); w.next_try.clear(); w.poll()
         self.assertEqual([p[2] for p in self.prompts()],['old'])
+
+    def test_unreadable_input_box_holds_a_focused_owner(self):
+        """typed_text is None when no input box is seen: the user may be typing into something the
+        reader cannot parse, so a focused owner is held and an unfocused one is prompted."""
+        m.cmd_add(str(self.d), ['a','--orch','old'])
+        self.agent('a','working'); self.agent('old',nobox=True,focused=True)
+        w=self.watcher(); self.agent('a','done'); self.agent('old',nobox=True,focused=True)
+        w.poll()
+        self.assertEqual(self.prompts(),[])
+        self.assertEqual([e[1] for e in w.pending],['a'])
+        self.assertIn('typed input or is focused',w.owner_note)
+        self.agent('old',nobox=True,focused=False); w.next_try.clear(); w.poll()
+        self.assertEqual([p[2] for p in self.prompts()],['old'])
+        self.assertFalse(w.pending)
+
+    def test_herdr_down_does_not_busy_poll(self):
+        """A held wake is due for another try, but Herdr is unreachable so none is made: the wait
+        falls back to the 60 s safety poll instead of 1 s."""
+        m.cmd_add(str(self.d), ['a','--orch','old'])
+        self.agent('a','working'); self.agent('old',typing=True)
+        def finish(): self.agent('a','done')
+        def down(): (self.d/'down').write_text('')
+        c=self.clock({10:finish,61:down})
+        self.run_watch(c, 300)
+        # start, 60 s (the finish, held), 90 s (the retry, Herdr down), then 150, 210, 270
+        self.assertEqual(len(self.lists()),6)
+
+    def test_hold_notice_follows_the_monotonic_clock(self):
+        m.cmd_add(str(self.d), ['a','--orch','old'])
+        self.agent('a','working'); self.agent('old',typing=True)
+        c=self.clock(); w=m.Watcher(str(self.d)); w.sleep=c.sleep; w.mono=c.mono
+        w.poll(); self.agent('a','done')
+        shown=[]
+        with patch.object(w,'notify',lambda t,b: shown.append(t) if t.startswith('orchestrator') else None), patch.object(m.time,'time',lambda: 1e9 + c.t) as _:
+            w.poll()                                  # held; wall clock and monotonic clock agree
+            self.assertEqual(shown,[])
+            with patch.object(m.time,'time',lambda: 1e9 + c.t + 7200):
+                c.t+=m.RETRY; w.poll()                # the wall clock jumps forward 2 h: no notice
+            self.assertEqual(shown,[])
+            with patch.object(m.time,'time',lambda: 1e9 + c.t - 7200):
+                c.t+=m.HOLD_NOTICE; w.poll()          # the wall clock jumps back 2 h: the notice still comes
+            self.assertEqual(shown,['orchestrator: events waiting'])
+
+    def test_the_real_plugin_hook_line_is_what_the_watcher_parses(self):
+        """Contract: run plugin/event-hook.py as Herdr would (HERDR_PLUGIN_EVENT[_JSON], a temp
+        XDG_CACHE_HOME), read its line with the watcher, and check the pane in it is the
+        `agent list` pane_id by letting it skip the retry wait of a held wake."""
+        hook=ROOT/'skills/orch/plugin/event-hook.py'
+        def fire(event, data):
+            env=dict(os.environ, HERDR_PLUGIN_EVENT=event,
+                     HERDR_PLUGIN_EVENT_JSON=json.dumps({'event':event.replace('.','_',1),'data':data}))
+            r=subprocess.run([sys.executable,'-I',str(hook)],env=env,capture_output=True,text=True)
+            self.assertEqual((r.returncode,r.stderr),(0,''))
+        m.cmd_add(str(self.d), ['a','--orch','old'])
+        self.agent('a','working'); self.agent('old',typing=True)
+        self.live['old']['pane_id']='w9:p2'
+        self.write_live()
+        w=self.watcher(); self.agent('a','done'); self.live['old']['pane_id']='w9:p2'; self.write_live()
+        w.poll()
+        self.assertTrue(w.pending); self.assertEqual(self.prompts(),[])
+        pane=m.agent_list()['old']['pane_id']
+        self.assertEqual(pane,'w9:p2')
+        self.agent('old'); self.live['old']['pane_id']=pane; self.write_live()
+        fire('pane.agent_status_changed',{'pane_id':pane,'agent_status':'idle'})
+        w.read_signal()
+        self.assertEqual(w.signalled,{pane:'idle'})
+        w.poll()                                           # no next_try.clear(): the event alone skips the wait
+        self.assertEqual([p[2] for p in self.prompts()],['old'])
+        fire('pane.closed',{'pane_id':pane})
+        w.read_signal()
+        self.assertEqual(w.signalled,{pane:None})
+        self.assertEqual(len(self.signal.read_text().splitlines()),2)
 
     def test_list_calls_per_hour(self):
         """One agent working, three events in the hour: the loop reads Herdr on start, on each event
