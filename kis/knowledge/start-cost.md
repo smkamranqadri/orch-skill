@@ -73,3 +73,45 @@ Caveats:
   nothing was changed). The harness now moves the XDG dirs and refuses to run while herdr reaches
   a server. The first cmd run (`runs/2026-10-17-cmd-permission-mode/`) is void too:
   `--permission-mode yolo` does not enable tools in print mode; `--yolo` does.
+
+## Baseline, interactive (2026-10-18)
+
+Plan phase 2's first step [3.12]: approvals, setup steps and questions to the owner, counted live in
+Herdr panes in the test home (orch 0.10.0, session-close 1.0.2, KIS 0.11.0 fixtures with anchors on
+all four hosts). Hosts in their normal permission mode (Claude in auto mode, as the owner runs it).
+Turn 1: orch start, then the fix. Turn 2: close with session-close. The coordinator answered
+permission and trust prompts inside the test home (owner approved 2026-10-18), declined anything that
+resolved to the owner's real home, and never answered owner questions. Raw logs:
+`~/.cache/orch-skill-test-home/runs/2026-10-18-interactive-baseline/<host>/events.log`.
+
+| Case | Setup per project | T1 approvals | T1 questions | T2 approvals | T2 questions |
+|---|---:|---:|---:|---:|---:|
+| claude (Sonnet 5.5, medium) | 1 | 1 | 1 | 0 | 0 |
+| codex, project hook untrusted (gpt-6.1-sol, medium) | 2 | 0 | 0 | 0 | 0 |
+| codex, project hook trusted | 2 | 0 | 0 | 0 | 1 |
+| cmd (glm-5.3-flash) | 1 | 16 | 2 | 5 | 1 |
+| agy (gpt-oss-120b) | 1 | 1 | 1 | 11 | 0 |
+
+Setup once per host (first run in a home): Claude 2 (theme, security notes); Codex, cmd and agy had
+finished theirs in earlier test-home sessions, so they show none here.
+
+What drives the counts:
+- Claude's one approval is the read of orch's own `start.md` under `~/.agents`, outside the project:
+  real use hits it too. (Here the model resolved `~` to the owner's real home, so it was declined.)
+- Codex runs everything inside its sandbox: no approvals. Orch itself stops at the Herdr
+  prerequisite outside Herdr in both Codex cases (the stop phase 2 removes).
+- cmd asks for every shell command and file edit (16 in turn 1). agy asks for files outside the
+  workspace and for most shell commands (11 in turn 2).
+- Questions: orch 0.10.0 asks for an orchestrator pane id (agy), a T2 entry point and D2 (Claude, cmd),
+  and session-close step 3 waits for a yes on the KIS check proposal (Codex trusted, cmd).
+
+Caveats:
+- One run per case; counts depend on what the model chooses to run.
+- Codex trusted: its pre-trust launch had already applied the fix, so turn 1 found it done.
+- cmd turn 2: the coordinator's helper wrongly declined one test-home command (a wrapped path) and
+  answered one owner question, then cancelled it; both are counted as asked.
+- agy: the first run is void (a loose helper sent stray Enter/Esc keys); the numbers are from a clean
+  second run on a fresh fixture.
+- Claude also showed an "external CLAUDE.md import" prompt for the owner's real memory index, a
+  test-home artifact that real use does not show; declined, not counted.
+
