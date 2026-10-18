@@ -24,9 +24,6 @@ Any text follows after a comma or colon. Evidence (verdict marks) lives in event
 | name | owner | type | started | report | status | depends | owns |
 |---|---|---|---|---|---|---|---|
 
-## Watcher
-pane <id>, pid <n>, wakes: <owners per agents.txt>, agents: <names> (<dir>/agents.txt), log: <dir>/events.log
-
 ## Open decisions (user's words, who they apply to; flush to the KIS plan at close)
 - <date time> "<decision>" (applies to: <stream>)
 

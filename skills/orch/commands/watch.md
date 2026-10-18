@@ -1,5 +1,5 @@
 ---
-description: Start or restart the watcher in its own Herdr pane for the named agents and record it in the ledger.
+description: Start or restart the watcher in its own Herdr pane for the named agents.
 argument-hint: <agent> [agent...]
 ---
 
@@ -11,9 +11,9 @@ owner's line. Legacy rows without an owner fall back to `<dir>/orchestrator`; cl
 when that default is you: pin them with `move <dir> <agent>... --from <your pane id>
 --orch <your pane id>` and record the owner in their ledger rows.
 
-The watcher lives in a visible pane, not in this session, so closing the orchestrator never
-strands it and the user can read it. One watcher per run; it reads `<dir>/agents.txt` on every
-poll, so adding an agent never needs a restart.
+The watcher lives in its own pane, not in this session, so closing the orchestrator never
+strands it. One watcher per run; it reads `<dir>/agents.txt` on every wake, and a change to that
+file wakes it, so adding an agent never needs a restart.
 
 W = `python3 ~/.agents/skills/orch/scripts/orch-watch.py`; `<dir>` is the run dir from
 `scripts/orch-dir.sh` (the ledger's folder).
@@ -28,14 +28,20 @@ W = `python3 ~/.agents/skills/orch/scripts/orch-watch.py`; `<dir>` is the run di
    see it, and it would die with you. If a sandbox refuses the herdr command, ask the user to
    approve it; there is no fallback.
 4. After 10 seconds: `<dir>/events.log` has a
-   "watcher start" line and one line per agent, and `herdr pane read <id> --source visible`
-   shows the board. To list panes compactly, use
+   "watcher start" line and one line per agent, `<dir>/watcher.pid` holds the pid, and the pane
+   shows one start line. To list panes compactly, use
    `~/.agents/skills/orch/scripts/orch-agents.sh --panes --fields pane,label`.
-5. Record pane id, pid and agent names under Watcher in the ledger.
+5. Nothing is recorded in the ledger: the pid lives in `<dir>/watcher.pid`, and `check` reads it.
 
-The pane redraws only when board text changes, including the minute clock, in an alternate
-terminal buffer. Exit and SIGTERM restore the terminal and cursor. The pane shows a board: each agent's state (working, finished, idle, needs you, closed), since
-when, its owner, context use and task title, then the last five events in plain words.
+The watcher is headless. State is shown by the board plugin and by
+`W board <dir>` (text; the usage line comes from the cache, which the watcher never refreshes).
+
+The watcher sleeps on `${XDG_CACHE_HOME:-$HOME/.cache}/orch/events.signal`. The orch plugin's
+Herdr hooks (`pane.agent_status_changed`, `pane.closed`) append one line to it per event:
+`{"ts":<epoch>,"event":<name>,"pane":<id>,"status":<status or null>}`. A change to that file
+wakes the watcher, which then reads Herdr's agent list (its `completion_seq` catches a turn
+shorter than the event debounce). With no event it still reads the list every 60 s, so a missed
+hook costs at most a minute. It truncates the file when it passes 1 MB.
 
 When an agent finishes, needs the user, or closes, the watcher shows a Herdr notification and
 queues an "orch event" for that agent's owner. Each owner has its own batch, retry timer
@@ -44,5 +50,4 @@ once its owner is idle and its input box is empty (dim placeholder text is ignor
 types over the user. A queue held over two minutes raises a notification.
 
 The orchestrator never waits for the watcher. It ends its turn after each step and the watcher
-prompts it (`commands/event.md`). `W --next <dir> 540` still exists for a one-off wait, but it
-blocks the user; use it only when the user asks to wait.
+prompts it (`commands/event.md`).
