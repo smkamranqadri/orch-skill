@@ -14,15 +14,13 @@
   `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
   Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
   model; the same host is fine. Picks come from `kis/knowledge/models.md`.
-- Next: phase 2 in progress. Interactive baseline done 2026-10-18 (kis/knowledge/start-cost.md);
-  owner approved the coordinator answering permission and trust prompts in the test home only
-  (this baseline and its phase 5 rerun), never owner questions. Builders in Herdr: A
-  `orch-builder-a` (worktree ../orch-skill.wt/p2-front-door), B `orch-builder-b`
-  (../orch-skill.wt/p2-close-install), Sonnet 5.5 high; briefs in ../orch-skill.wt/briefs/.
-  Review: Opus 5.5 high per branch, then the coordinator merges.
-  Follow-ups: lore's harvester records coordinator briefs sent to Herdr agents as owner
-  corrections; KIS bootstrap warns "is not a commit" on an annotated tag; the KIS test fixture
-  named `tartib` (a real product) predates 0.11 and should get a fictional name.
+- Next: phase 2 and phase 3 are built, merged and green on branch `p3` (worktree
+  ../orch-skill.wt/p3, orch 0.12.0, 20 test files, 37 commits ahead of main; NOT merged to main).
+  Open: (1) review of the last fixes (`orch-rev-p3b`, Opus, brief ../orch-skill.wt/briefs/review-p3b.md;
+  it waits on the Claude usage limit, reset 17:30); (2) phase 2 live acceptance rerun with a reviewed
+  fixture plan; (3) phase 3 live acceptance in Herdr (needs the owner's yes: `herdr plugin link`
+  writes the real ~/.config/herdr/plugins); then merge p3 to main. Reviews and briefs are in
+  ../orch-skill.wt/reviews and ../orch-skill.wt/briefs. Agent `orch-board` (Codex) idles for reuse.
 - Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
   memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
   cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run
