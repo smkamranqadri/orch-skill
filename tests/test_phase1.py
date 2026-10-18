@@ -4,7 +4,7 @@ CLI=ROOT/'plugin'/'orch'
 class PhaseOne(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(); self.root=pathlib.Path(self.tmp.name)
-  self.home=self.root/'state'; self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'
+  self.home=self.root/'state'; self.home.mkdir(); self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'; self.resources=self.home/'herdr-resources.json'; self.resources.write_text(json.dumps({'panes':{},'tabs':{}}))
   scrubbed=os.environ.copy()
   for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION'):
    scrubbed.pop(name,None)
@@ -13,6 +13,9 @@ class PhaseOne(unittest.TestCase):
   fake.write_text('''#!/usr/bin/env python3
 import json,os,sys,subprocess,shutil
 args=sys.argv[1:]
+resource_file=os.path.join(os.environ["XDG_STATE_HOME"],"herdr-resources.json")
+def load_resources(): return json.load(open(resource_file))
+def save_resources(value): json.dump(value,open(resource_file,"w"))
 with open(os.environ["CALLS"],"a") as f:f.write(json.dumps(args)+"\\n")
 if args[:2]==["agent","start"] and os.environ.get("CHECK_RESOURCE"):
  d=json.load(open(os.path.join(os.environ["XDG_STATE_HOME"],"orch","registry.json")))
@@ -30,8 +33,22 @@ elif args[:2]==["pane","split"]:
   ok=entry.get("state")=="starting" and entry.get("created")==[]
   open(os.environ["CHECK_RESERVATION"],"w").write("yes" if ok else "no")
   if not ok: sys.exit(4)
+ r=load_resources(); r['panes']['newpane']=None; save_resources(r)
  print(json.dumps({"result":{"pane":{"pane_id":"newpane"}}}))
-elif args[:2]==["tab","create"]: print(json.dumps({"result":{"root_pane":{"pane_id":"tabpane"},"tab":{"tab_id":"newtab"}}}))
+elif args[:2]==["tab","create"]:
+ r=load_resources(); r['tabs']['newtab']=['tabpane']; r['panes']['tabpane']='newtab'; save_resources(r)
+ print(json.dumps({"result":{"root_pane":{"pane_id":"tabpane"},"tab":{"tab_id":"newtab"}}}))
+elif args[:2]==["pane","close"]:
+ ident=args[-1]; r=load_resources()
+ if ident not in r['panes']: print("pane not found",file=sys.stderr); sys.exit(3)
+ parent=r['panes'].pop(ident)
+ if parent in r['tabs']: r['tabs'][parent].remove(ident)
+ save_resources(r); print(json.dumps({"result":{}}))
+elif args[:2]==["tab","close"]:
+ ident=args[-1]; r=load_resources()
+ if ident not in r['tabs']: print("tab not found",file=sys.stderr); sys.exit(3)
+ for child in r['tabs'].pop(ident): r['panes'].pop(child,None)
+ save_resources(r); print(json.dumps({"result":{}}))
 elif args[:2]==["worktree","create"]:
  cwd=args[args.index("--cwd")+1]; branch=args[args.index("--branch")+1]; base=args[args.index("--base")+1]; path=args[args.index("--path")+1]
  subprocess.run(["git","-C",cwd,"worktree","add","-qb",branch,path,base],check=True)
@@ -165,8 +182,16 @@ else: print(json.dumps({"result":{}}))
   self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
  def test_partial_close_resumes_successful_steps(self):
   self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber',ok=False,env=self.env|{'FAIL_CLOSE':'tabpane'})
-  a=self.state()['agents']['session-a/tabber']; self.assertEqual(a['created'],['pane:tabpane']); self.assertTrue(a['stopped'])
+  a=self.state()['agents']['session-a/tabber']; self.assertEqual(a['created'],['tab:newtab','pane:tabpane']); self.assertTrue(a['stopped'])
+  resources=json.loads(self.resources.read_text()); self.assertIn('newtab',resources['tabs']); self.assertIn('tabpane',resources['panes'])
   self.runcli('close','tabber'); self.assertEqual(self.state()['agents']['session-a/tabber']['state'],'closed'); self.assertEqual(self.calls().count(['agent','send-keys','tabber','ctrl+c']),1)
+  resources=json.loads(self.resources.read_text()); self.assertNotIn('newtab',resources['tabs']); self.assertNotIn('tabpane',resources['panes'])
+ def test_rollback_stops_when_child_close_fails(self):
+  self.reg(); self.runcli('spawn','broken-tab','--role','build','--kind','claude','--where','tab','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_START':'1','FAIL_CLOSE':'tabpane'})
+  a=self.state()['agents']['session-a/broken-tab']; self.assertEqual(a['state'],'cleanup'); self.assertEqual(a['created'],['tab:newtab','pane:tabpane'])
+  resources=json.loads(self.resources.read_text()); self.assertIn('newtab',resources['tabs']); self.assertIn('tabpane',resources['panes'])
+  self.runcli('close','broken-tab'); self.assertEqual(self.state()['agents']['session-a/broken-tab']['state'],'closed')
+  resources=json.loads(self.resources.read_text()); self.assertNotIn('newtab',resources['tabs']); self.assertNotIn('tabpane',resources['panes'])
  def test_spawn_failure_rolls_back_created_resources(self):
   self.reg(); e=self.env|{'FAIL_START':'1'}; p=self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
   self.assertNotIn('session-a/broken',self.state()['agents']); self.assertIn(['pane','close','--pane','newpane'],self.calls())

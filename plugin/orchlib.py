@@ -166,8 +166,8 @@ def spawn(a):
                 elif kind in ("pane","tab","workspace"): ok=herdr(kind,"close","--"+kind,ident,check=False) is not None
                 elif kind=="branch":
                     p=subprocess.run(["git","branch","-d",ident],cwd=project,text=True,capture_output=True); ok=p.returncode==0
-                if ok:
-                    created.remove(item); save_registry(registry_path(),d)
+                if not ok: break
+                created.remove(item); save_registry(registry_path(),d)
             if not created: d["agents"].pop(key,None)
             else: d["agents"][key].update(state="cleanup",status="cleanup")
             if isinstance(exc,SystemExit): raise
@@ -200,7 +200,7 @@ def close_agent(a):
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
             if kind not in ("pane","tab","workspace"): continue
-            if herdr(kind,"close","--"+kind,ident,check=False) is None: continue
+            if herdr(kind,"close","--"+kind,ident,check=False) is None: fail(f"failed step: close {kind} {ident}")
             agent["created"].remove(item); save_registry(registry_path(),d)
         if any(item.startswith(("pane:","tab:","workspace:")) for item in agent.get("created",[])):
             fail(f"failed step: cleanup remains for {a.name}: {', '.join(agent['created'])}")
