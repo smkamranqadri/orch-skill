@@ -1,21 +1,21 @@
 # Current
 
-- Branch: `main`, in step with `origin/main` (public). Source: orch 0.10.0, session-close 1.0.2,
-  vendored KIS 0.10.1. No code change since 43eed48.
+- Branch: `main`. Source: orch 0.10.0, session-close 1.0.2, vendored KIS 0.11.0 (byte-identical
+  to tag v0.11.0, vendored from GitHub 2026-10-18).
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
-  Mode: Phase. Status: phase 1 in progress (KIS 0.11.0, worktree
-  `../kis-loop-skill.wt/kis-0.11`, branch `kis-0.11`). Done on the branch: task 1 State stamp
-  (`5a3aa78`, `7ea6ebe`), task 2 plan review (`bda1469`, `0c29a80`, `bd81360`), task 3 Run pointer
-  (`16e08d3`); each re-verified by the coordinator (gates and probes). Task 4 (anchors on four
-  hosts) is with the builder; tasks 1-3 await the Opus review.
-- Blocker: none.
+  Mode: Phase. Status: phases 0 and 1 done. KIS 0.11.0 released 2026-10-18: one squashed commit
+  `f3b17bb` on KIS main, tag v0.11.0, pushed (verified from origin); all 9 KIS gates green on it.
+  Six review rounds (last verdict ship); live anchor checks: Claude, Codex, agy turn 1, cmd turn 2.
+- Blocker: this plan has no `## Review` record in the 0.11 format, so `kis:act` refuses it
+  (`plan-review.sh check`: no review recorded). Owner to choose: re-review, or waive.
 - Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
   `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
   Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
   model; the same host is fine. Picks come from `kis/knowledge/models.md`.
-- Next: Opus review of tasks 1-2, then 3 and 4; live anchor checks on each host in the test home;
-  task 5 release 0.11.0 and vendor here. When vendored, this plan needs a `## Review` record in
-  the new format or `kis:act` refuses it.
+- Next: settle this plan's review record, then phase 2 (front door and close).
+  Follow-ups: lore's harvester records coordinator briefs sent to Herdr agents as owner
+  corrections; KIS bootstrap warns "is not a commit" on an annotated tag; the KIS test fixture
+  named `tartib` (a real product) predates 0.11 and should get a fictional name.
 - Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
   memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
   cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run

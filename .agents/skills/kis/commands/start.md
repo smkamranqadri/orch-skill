@@ -21,10 +21,11 @@ Full instructions: `.agents/skills/kis/SKILL.md`.
 
 1. If `kis/` does not exist, stop and tell the user to run the init command instead.
 2. Read `kis/state/*` first.
-3. Read only the `kis/intent/*` relevant to `$ARGUMENTS` or to the current State task.
-4. Read only the `kis/knowledge/*` needed to act.
-5. Inspect the repository only where State or Intent is unclear or looks stale.
-6. Resolve contradictions with the truth hierarchy: State, then Intent, then Knowledge, then conversation, then repository inspection.
+3. If State has a `Run:` line, read the head (about 60 lines) of the live record it names and take Task and Next from there. Say "run active, live record at <path>" in the report. If that path does not exist, report it as a contradiction.
+4. Read only the `kis/intent/*` relevant to `$ARGUMENTS` or to the current State task.
+5. Read only the `kis/knowledge/*` needed to act.
+6. Inspect the repository only where State or Intent is unclear or looks stale. If the anchor printed a `Stale State` line (or `.agents/skills/kis/scripts/state-stamp.sh --check` prints one), the code changed after the last sync: inspect the repo before trusting Task and Next, and say so in the report.
+7. Resolve contradictions with the truth hierarchy: State, then Intent, then Knowledge, then conversation, then repository inspection.
 
 ## Report
 

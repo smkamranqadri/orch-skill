@@ -28,7 +28,26 @@ Before coding, check:
 - Does the plan avoid unrelated changes?
 - Is the right specialist selected, if any?
 
-If the plan is weak, improve it before implementation.
+If the plan is weak, improve it before implementation. This is the author's own pass; the external review and its record follow it (see `SKILL.md`, PLAN).
+
+## Plan Review
+
+A written plan carries a `## Review` section; `scripts/plan-review.sh check <plan>` enforces it. This section owns the format and the rules.
+
+```text
+## Review
+- Reviewed: <YYYY-MM-DD> by <cli> <model> (<effort>); plan hash <12 hex>
+- [fixed] <finding> - <what changed>
+- [rejected] <finding> - <reason>
+- [open] <finding>
+```
+
+- A waiver is `- Reviewed: waived by the owner <YYYY-MM-DD>; plan hash <12 hex>`. Only the user waives.
+- Each finding carries exactly one tag: `[fixed]`, `[rejected]` (with a reason) or `[open]`. Any `[open]` finding fails the check.
+- Resolve every finding with the user where it changes scope.
+- Take the hash last, from `plan-review.sh hash <plan>`, after the plan is final: any later edit to the plan's substance voids the review.
+- A plan with no Review section (for example one written before the review existed) is unreviewed like any other: review it, or get the user's waiver and record the waiver line.
+- Mark a task done only by ticking its `[ ]` to `[x]` or by a `Status:` line. Any other edit to the plan (a "(done)" suffix, strikethrough, an emoji) voids the review and the next ACT refuses the plan.
 
 ## Per-Task Loop
 
@@ -111,7 +130,7 @@ Verify behavior that unit tests cannot prove:
 
 Only when review and verification are clean:
 
-- mark the task done in the plan
+- mark the task done in the plan (tick `[ ]` to `[x]` or add a `Status:` line, nothing else; see Plan Review)
 - append a short State ledger line when useful
 - record proof
 - synchronize KIS

@@ -2,7 +2,7 @@
 name: kis
 description: Operate KIS project memory under `kis/`, where Knowledge holds stable facts, Intent holds goals and plans, and State holds the current task, blocker, proof, and next action. Use when the repository has a `kis/` directory, when starting or resuming multi-step work or asking where it left off and what is next, when a decision, plan, blocker, proof, or status needs recording, when choosing how much process a task needs, when project memory has gone stale or contradictory, or when a project needs memory set up from scratch. Skip for trivial one-off work and questions the code already answers.
 metadata:
-  version: "0.10.1"
+  version: "0.11.0"
 ---
 
 # KIS
@@ -33,6 +33,10 @@ What branch?  What task?  What command?  What blocker?  What's next?
 ```
 
 Keep State lean. Stable facts belong in Knowledge, plans belong in Intent.
+
+When State has a `Run: <description>; live record at <path>` line, an orchestrator is mid-run and the file it names is the live record for task status and the next action: while the run is active, take the current Task and Next from it rather than from State or the conversation, and a path that does not exist is a contradiction to report. State keeps the pointer and one proof line per merged unit of work. KIS steps never copy task status from the live record into State and never remove the `Run:` line: the orchestrator removes it when the run closes, then flushes the run's decisions to Intent.
+
+State carries a `Stamp:` line, written by sync as the helper's output verbatim (run with the project root, no markdown around it), that fingerprints the code outside `kis/`. When the anchor or start reports `Stale State`, the code moved on after the last sync: check State against the repo before trusting Task and Next, and say so in your report.
 
 ## Work Modes
 
@@ -88,11 +92,13 @@ Done when: every new fact sits in exactly one layer.
 
 Plan only enough to execute safely: scope, acceptance checks, risk, files likely involved, verification method, and whether a specialist or review is needed. For specialist routing, read [specialist-routing.md](references/specialist-routing.md).
 
-Done when: the user has approved the scope. In Fast Mode, when the verification method is settled.
+A written plan in `kis/intent/` is reviewed before ACT by a different CLI than its author. Propose the harness, model, and effort to the user and get approval first. Record the outcome, or the user's waiver, in the plan's `## Review` section in the format [execution.md](references/execution.md) (Plan Review) owns.
+
+Done when: the user has approved the scope and, for a written plan, `scripts/plan-review.sh check` passes. In Fast Mode, when the verification method is settled.
 
 ### ACT
 
-Update State with the current task, mode, status, and verification plan. Then implement only the current scope, avoid unrelated changes, and keep changes reviewable. For written plans and Phase Mode, read [execution.md](references/execution.md).
+Refuse a written plan whose `scripts/plan-review.sh check` fails. Update State with the current task, mode, status, and verification plan. Then implement only the current scope, avoid unrelated changes, and keep changes reviewable. For written plans and Phase Mode, read [execution.md](references/execution.md).
 
 Done when: proof exists. See Proof Before Done.
 

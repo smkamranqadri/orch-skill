@@ -5,14 +5,15 @@ project_root="${1:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 kis_dir="$project_root/kis"
 # The anchor is loaded at every session start, resume, clear and compact, so it must stay small.
 # KIS_ANCHOR_MAX_LINES is the whole-anchor line budget, stated here and in the tool's env docs;
-# the output below is built to fit it (minimum 16, the header plus the four summary fields and
-# the pointer), and a State with no summary fields gets a capped head instead of the whole file.
+# the output below is built to fit it (minimum 18, the header, the optional Stale State line, the
+# five summary fields and the pointer), and a State with no summary fields gets a capped head
+# instead of the whole file.
 max_lines="${KIS_ANCHOR_MAX_LINES:-20}"
 # A summary field (its label plus its indented continuation lines) is joined and then cut at
-# this many characters, "..." marking the cut. The full value is in the State file it points at.
+# this many bytes, backed off to a character boundary, "..." marking the cut. The full value is in the State file it points at.
 max_field_chars="${KIS_ANCHOR_MAX_FIELD_CHARS:-200}"
 [[ "$max_lines" =~ ^[0-9]+$ ]] || max_lines=20
-[[ "$max_lines" -lt 16 ]] && max_lines=16
+[[ "$max_lines" -lt 18 ]] && max_lines=18
 [[ "$max_field_chars" =~ ^[0-9]+$ ]] || max_field_chars=200
 
 printed=0
@@ -54,12 +55,34 @@ other_state="$(find "$kis_dir/state" -maxdepth 1 -type f -name '*.md' ! -path "$
 p "## Current State: $rel"
 p
 
-# A short summary of the four recovery fields, never the whole file. Branch, Task, Blocker and
-# Next come from a `Label:` line (any bullet marker, indented continuation lines joined, capped
+# One line when the code outside kis/ moved on since the last sync; silent otherwise.
+stamp_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../scripts/state-stamp.sh"
+stale_line=""
+# The helper time-caps itself (5 seconds for --check, with or without `timeout`), so a huge
+# untracked tree cannot stall the session start; past the cap the line is simply absent.
+if [[ -f "$stamp_helper" ]]; then
+  stale_line="$(bash "$stamp_helper" --check "$project_root" 2>/dev/null | head -n 1 || true)"
+fi
+[[ -n "$stale_line" ]] && p "$stale_line"
+
+# The awk runs under LC_ALL=C: a UTF-8 gawk skips any line holding an invalid byte, which would lose
+# the summary. In C, length and substr count bytes, so ucut() backs off while the next byte is a
+# UTF-8 continuation byte (0x80-0xBF) and never splits a multibyte character.
+awk_lib='function ucut(s, n,   i, c) {
+  if (n >= length(s)) return s
+  if (n < 0) n = 0
+  if (!built) { for (i = 128; i < 192; i++) cont[sprintf("%c", i)] = 1; built = 1 }
+  while (n > 0 && (substr(s, n + 1, 1) in cont)) n--
+  return substr(s, 1, n)
+}
+'
+
+# A short summary of the five recovery fields, never the whole file. Branch, Run, Task, Blocker
+# and Next come from a `Label:` line (any bullet marker, indented continuation lines joined, capped
 # at max_field_chars). When a label is absent, Next falls back to the first item under a
 # `## Next` heading and Blocker to the first item under a `## Open` heading: the shape real
 # State files use.
-summary="$(awk -v max="$max_field_chars" '
+summary="$(LC_ALL=C awk -v max="$max_field_chars" "$awk_lib"'
 function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
 function add(name, s) {
   s = trim(s)
@@ -76,7 +99,7 @@ function app(name, s) {
 {
   line = $0
   if (line ~ /^##[[:space:]]/) { heading = trim(line); cur = ""; next }
-  if (line ~ /^[[:space:]]*[-*]?[[:space:]]*(Branch|Task|Blocker|Next)[[:space:]]*:/) {
+  if (line ~ /^[[:space:]]*[-*]?[[:space:]]*(Branch|Run|Task|Blocker|Next)[[:space:]]*:/) {
     n = line
     sub(/^[[:space:]]*[-*]?[[:space:]]*/, "", n)
     name = n; sub(/[[:space:]]*:.*/, "", name)
@@ -97,12 +120,25 @@ function app(name, s) {
   }
 }
 END {
-  order[1] = "Branch"; order[2] = "Task"; order[3] = "Blocker"; order[4] = "Next"
-  for (i = 1; i <= 4; i++) {
+  order[1] = "Branch"; order[2] = "Run"; order[3] = "Task"; order[4] = "Blocker"; order[5] = "Next"
+  for (i = 1; i <= 5; i++) {
     n = order[i]
     if (v[n] == "") continue
     s = v[n]
-    if (length(s) > max) s = substr(s, 1, max - 3) "..."
+    if (length(s) > max) {
+      # The Run pointer is the part the anchor exists to show: keep "; live record at <path>" whole
+      # and shorten the description before it.
+      tag = "; live record at "
+      cut = 0; pos = 0; rest = s
+      while ((k = index(rest, tag)) > 0) { cut = pos + k; pos = cut + length(tag) - 1; rest = substr(s, pos + 1) }
+      if (n == "Run" && cut > 0) {
+        tail = substr(s, cut)
+        keep = max - length(tail) - 3
+        s = (keep >= 1 ? ucut(s, keep) : "") "..." tail
+      } else {
+        s = ucut(s, max - 3) "..."
+      }
+    }
     print n ": " s
   }
 }
@@ -120,7 +156,7 @@ else
   # Nothing to summarise: show a head of State that fits the budget, and point at the file.
   room=$((max_lines - printed - 2 - other_lines))
   [[ "$room" -lt 1 ]] && room=1
-  head -n "$room" "$state_file"
+  head -n "$room" "$state_file" | LC_ALL=C awk -v max="$max_field_chars" "$awk_lib"'{ if (length($0) > max) $0 = ucut($0, max - 3) "..."; print }'
   printed=$((printed + room))
   p
   p "No Branch/Task/Blocker/Next summary fields found; read $rel ($total_lines lines) before planning."

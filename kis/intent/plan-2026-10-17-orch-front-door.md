@@ -99,7 +99,7 @@ Status: done 2026-10-17 (`7ef115e` and the agy rerun; numbers in `kis/knowledge/
 Accept: static rerun prints identical numbers; every live number carries host, version and case.
 
 ### Phase 1: KIS 0.11.0 (in ../kis-loop-skill, then vendored)
-Status: in progress 2026-10-17. Worktree `../kis-loop-skill.wt/kis-0.11`, branch `kis-0.11`.
+Status: done 2026-10-18. KIS 0.11.0 released (`f3b17bb`, tag v0.11.0, pushed) and vendored here.
 Builder Claude Sonnet 5.5 (high), reviewer Claude Opus 5.5 (high, read-only), one task at a
 time (owner, 2026-10-17; Codex and agy reviewed task 1 before the switch). Order: stamp, plan review, recovery contract and pointer-aware sync,
 anchors on four hosts, release and vendor.

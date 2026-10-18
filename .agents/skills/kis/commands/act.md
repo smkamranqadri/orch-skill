@@ -13,8 +13,9 @@ Full instructions: `.agents/skills/kis/SKILL.md`. Execution detail: `.agents/ski
 
 1. Read `kis/state/*` and the approved plan in `kis/intent/*`.
 2. If there is no approved scope for this work, stop and run the plan command first.
-3. Pre-flight the plan for contradictions. Raise blocking ones before starting.
-4. Update State with the current task, work mode, status, and verification plan.
+3. For a written plan, run `.agents/skills/kis/scripts/plan-review.sh check <plan>`. On exit 1, stop without starting and report its line. On `no review recorded` offer the two ways out: run the review step of the plan command, or ask the user whether to waive the review and record the waiver line (`execution.md`, Plan Review).
+4. Pre-flight the plan for contradictions. Raise blocking ones before starting.
+5. Update State with the current task, work mode, status, and verification plan.
 
 ## Per-Task Loop
 
@@ -37,7 +38,7 @@ If verification fails, record the failure in State as the current blocker rather
 
 Only when verification is clean:
 
-- mark the task done in the plan
+- mark the task done in the plan by ticking `[ ]` to `[x]` or adding a `Status:` line, nothing else: any other edit voids the plan review
 - record proof in State
 - rewrite `Now`, `Next`, and `Status` in State
 - report the changed files, commands run, and proof
