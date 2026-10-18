@@ -126,7 +126,7 @@ def active(tasks, skip=None):
 
 def merged(t):
     """A dependency counts as landed when its row says merged, or closed after a merge ("closed, merged <sha>")."""
-    return t["word"] == "merged" or (t["word"] == "closed" and re.search(r"\bmerged\b", t["status"].lower()) is not None)
+    return t["word"] == "merged" or (t["word"] == "closed" and re.match(r"closed[,:]?\s*merged\b", t["status"].lower()) is not None)
 
 
 def decide(live, others, depends, owns, tasks=(), writes_nothing=False):
