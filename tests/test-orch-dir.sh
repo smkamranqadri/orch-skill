@@ -43,6 +43,24 @@ for flag in --migrate --bogus; do
   [[ "$err" == "Error: unknown option: $flag"* ]] || fail "$flag message: $err"
 done
 
+# 4b. an unknown flag after the path, or a second path, fails too
+if err="$("$S" "$tmp/old" --migrate 2>&1 >/dev/null)"; then fail "path then --migrate should fail"; fi
+[[ "$err" == "Error: unknown option: --migrate"* ]] || fail "path then --migrate message: $err"
+if err="$("$S" --check --bogus 2>&1 >/dev/null)"; then fail "--check --bogus should fail"; fi
+[[ "$err" == "Error: unknown option: --bogus"* ]] || fail "--check --bogus message: $err"
+if err="$("$S" "$tmp/old" "$tmp/proj" 2>&1 >/dev/null)"; then fail "two paths should fail"; fi
+[[ "$err" == "Error: more than one path"* ]] || fail "two paths message: $err"
+
+# 4c. paths with spaces: repo and linked worktree both resolve the main checkout's .orch
+mkdir -p "$tmp/my repo" && git -C "$tmp/my repo" init -q
+git -C "$tmp/my repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$tmp/my repo" worktree add -q "$tmp/my repo.wt/feat x" -b featx
+[[ "$("$S" "$tmp/my repo")" == "$tmp/my repo/.orch" ]] || fail "spaces: repo dir"
+[[ "$("$S" "$tmp/my repo.wt/feat x")" == "$tmp/my repo/.orch" ]] || fail "spaces: worktree dir"
+[[ "$(cd "$tmp/my repo.wt/feat x" && "$S")" == "$tmp/my repo/.orch" ]] || fail "spaces: worktree cwd"
+test ! -e "$tmp/my repo.wt/feat x/.orch" || fail "spaces: worktree got its own .orch"
+[[ "$(grep -cxF '.orch/' "$tmp/my repo/.git/info/exclude")" == "1" ]] || fail "spaces: exclude entry count"
+
 # 5. not a git repo: .orch under the path, no exclude needed
 mkdir -p "$tmp/plain"
 [[ "$("$S" "$tmp/plain")" == "$tmp/plain/.orch" ]] || fail "plain dir"
