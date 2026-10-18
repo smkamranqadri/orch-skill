@@ -21,9 +21,6 @@ Evidence (verdict marks) lives in events.log, not here.
 | name | owner | type | started | report | status |
 |---|---|---|---|---|---|
 
-## Watcher
-pane <id>, pid <n>, wakes: <owners per agents.txt>, agents: <names> (<dir>/agents.txt), log: <dir>/events.log
-
 ## Open decisions (user's words, who they apply to; flush to the KIS plan at close)
 - <date time> "<decision>" (applies to: <stream>)
 
