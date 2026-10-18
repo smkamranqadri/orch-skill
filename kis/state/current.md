@@ -1,19 +1,21 @@
 # Current
 
-- Stamp: main fe8380a be32462f93a8
+- Stamp: main 0cf718a be32462f93a8
 - Branch: `main`. Source: orch 0.10.0, session-close 1.0.2, vendored KIS 0.11.0 (byte-identical
   to tag v0.11.0, vendored from GitHub 2026-10-18).
 - Task: orch as the global front door, plan `kis/intent/plan-2026-10-17-orch-front-door.md`.
   Mode: Phase. Status: phases 0 and 1 done. KIS 0.11.0 released 2026-10-18: one squashed commit
   `f3b17bb` on KIS main, tag v0.11.0, pushed (verified from origin); all 9 KIS gates green on it.
   Six review rounds (last verdict ship); live anchor checks: Claude, Codex, agy turn 1, cmd turn 2.
-- Blocker: this plan has no `## Review` record in the 0.11 format, so `kis:act` refuses it
-  (`plan-review.sh check`: no review recorded). Owner to choose: re-review, or waive.
+- Blocker: none. This plan re-reviewed 2026-10-18 by Codex gpt-6.1-sol (high): pass 1 rework
+  (1 blocker, 11 major, 2 minor), pass 2 after fixes 13 of 14 resolved, the last fixed; recorded in
+  the plan's `## Review` (hash 2c86ee76814e), `plan-review.sh check` ok, mutant refused.
 - Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
   `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
   Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
   model; the same host is fine. Picks come from `kis/knowledge/models.md`.
-- Next: settle this plan's review record, then phase 2 (front door and close).
+- Next: phase 2 (front door and close), starting with the interactive baseline. Propose
+  builder and reviewer per kis/knowledge/models.md before launching.
   Follow-ups: lore's harvester records coordinator briefs sent to Herdr agents as owner
   corrections; KIS bootstrap warns "is not a commit" on an annotated tag; the KIS test fixture
   named `tartib` (a real product) predates 0.11 and should get a fictional name.
