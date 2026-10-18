@@ -117,7 +117,9 @@ def register(name=None):
             d["orchs"][key]={"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False,"queue":[]}
         orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
         old_owners={a.get("orch") for a in orphaned}
-        for old_key in old_owners: d["orchs"][key]["queue"].extend(d["orchs"][old_key].get("queue",[]))
+        for old_key in old_owners:
+            d["orchs"][key]["queue"].extend(d["orchs"][old_key].get("queue",[]))
+            d["orchs"][old_key]["queue"].clear()
         for agent in orphaned:
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
