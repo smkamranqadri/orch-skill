@@ -1,5 +1,5 @@
 ---
-description: Hand the orchestrator over to a fresh session at about 150k context: retro, memory sync, status space, ledger and handoff packet, start the successor, then close.
+description: Hand the orchestrator over to a fresh session at about 150k context: memory sync, status space, ledger and handoff packet, start the successor, then close.
 argument-hint: [optional note for the successor]
 ---
 
@@ -13,12 +13,14 @@ when that default is you: pin them with `move <dir> <agent>... --from <your pane
 
 Agents keep running. Nothing is closed, removed or committed beyond the memory sync.
 
-1. Retro first (`/lore:retro`, core rule 66) when the lore skill is installed: a compact
-   or close loses the detail. Not installed: skip in one line.
-2. Session-close steps 1 to 3 and 6 (`~/.agents/skills/session-close/SKILL.md`): KIS sync, KIS
-   check, apply (when the repo has `kis/`), the project's status space (when the notes MCP is
-   present); each absent one is skipped in one line. Flush applied decisions from the ledger's
-   Open decisions into the KIS plan (core rule 57), or leave them in the ledger without KIS.
+1. Sync project memory with the close steps, not the close itself
+   (`~/.agents/skills/orch/commands/close.md`, steps 3, 4, 5 and 7): KIS sync, KIS check, apply
+   (when the repo has `kis/`), and the project's status space (when the notes
+   MCP is present); each absent one is skipped in one line. The run is not ending, so keep the
+   `Run:` line in State and add only proof lines for merged work. Decisions stay in the ledger's
+   Open decisions and go into the packet in step 4; only `close` flushes them to Intent.
+2. Write the stamp last, after the final State edit: `.agents/skills/kis/scripts/state-stamp.sh
+   <project root>`, its output verbatim as the one `Stamp:` line in State.
 3. Update only your ledger rows and `Next action (<owner>):`. Refuse to continue while your
    line is empty or stale; preserve other owners' lines. Then
    `python3 ~/.agents/skills/orch/scripts/orch-watch.py check <dir> --owner <your pane id>` must report nothing for your rows and
@@ -26,10 +28,10 @@ Agents keep running. Nothing is closed, removed or committed beyond the memory s
    `python3 ~/.agents/skills/orch/scripts/orch-watch.py mark <dir> <your pane id> handoff "ctx <n>"`.
 4. Write `<dir>/handoff-<date>-<n>.md`: line one is the Next action; then paths to the ledger,
    State, briefs and reports (paths, never bodies); decisions since the last handoff; your agent-tool
-   sub-agents still running, listed as lost; the watcher's pane and pid; skills the successor
+   sub-agents still running, listed as lost; the watcher's pid (`<dir>/watcher.pid`; it is headless); skills the successor
    must load. No secrets, no session story.
 5. Leave the watcher running; it serves the successor once step 7 points it there.
-6. Start the successor in a new pane of this workspace, visible (preference 28), with the same
+6. Start the successor in a new pane of this workspace, visible, with the same
    kind and model as yourself unless the user says otherwise:
    `herdr pane split --current --direction right --no-focus`, then
    `herdr agent start orch-<n> --kind claude --pane <id> -- --name orch-<n>`, then

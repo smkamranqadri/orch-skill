@@ -10,22 +10,25 @@ Parked: <item, until when, why; or none>
 
 ## Pane agents
 The status cell starts with one fixed word so `check` can read it: `working`, `done`, `merged`,
-`closed`, `gone`, or `open: next cycle <what>`. Any text follows after a comma or colon.
-Evidence (verdict marks) lives in events.log, not here.
+`closed`, `gone`, `open: next cycle <what>`, or `queued: after <task>` (held by the split gate: no pane yet).
+Any text follows after a comma or colon. Evidence (verdict marks) lives in events.log, not here.
+`depends`: task names that must merge first; `owns`: paths or globs the task writes (both feed
+`scripts/orch-gate.py`). `depends: none` = no dependency. `owns: none` (or `-`) = the task writes
+nothing, such as a diff reviewer, and never holds another task; an empty `owns` cell holds every
+other task. A dependency counts as landed when its row says `merged` or `closed, merged <sha>`.
+A task is a row, named by its agent.
 
-| name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event |
-|---|---|---|---|---|---|---|---|---|
-| code | w5:p2 | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions |
+| name | owner | kind/model | pane | worktree / branch | brief | handoff | status | last event | depends | owns |
+|---|---|---|---|---|---|---|---|---|---|---|
+| code | w5:p2 | claude/sonnet | w5:p1 | ../repo.wt/fees / fees | .orch/code/brief-fees.md | .orch/code/handoff.md | working | 06 14:02 prompted: concessions | none | src/fees/**, tests/fees/** |
+| docs | w5:p2 | claude/sonnet | - | ../repo.wt/docs / docs | .orch/docs/brief-docs.md | .orch/docs/handoff.md | queued: after code | 06 14:05 held: shares src/fees | code | docs/fees.md, src/fees/README.md |
 
 ## Sub-agents and background jobs (die with the orchestrator; `--sub` route)
-| name | owner | type | started | report | status |
-|---|---|---|---|---|---|
+| name | owner | type | started | report | status | depends | owns |
+|---|---|---|---|---|---|---|---|
 
-## Watcher
-pane <id>, pid <n>, wakes: <owners per agents.txt>, agents: <names> (<dir>/agents.txt), log: <dir>/events.log
-
-## Open decisions (user's words, who they apply to; flush to the KIS plan at handoff)
+## Open decisions (user's words, who they apply to; flush to the KIS plan at close)
 - <date time> "<decision>" (applies to: <stream>)
 
-## Done this run (one line each; move to KIS at handoff when the repo has kis/)
+## Done this run (one line each; merged work also has its proof line in State)
 - <date> <what, commit>

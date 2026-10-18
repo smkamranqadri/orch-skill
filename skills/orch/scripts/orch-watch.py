@@ -3,12 +3,15 @@
 
   orch-watch.py watch <dir> [agent...] [--orch <target>]
       Runs until killed (start it with: herdr pane run <pane> "python3 <this> watch <dir> ...").
-      Watches every agent in <dir>/agents.txt (the agents given here are added to it), redraws a
-      board in an alternate terminal buffer, appends one line per status change to <dir>/events.log, shows a
-      Herdr notification when an agent finishes, needs you, or closes, and wakes the
-      owner in agents.txt (bare names fall back to <dir>/orchestrator), batching per owner
-      when it is idle and its
-      input box is empty. Writes its pid to <dir>/watcher.pid.
+      Headless: prints one start line and nothing else (the board plugin and `board` show state).
+      Watches every agent in <dir>/agents.txt (the agents given here are added to it), appends one
+      line per status change to <dir>/events.log, shows a Herdr notification when an agent finishes,
+      needs you, or closes, and wakes the owner in agents.txt (bare names fall back to
+      <dir>/orchestrator), batching per owner when it is idle and its input box is empty. Writes
+      its pid to <dir>/watcher.pid.
+      It sleeps on ${XDG_CACHE_HOME:-~/.cache}/orch/events.signal (one JSON line per Herdr event,
+      appended by the orch plugin's hooks) and on agents.txt, and reads `herdr agent list` on every
+      wake and at least every 60 s, so a turn shorter than the event debounce is still caught.
   orch-watch.py add <dir> <agent>... [--orch <target>]  register agents with an owner
   orch-watch.py move <dir> <agent>... --from <old> --orch <new>  transfer only owned agents
   orch-watch.py remove <dir> <agent>...   stop watching agents
@@ -28,13 +31,11 @@
                                           handoff (see references/visibility.md)
   orch-watch.py orch <dir> <target>       set the orchestrator to wake (agent name or pane id);
                                           "none" turns waking off
-  orch-watch.py board <dir>               print the board once and exit
+  orch-watch.py board <dir>               print the board once and exit (usage line from the cache)
   orch-watch.py input <target>            what is really typed in an agent's input box: "empty",
                                           "typed: <text>" or "none" (dim suggestions and known
                                           placeholders are not typed text); use this, not a plain
                                           pane read, before saying an agent has input waiting
-  orch-watch.py --next <dir> [seconds]    foreground wait until events.log grows (default 540);
-                                          prints the new lines, exit 3 on timeout
 """
 import datetime as dt
 import fcntl
@@ -48,8 +49,10 @@ import subprocess
 import sys
 import time
 
-POLL = 4               # seconds between polls of `herdr agent list`
-USAGE_EVERY = 300      # seconds between usage refreshes (orch-usage.py collect; codex is one app-server call)
+SAFETY_POLL = 60       # longest sleep between reads of `herdr agent list` (events wake it sooner)
+SIGNAL_STEP = 0.25     # seconds between stats of the signal file while sleeping
+SIGNAL_SETTLE = 0.5    # pause after a wake so a burst of events costs one read
+SIGNAL_MAX = 1 << 20   # the watcher truncates events.signal past this many bytes
 RETRY = 30             # seconds between wake attempts while the orchestrator is busy or typing
 HOLD_NOTICE = 120      # seconds a held wake waits before the user gets a notification
 WAKE_STATES = {"done", "blocked", "gone"}
@@ -190,26 +193,12 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 PLACEHOLDER = re.compile(r"^(Ask your question|Ask Codex to anything|Type a message|Send a message)\b", re.I)
 
 
-def input_empty(target):
-    """True when the input box is empty, False when text is typed, None if no input box is seen.
+def typed_text(target):
+    """The real text in the input box, '' when empty, None if no input box is seen.
 
     Claude and Codex both draw their placeholder suggestions dim, so dim text is dropped first;
-    Command Code's placeholder is matched by name, see PLACEHOLDER."""
-    code, out = herdr("agent", "read", target, "--source", "visible", "--ansi")
-    if code != 0:
-        return None
-    for line in reversed([l for l in out.splitlines() if l.strip()][-14:]):
-        text = ANSI.sub("", DIM.sub("", line)).replace("\xa0", " ").strip()
-        if text[:1] in ("❯", "›"):
-            rest = text[1:].strip()
-            if PLACEHOLDER.match(rest):
-                rest = ""
-            return not rest
-    return None
-
-
-def typed_text(target):
-    """The real text in the input box, '' when empty, None if no input box is seen (see input_empty)."""
+    Command Code's placeholder is matched by name, see PLACEHOLDER. The only reader of the box:
+    the wake gate and the `input` command both use it."""
     code, out = herdr("agent", "read", target, "--source", "visible", "--ansi")
     if code != 0:
         return None
@@ -223,6 +212,18 @@ def typed_text(target):
 
 def iso(t=None):
     return dt.datetime.fromtimestamp(t or time.time(), dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def signal_path():
+    """Where the plugin's hooks append Herdr events: ${XDG_CACHE_HOME:-$HOME/.cache}/orch/events.signal."""
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "orch", "events.signal")
+
+
+def file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 
 def local(stamp):
@@ -374,6 +375,9 @@ def needs_you(events, owners, live_state, since, now, wake_held=(), waiting=None
 
 
 class Watcher:
+    sleep = staticmethod(time.sleep)       # the wait loop's clock; tests swap in a fake one
+    mono = staticmethod(time.monotonic)
+
     def __init__(self, d):
         self.dir = d
         self.log = os.path.join(d, "events.log")
@@ -382,17 +386,19 @@ class Watcher:
         self.since = {}       # agent -> iso time of last change
         self.info = {}        # agent -> (title, ctx)
         self.pending = []     # (iso, agent, state) waiting to be told to the orchestrator
-        self.held_since = {}
+        self.held_since = {}   # owner -> wall clock of the first hold, for the display only
+        self.held_mono = {}    # owner -> monotonic time of the first hold, for HOLD_NOTICE
         self.held_noticed = {}
         self.next_try = {}
         self.recent = self.seed_recent()
         self.orch_note = ""
         self.owners = {}
         self.owner_notes = {}
-        self.last_board = None
-        self.usage = ""       # one line from orch-usage.py, refreshed every USAGE_EVERY seconds
-        self.usage_at = 0
+        self.usage = ""       # the cached usage line; `board` fills it, the watcher never collects
         self.clock = now_utc
+        self.signal = signal_path()
+        self.signal_pos = file_size(self.signal)   # lines already there are history
+        self.signalled = {}   # pane id -> status named by the signal lines read this wake
 
     def seed_recent(self):
         recent = []
@@ -405,29 +411,66 @@ class Watcher:
                 recent.append(f"{local(m.group(1))}  {m.group(2)}  {PLAIN[m.group(3)]}")
             elif m and m.group(2) == "orchestrator":
                 recent.append(f"{local(m.group(1))}  → orchestrator told")
-        try:
-            self.log_pos = os.path.getsize(self.log)
-        except OSError:
-            self.log_pos = 0
         return recent[-5:]
 
-    def read_marks(self):
-        """Marks are written by the orchestrator's `mark` command, not by this process: tail the log."""
-        try:
-            with open(self.log, "rb") as f:
-                f.seek(self.log_pos)
-                chunk = f.read()
-        except OSError:
-            return False
-        end = chunk.rfind(b"\n") + 1
-        self.log_pos += end
-        changed = False
-        for raw in chunk[:end].decode(errors="replace").splitlines():
-            e = parse_event(raw)
-            if e and e["kind"] == "mark":
-                self.recent = (self.recent + [mark_words(e)])[-5:]
-                changed = True
-        return changed
+    def stamp(self):
+        """(mtime, size) of the signal file and agents.txt; a change is the cue to read Herdr."""
+        out = []
+        for path in (self.signal, os.path.join(self.dir, "agents.txt")):
+            try:
+                st = os.stat(path)
+                out.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                out.append(None)
+        return out
+
+    def read_signal(self):
+        """Take the signal lines appended since the last read into `signalled` (pane id -> status),
+        then truncate the file when it is past SIGNAL_MAX. Hooks only append; the poll that follows
+        reads `agent list`, so a line lost to the truncation costs nothing."""
+        self.signalled = {}
+        size = file_size(self.signal)
+        if size < self.signal_pos:
+            self.signal_pos = 0
+        if size > self.signal_pos:
+            try:
+                with open(self.signal, "rb") as f:
+                    f.seek(self.signal_pos)
+                    chunk = f.read()
+            except OSError:
+                chunk = b""
+            end = chunk.rfind(b"\n") + 1
+            self.signal_pos += end
+            for raw in chunk[:end].decode(errors="replace").splitlines():
+                try:
+                    e = json.loads(raw)
+                    if isinstance(e["pane"], str):
+                        self.signalled[e["pane"]] = e.get("status")
+                except (ValueError, KeyError, TypeError):
+                    continue
+        if size > SIGNAL_MAX:
+            try:
+                os.truncate(self.signal, 0)
+                self.signal_pos = 0
+            except OSError:
+                pass
+
+    def wait(self, before):
+        """Sleep until `stamp()` differs from `before` (True) or the timeout passes (False). The
+        timeout is SAFETY_POLL, or sooner when a held wake has another try still ahead. A try that
+        is already due but not made (Herdr unreachable) does not shorten the wait."""
+        limit = SAFETY_POLL
+        owners = {self.owners.get(a) for _, a, _ in self.pending} - {None, "none"}
+        if owners:
+            due = min(self.next_try.get(o, 0) for o in owners) - self.mono()
+            if due > 0:
+                limit = min(limit, max(1.0, due))
+        end = self.mono() + limit
+        while self.mono() < end:
+            if self.stamp() != before:
+                return True
+            self.sleep(min(SIGNAL_STEP, max(0.0, end - self.mono())))
+        return False
 
     def append(self, line):
         with open(self.log, "a") as f:
@@ -436,27 +479,11 @@ class Watcher:
     def notify(self, title, body):
         herdr("notification", "show", title, "--body", body[:120], "--sound", "done")
 
-    def refresh_usage(self):
-        if time.time() - self.usage_at < USAGE_EVERY:
-            return False
-        self.usage_at = time.time()
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orch-usage.py")
-        try:
-            subprocess.run([sys.executable, script, "collect"], capture_output=True, text=True, timeout=45)
-            r = subprocess.run([sys.executable, script, "line"], capture_output=True, text=True, timeout=10)
-            new = r.stdout.strip() if r.returncode == 0 else ""
-        except (OSError, subprocess.TimeoutExpired):
-            new = ""
-        changed = new != self.usage
-        self.usage = new
-        return changed
-
     def poll(self):
         live = agent_list()
         if live is None:
             return False
-        changed = self.refresh_usage()
-        changed |= self.read_marks()
+        changed = False
         self.owners = registrations(self.dir)
         names = self.owners
         for name in names:
@@ -483,8 +510,6 @@ class Watcher:
             self.prev[name] = state
             changed = True
             self.append(f"{now} {name} {state} | {title} | ctx {ctx or '-'}")
-            if {before, state} != {"done", "idle"}:  # done <-> idle is only the user looking at the pane
-                self.recent = (self.recent + [f"{local(now)}  {name}  {PLAIN.get(state, state)}"])[-5:]
             if first:
                 continue
             wake = state in WAKE_STATES or (state == "idle" and before in ("working", "blocked"))
@@ -526,16 +551,18 @@ class Watcher:
         if target == "none":
             self.owner_note = "waking off"
             return False
-        if time.time() < self.next_try.get(target, 0):
-            return False
-        self.next_try[target] = time.time() + RETRY
         entry = live.get(target)
+        # An event saying the owner just went idle skips the retry wait.
+        woke = self.signalled.get((entry or {}).get("pane_id")) in ("idle", "done")
+        if self.mono() < self.next_try.get(target, 0) and not woke:
+            return False
+        self.next_try[target] = self.mono() + RETRY
         if not entry:
             note = f"orchestrator {target} not found; {len(batch)} event(s) held"
         else:
             st = entry.get("agent_status")
-            empty = input_empty(target)
-            safe = empty is True or (empty is None and not entry.get("focused"))
+            typed = typed_text(target) if st in ("idle", "done") else None
+            safe = typed == "" or (typed is None and not entry.get("focused"))
             if st not in ("idle", "done"):
                 note = f"orchestrator {target} {st}; {len(batch)} event(s) held until it is idle"
             elif not safe:
@@ -567,14 +594,14 @@ class Watcher:
                     now = iso()
                     who = ", ".join(sorted({a for _, a, _ in batch}))
                     self.append(f"{now} orchestrator woken orch={target} | {who}")
-                    self.recent = (self.recent + [f"{local(now)}  → {target} told: {who}"])[-5:]
                     self.delivered(target, batch)
                     self.owner_note = f"wakes {target}"
                     return True
                 note = f"prompt to {target} failed; retrying in {RETRY}s"
         if target not in self.held_since:
             self.held_since[target] = time.time()
-        if not self.held_noticed.get(target) and time.time() - self.held_since[target] > HOLD_NOTICE:
+            self.held_mono[target] = self.mono()
+        if not self.held_noticed.get(target) and self.mono() - self.held_mono[target] > HOLD_NOTICE:
             self.notify("orchestrator: events waiting", note)
             self.held_noticed[target] = True
         changed = note != self.owner_note
@@ -584,6 +611,7 @@ class Watcher:
     def delivered(self, target, batch):
         self.pending = [e for e in self.pending if e not in batch]
         self.held_since.pop(target, None)
+        self.held_mono.pop(target, None)
         self.held_noticed.pop(target, None)
 
     def wake_held(self):
@@ -625,14 +653,6 @@ class Watcher:
         out.extend(("  " + r)[:width] for r in self.recent)
         return "\n".join(out)
 
-    def draw(self):
-        board = self.board()
-        if board == self.last_board:
-            return
-        self.last_board = board
-        sys.stdout.write("\033[H\033[2J" + board + "\n")
-        sys.stdout.flush()
-
 
 def cmd_watch(d, args):
     orch = None
@@ -650,19 +670,13 @@ def cmd_watch(d, args):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     w = Watcher(d)
     w.append(f"{iso()} watcher start pid {os.getpid()} agents: {' '.join(read_lines(os.path.join(d, 'agents.txt')))}")
-    terminal = sys.stdout.isatty()
-    try:
-        if terminal:
-            sys.stdout.write("\033[?1049h\033[?25l")
-            sys.stdout.flush()
-        while True:
-            w.poll()
-            w.draw()
-            time.sleep(POLL)
-    finally:
-        if terminal:
-            sys.stdout.write("\033[?25h\033[?1049l")
-            sys.stdout.flush()
+    print(f"orch watcher pid {os.getpid()} · {d} · wakes on {w.signal}, safety poll {SAFETY_POLL}s", flush=True)
+    while True:
+        w.read_signal()
+        before = w.stamp()   # taken before the poll, so an event during it wakes the next wait
+        w.poll()
+        if w.wait(before):
+            w.sleep(SIGNAL_SETTLE)
 
 
 @contextmanager
@@ -783,6 +797,16 @@ def cmd_orch(d, target):
     write_lines(os.path.join(d, "orchestrator"), [target])
 
 
+def usage_line():
+    """The usage line from orch-usage.py's cache; `line` reads the cache and starts no CLI."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orch-usage.py")
+    try:
+        r = subprocess.run([sys.executable, script, "line"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def cmd_board(d, now=None):
     w = Watcher(d)
     live = agent_list() or {}
@@ -797,7 +821,7 @@ def cmd_board(d, now=None):
                 w.since[name] = m.group(1)
                 break
         w.info[name] = ((entry or {}).get("terminal_title_stripped", ""), context_of(name) if entry else "")
-    w.refresh_usage()
+    w.usage = usage_line()
     print(w.board(now))
 
 
@@ -815,6 +839,7 @@ def option_now(args):
 LEDGER_LIMIT = 60
 DONE_WORDS = ("done", "verified", "merged")
 ENDED_WORDS = ("closed", "gone")
+QUEUED = re.compile(r"^queued: after \S")   # a held task: no watcher registration until it launches
 
 
 class CheckError(Exception):
@@ -847,13 +872,11 @@ def parse_ledger(d):
         m = re.match(r"^Next action \(([^)]+)\):\s*(.*)$", line.strip())
         if m:
             nexts[m.group(1)] = m.group(2).strip()
-    section, header, rows, watcher, has_table = None, None, {}, None, False
+    section, header, rows, has_table = None, None, {}, False
     for n, line in enumerate(lines, 1):
         if line.startswith("## "):
             section, header = line[3:].strip().lower(), None
             continue
-        if section == "watcher" and line.strip() and watcher is None:
-            watcher = line.strip()
         if section != "pane agents" or not line.lstrip().startswith("|"):
             continue
         cells = split_row(line)
@@ -881,19 +904,53 @@ def parse_ledger(d):
                             "last": row.get("last event", ""), "line": n}
     if not has_table:
         raise CheckError("ledger.md has no Pane agents table")
-    if watcher is None:
-        raise CheckError("ledger.md has no Watcher section")
-    pid = re.search(r"\bpid (\d+)", watcher)
-    agents = re.search(r"agents:\s*(.*?)\s*(?:\(|,\s*log:|$)", watcher)
-    names = None
-    if agents:
-        names = set() if agents.group(1).lower() in ("", "none") else set(re.split(r"[,\s]+", agents.group(1)))
-    return {"lines": len(lines), "nexts": nexts, "rows": rows, "pid": int(pid.group(1)) if pid else None,
-            "watcher_agents": names}
+    # An old ledger's `## Watcher` section is ignored: the pid lives in <dir>/watcher.pid.
+    return {"lines": len(lines), "nexts": nexts, "rows": rows}
+
+
+def watcher_pid(d):
+    try:
+        with open(os.path.join(d, "watcher.pid")) as f:
+            return int(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def is_minimal(d):
+    """True when ledger.md is the minimal no-agent ledger (a `Ledger: minimal` line)."""
+    try:
+        with open(os.path.join(d, "ledger.md")) as f:
+            return any(line.strip() == "Ledger: minimal" for line in f)
+    except OSError:
+        return False
+
+
+def minimal_findings(d):
+    """Findings for a minimal ledger: no pane, owner or watcher fields, only length, Next and plan review."""
+    with open(os.path.join(d, "ledger.md")) as f:
+        lines = f.read().splitlines()
+    field = {}
+    for line in lines:
+        m = re.match(r"^(Next action|Plan review|Plan|Task):\s*(.*)$", line.strip())
+        if m:
+            field[m.group(1)] = m.group(2).strip()
+    out = []
+    if len(lines) > LEDGER_LIMIT:
+        out.append(("run", "ledger-length", f"ledger has {len(lines)} lines, the limit is {LEDGER_LIMIT}"))
+    if not field.get("Next action"):
+        out.append(("run", "next-action", "no 'Next action:' line, or it is empty"))
+    plan = field.get("Plan", "none")
+    if plan.lower() not in ("", "none"):
+        if not re.search(r"\boutcome:\s*(ready|waived)\s*(;|$)", field.get("Plan review", "")):
+            out.append(("run", "plan-review",
+                        f"written plan {plan} has no recorded review with 'outcome: ready'; review it before implementing"))
+    return out
 
 
 def check_findings(d, offline=False):
     """[(owner, rule, text)] for the run in d. Raises CheckError when it cannot parse."""
+    if is_minimal(d):
+        return minimal_findings(d)
     ledger = parse_ledger(d)
     try:
         owners = registrations(d)
@@ -911,7 +968,7 @@ def check_findings(d, offline=False):
         if name not in rows:
             out.append((owner, "no-row", f"{name} is registered but has no ledger row"))
     for name, row in rows.items():
-        if name not in owners and row["status"] not in ENDED_WORDS:
+        if name not in owners and row["status"] not in ENDED_WORDS and not QUEUED.match(row["text"]):
             out.append((row["owner"] or "unowned", "row-unregistered",
                         f"{name} has a ledger row ({row['status'] or '?'}) that is not closed, but is not registered"))
     for name in dict.fromkeys([*owners, *rows]):
@@ -927,13 +984,12 @@ def check_findings(d, offline=False):
             causes.append(f"marked {mark['tier']}")
         if causes:
             out.append((owner, "not-closed", f"{name}: {' and '.join(causes)}, but it is neither closed nor 'open: next cycle'"))
-    if ledger["pid"] is None:
-        out.append(("run", "watcher", "the ledger's Watcher line has no pid"))
-    elif not pid_alive(ledger["pid"]):
-        out.append(("run", "watcher", f"watcher pid {ledger['pid']} is not alive"))
-    if ledger["watcher_agents"] is not None and ledger["watcher_agents"] != set(owners):
-        out.append(("run", "watcher", f"ledger Watcher line lists agents {sorted(ledger['watcher_agents']) or 'none'}"
-                                      f" but agents.txt holds {sorted(owners) or 'none'}"))
+    if owners:  # a run with nothing registered (all rows queued, say) needs no watcher
+        pid = watcher_pid(d)
+        if pid is None:
+            out.append(("run", "watcher", "agents are registered but watcher.pid is missing or has no pid"))
+        elif not pid_alive(pid):
+            out.append(("run", "watcher", f"watcher pid {pid} is not alive"))
     if not offline:
         live = agent_list()
         if live is not None:
@@ -1107,20 +1163,6 @@ def cmd_stats(d, args, now=None):
     return 0
 
 
-def cmd_next(d, secs):
-    log = os.path.join(d, "events.log")
-    open(log, "a").close()
-    start = sum(1 for _ in open(log))
-    deadline = time.time() + secs
-    while time.time() < deadline:
-        lines = open(log).read().splitlines()
-        if len(lines) > start:
-            print("\n".join(lines[start:]))
-            return 0
-        time.sleep(5)
-    return 3
-
-
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -1149,8 +1191,6 @@ def main(argv):
         cmd_orch(d, rest[0])
     elif cmd == "board":
         cmd_board(d, option_now(rest))
-    elif cmd == "--next":
-        return cmd_next(d, int(rest[0]) if rest else 540)
     else:
         print(__doc__)
         return 2

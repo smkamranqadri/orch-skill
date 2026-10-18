@@ -1,30 +1,76 @@
 ---
 name: orch
-description: "Run a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own pane that wakes the orchestrator when an agent finishes (the orchestrator never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator. Works alone; uses KIS, the lore notes and the project's status space when they are present."
+description: "Front door for any repo, on any host. With kis/ it runs KIS's start step and adds one mode, Agents; without kis/ it installs KIS or keeps a minimal ledger. Agents mode runs a replaceable orchestrator over many agents without letting its own context grow: a run ledger on disk, a watcher in its own Herdr pane that wakes the orchestrator when an agent finishes (it never blocks), hand off to a fresh orchestrator at about 150k instead of compacting. Use when the user starts a session, asks you to orchestrate, coordinate or run agents, resume a run, say what is pending or building, or hand off the orchestrator."
 metadata:
-  version: "0.10.0"
+  version: "0.12.0"
 ---
 
 # Orchestrator (orch)
 
 Experiment from 2026-10-06. The orchestrator sessions it replaces ran at 300k to 930k context for
 most of their turns, held 346 background watchers as children, needed 61 TaskStops, and lost a
-next action in one compact. Rules 46 to 51 of `Agents: coordinating parallel agents` in the
-lore notes hold the method; this skill is the mechanics. Agents run in Herdr panes
-(`herdr` CLI, HERDR_ENV=1). Herdr missing: say so and stop; the user installs it.
+next action in one compact. This skill is the mechanics of the method.
 
-Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orch:watch`, `/orch:event`. Codex and others:
-"run the orch start step" and follow `commands/<name>.md`.
+Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orch:watch`,
+`/orch:event`, `/orch:close`. Codex: `/prompts:orch-start`; Command Code: `/orch-start`; agy and
+others: "run the orch start step" and follow `commands/<name>.md`.
 
-## The three rules
+## Modes
+
+`start` is the front door. It loads nothing beyond itself until a mode is chosen.
+
+| Repo | Start does | Modes |
+|---|---|---|
+| has `kis/` | version check (below), then KIS's start step and its single confirmation | KIS's Fast, Standard, Phase, plus **Agents** |
+| no `kis/` | offers to install KIS once, else the minimal ledger | one session, no agents; Agents on request |
+
+Herdr (`herdr` CLI, HERDR_ENV=1) is required in Agents mode only; missing: say so and stop that
+mode, the user installs it. The ledger, watcher, Herdr and brief references load in Agents mode
+only. Outside it the whole footprint is `commands/start.md` and, with no KIS, the minimal ledger.
+
+**KIS version.** `scripts/orch-kis-version.sh` reads the repo's vendored KIS: 0.11.0 or newer
+follows a `Run:` pointer; below that, `start` offers the repo's one-line update and continues if
+declined. Declined: an Agents run keeps its record in the ledger only and writes nothing into
+State ("pointer off"), and notes `State pointer: off (KIS <version>)` under `Updated:` in the
+ledger so `event`, `close` and a successor read it there. A repo with `kis/` but no vendored KIS
+package (`orch-kis-version.sh` exit 2) is offered the same install.
+
+**Minimal ledger** (no KIS, no agents): `ledger-minimal-template.md` holds Task, Next action,
+Plan and Plan review, Decisions, Done; no pane, owner or watcher fields. `orch-watch.py check`
+accepts it without a watcher. The template ships `Plan: none` and `Plan review: none`.
+Fast-mode work (a small, obvious fix) writes no plan. A plan written for Standard or Phase work is reviewed
+before implementation: the reviewer (a different CLI than the author; harness, model and effort)
+is proposed to the user and launched only after approval, never on your own. The ledger records
+`Plan review: <reviewer>; outcome: ready|rework; <date>`, and `check` reports `[plan-review]`
+until it says `ready` (or `waived` by the user). A review that cannot run is recorded as
+`blocked` and the user is asked: review later, waive, or stop. `start` does not implement meanwhile.
+
+## State contract (Agents mode in a KIS >= 0.11 repo, not "pointer off")
+
+Every orch step that writes `kis/state/current.md` (`start`, `event`, `handoff`, `close`) follows it:
+
+1. While the run is active State holds one line `Run: orch run active; live record at <abs path
+   of the ledger>` and no Task, Next or status copied from the ledger; `start` moves State's
+   Task and Next into the ledger when it writes the line. Removed by `close` only; `handoff` keeps it.
+2. Each merge adds one proof line to State: `Merged: <task> <short sha>; proof <command: result>`.
+   `event` writes it in the merge turn.
+3. After the last State edit of a step, run `.agents/skills/kis/scripts/state-stamp.sh <project
+   root>` and write its output verbatim as the single `Stamp:` line near the top of State.
+4. `close` flushes the ledger's Open decisions to Intent (once; it deletes what it moved),
+   removes the `Run:` line, restores Task and Next from the ledger, then stamps. It does this
+   whenever the run exists, also when every agent is already closed. `handoff` leaves decisions
+   in the ledger and passes them on in its packet.
+5. Pointer off or no KIS: State is never touched by a run; the ledger is the whole record.
+   Ledger and State never disagree about what is merged.
+
+## Agents mode: the three rules
 
 1. **Own nothing long-lived, and never block.** Agents run in Herdr panes. The watcher runs in
    its own visible pane via `herdr pane run`. The orchestrator starts no background jobs and does
    not wait: after each step it updates the ledger and ends its turn, so the user can always ask,
    start more agents or give feedback. When an agent finishes, needs the user, or closes, the
    watcher prompts the orchestrator with "orch event: ..." once it is idle with an empty input
-   box (`commands/event.md`). Changed 2026-10-07: the foreground `--next` wait of 0.1.0 blocked
-   the user for up to nine minutes.
+   box (`commands/event.md`).
 2. **The ledger is the memory.** `<repo>/.orch/ledger.md`, under 60 lines, shape in
    `ledger-template.md`. `scripts/orch-dir.sh` names the dir: it creates `.orch/` and keeps it out
    of git through `.git/info/exclude` (one entry serves every worktree; nothing is committed), and
@@ -32,115 +78,60 @@ Claude Code: `/orch:start`, `/orch:task`, `/orch:status`, `/orch:handoff`, `/orc
    given a second ledger (`--migrate` moves it). Briefs, reports and handoffs live beside it in
    `.orch/<agent>/`. `Next action (<owner>):` has one line per orchestrator pane, never empty. Each
    orchestrator edits only its own rows and exact-matches its own Next action line; preserve
-   other owners. Claim unowned legacy rows explicitly before acting. A fresh orchestrator orients from it alone. Agent-tool sub-agents die with the
-   session, so long builds go in panes and sub-agents do one-message checks.
+   other owners. Claim unowned legacy rows explicitly before acting. A fresh orchestrator orients
+   from it alone. Agent-tool sub-agents die with the session, so long builds go in panes and
+   sub-agents do one-message checks.
 3. **Read verdicts, not output.** Pane reads `tail -10` at most. Reports and briefs by section
    (`sed -n '/## Result/,$p' | head -40`) or through a cheap sub-agent that returns one line.
-   Artifact creation and status-space edits go to a sub-agent. Lore loads once, in start;
-   handoff replaces compact, so nothing is reloaded.
+   Artifact creation and status-space edits go to a sub-agent. Handoff replaces compact.
 
-## Works alone
-
-Orch needs Herdr and nothing else. Three integrations switch on when present and are skipped
-with one line when absent; never ask the user to install them:
-
-| Integration | Present when | Used for | Absent |
-|---|---|---|---|
-| KIS project memory | `kis/` in the repo | `start` reads `kis/state/current.md`; `task` takes items from `kis/intent/backlog.md`; agents run `/kis:plan` then `/kis:act`; `event` rewrites State after a merge; `handoff` runs the KIS sync and check | the ledger is the whole memory; agents plan in their reply, then act |
-| Lore notes (lore skill, over a notes MCP such as Tartib) | the `lore:load` command or the skill's notes are reachable | `start` loads preferences, core rules and the coordination note once; pointer prompts say "load lore first" | say "no lore in this session" once and go on; briefs carry the standing rules themselves |
-| Project status space (the user's notes app) | the notes MCP lists a space for the project | one task per feature, a plain thought per move, decisions starred (the user's view) | the ledger's `Done this run` is the only status; mention it when the user asks what moved |
+Integrations switch on when present and are skipped with one line when absent: KIS (`task` takes
+items from `kis/intent/backlog.md`, agents run `/kis:plan` then `/kis:act`, `event` and `handoff`
+follow the State contract); the user's status space over a notes MCP (one task per feature, a
+plain thought per move, decisions starred; absent, the ledger's `Done this run` is the status).
 
 ## A run, end to end
 
-When the project has `kis/`, `/kis:start` first; then `/orch:start` (creates the ledger on a
-project that has none). `/orch:task <agent> <task>` per task, where the task is a KIS backlog
-item, a task in the status space, or the user's words: home (`references/placement.md`), brief
-file, worktree, pane, pointer prompt, ledger row, watcher. The agent plans then acts in its worktree; the orchestrator relays
-the plan's questions to the user one at a time and records the answers in the ledger. A whole
-new module gets a requirements interview first (coordination rule 5). End the turn after each
-step; on an "orch event" prompt, verify (coordination rule 35), merge, **close a finished
-one-time agent; keep a multi-cycle stream such as design open** (watcher remove, /exit, worktree
-and merged branch removed; `commands/event.md` step 3), update the ledger, State when KIS is
-present, and the status space when it exists. `/orch:status` whenever the user asks what is
-going on. `/orch:handoff` at about 150k. `/session-close` when the day's work ends.
+`/orch:start`, pick Agents. `/orch:task <agent> <task>` per task, where the task is a KIS backlog
+item, a status-space task, or the user's words: home (`references/placement.md`), brief file,
+worktree, pane, pointer prompt, ledger row, watcher. The agent plans then acts in its worktree;
+the orchestrator relays the plan's questions to the user one at a time and records the answers in
+the ledger. End the turn after each step; on an "orch event" prompt, verify, merge, **close a
+finished one-time agent; keep a multi-cycle stream such as design open** (`commands/event.md`
+step 3), update the ledger, State per the contract, and the status space when it exists.
+`/orch:status` whenever asked. `/orch:handoff` at about 150k. `orch:close` when the day's work ends.
 
 Briefs are files under `.orch/<agent>/brief-<slug>.md`. The prompt is a pointer: "The user asked
-for this: <one line>. Your brief is <path>. Read it in full and follow it. Load lore first
-if the lore skill is installed. Write your report and handoff to <path> and reply with a short
-summary, then continue straight into the plan."
+for this: <one line>. Your brief is <path>. Read it in full and follow it. Write your report and
+handoff to <path> and reply with a short summary, then continue straight into the plan."
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `start` | Pick the run dir (`scripts/orch-dir.sh`), orient from the ledger, reconcile with live state, print the board, re-prompt agents stopped by a limit from their resume briefs, then do Next action. Creates the ledger when none exists. |
-| `task` | One task (KIS item, status-space task, or the user's words) to one named agent, which plans then acts in its worktree: brief file, worktree and pane if missing, pointer prompt, ledger row, watcher updated, plan questions relayed. |
+| `start` | Front door above. Agents mode: pick the run dir, orient from the ledger, reconcile with live state, print the board, re-prompt agents stopped by a limit, then do Next action. |
+| `task` | One task to one named agent, which plans then acts in its worktree: brief, worktree and pane, pointer prompt, ledger row, watcher, plan questions relayed. |
 | `status` | The board in under 20 lines: Next, Waiting on user, Parked, each agent's live state, last five events. |
-| `handoff` | At about 150k context, or when asked: retro (if lore), KIS sync and check (if KIS), status space (if present), ledger and handoff packet, start the successor, confirm it read the ledger, then say "close me". Notice 150k by reading your own pane by id every few prompts: `herdr pane read <your pane id> --source recent-unwrapped --lines 8 \| grep -o 'ctx [^·]*'` (`--current` returns nothing from a tool shell). |
-| `watch` | Start the watcher in its own pane, or add agents to the running one; record pane and pid. |
-| `event` | Handle the watcher's "orch event" prompt: read each agent's verdict, take the next ledger step, sync State if KIS, reply in five lines, end the turn. |
+| `handoff` | At about 150k context, or when asked: sync and check State (if KIS), ledger and handoff packet, start the successor, confirm it read the ledger, then say "close me". Read your own context by pane id: `herdr pane read <your pane id> --source recent-unwrapped --lines 8 \| grep -o 'ctx [^·]*'`. |
+| `watch` | Start the watcher in its own pane, or add agents to the running one; the pid is in `watcher.pid`, the watcher is headless. |
+| `event` | Handle the watcher's "orch event" prompt: read each verdict, take the next ledger step, State per the contract, reply in five lines, end the turn. |
+| `close` | The single close, built separately: agents, KIS sync and check, worktrees, commit and push. Follows the State contract. |
 
 ## Files
 
-- `agents/`: the four named sub-agents (`worker`, `explorer`, `researcher`, `designer`) that
-  `placement.md` and `task --sub` use; the installer copies them to `~/.claude/agents/`.
-- `ledger-template.md`: the ledger's shape. Copy it on the first start.
-- `references/placement.md`: where work runs: sub-agent (one-message work, small fully briefed
-  changes; Claude only), pane agent in a new worktree and workspace (anything on its own branch,
-  anything long, other kinds), a new tab on the same worktree (a second stream on the same
-  branch, never at the same time), a helper pane (servers, watchers). `task` decides from it.
-- `references/design.md`: the design stream. With pen.dev: Pencil frames, exports, three JSON
-  files, then `scripts/design-pages.py` builds the round's local `review.html` (changed screens,
-  before and after, the user's feedback above each, review-first list) and `prototype.html`
-  (every frame, clickable regions, the whole app at once). Without pen.dev: ask the user to
-  install it or to skip the design step; nothing else is invented.
-- `references/brief-rules.md`: the standing rules every brief carries (by pointer with a
-  lore notes, in full without one).
-- `references/runtimes.md`: one row per agent kind (claude, codex, cmd, agy): how to start and
-  prompt it, where its live model shows, default, allowed and avoided models. `task` follows it.
-- `scripts/orch-model.sh <agent> [model]`: the kind and model an agent really runs (Herdr's
-  list for cmd, pane text for Claude and Codex); exit 1 on a mismatch, 2 when not visible.
-  Run it after every `agent start`, before the first prompt.
-- `scripts/orch-agents.sh [--panes] [--fields a,b,...] [<name-or-pane>]`: the compact live
-  agents (`name,pane,status,model,cwd`) and panes (`pane,label,cwd,agent`), one row each, sorted
-  by the first field. Read this instead of the full Herdr agent or pane list JSON: it is about
-  12.6k chars a call. A named target exits 2 when it is not live.
-- `scripts/orch-dir.sh [--check|--migrate] [repo]`: prints the run dir (see rule 2).
-- `scripts/orch-usage.py collect|show|line|check <kind>`: each CLI's 5-hour and weekly plan
-  usage with reset times (claude from the Claude Code statusline cache, codex from its
-  app-server, cmd from its statusline cache while under five minutes old, with optional
-  `CMD_API_KEY` fallback). Usage decides the kind first: `task` starts the
-  agent on a CLI with usage available for the task, never on one at or above 80%, and asks the
-  user when no candidate is clearly available. The watcher shows usage on the board and the
-  ledger header carries the line.
-- `scripts/orch-watch.py` (`orch-watch.sh` wraps old ledgers): one watcher per repo run.
-  `add <dir> <agent>... --orch <owner>` registers agents; bare lines fall back to
-  `<dir>/orchestrator`. `move <dir> <agent>... --from <old> --orch <new>` transfers only
-  the named owner's agents; pending events follow them. Each owner gets its own wake batch
-  and retry timer, so a busy owner does not hold another's events. `orch <dir> <pane>` changes
-  only the legacy default; never use it for multi-owner handoff. `remove` stops watching named
-  agents. The board shows owners and five Recent lines, redraws only when text changes in an
-  alternate buffer and restores the terminal on exit. `board <dir>` prints once;
-  `--next <dir> [seconds]` is the old blocking wait, only when the user asks to wait.
-- `orch-watch.py mark <dir> <agent> <tier> "<what>" [--proof <path>]`: record a verdict (tiers
-  `reported verified asserted sent-back merged open closed handoff`). The board's EVID column and
-  its NEEDS YOU block read the marks; `event` marks every verdict and `task` marks a send-back.
-- `orch-watch.py check <dir> [--owner <pane>] [--offline]`: lint the run, one line per finding
-  with its owner; exit 0 clean, 1 findings, 3 when the ledger cannot be parsed. `start`, `event`,
-  `status` and `handoff` run it. It never writes the ledger.
-- `orch-watch.py show <dir> <agent>`: one card (15 lines at most) for one agent.
-- `orch-watch.py stats <dir> [agent]`: working time, finishes, attempts and the finish-to-wake and
-  finish-to-mark delays from events.log.
-- `references/visibility.md`: the mark tiers, the Needs-you rules and the check rules.
-- `<dir>/events.log`: one line per change, `<UTC> <agent> <state> | <task title> | ctx <use>`,
-  `<UTC> orchestrator woken | <agents>` per delivered prompt, `<UTC> <agent> mark:<tier> a<n> | <what>
-  | proof <path or ->` per verdict, and `registered`, `moved`, `removed` per registration change.
+Agents mode loads these; none is read outside it.
+
+- `ledger-template.md`: the run ledger's shape. `ledger-minimal-template.md`: the no-agent one.
+- `references/tools.md`: every script and `orch-watch.py` subcommand, the sub-agents, `events.log`.
+- `references/placement.md`: where work runs (sub-agent, new worktree pane, tab, helper pane).
+- `references/runtimes.md`: per agent kind (claude, codex, cmd, agy): start, prompt, models.
+- Model matrix: `scripts/orch-models.py pick <job>` proposes harness, model and effort from the user's `~/.agents/orch/models.md` (else `references/models.md`); `commands/models.md` rebuilds it.
+- `scripts/orch-gate.py`: the split gate (`admit`, `release`) used by `task` and `event`, and the diff-review record and `merge-check` before every merge.
+- `references/brief-rules.md`: the standing rules every brief carries.
+- `references/design.md`: the design stream. `references/visibility.md`: marks and check rules.
 - Handoff packets: `<dir>/handoff-<date>-<n>.md`.
 
-## Not yet proved
-
-Proved 2026-10-07 with two Haiku test agents: a turn shorter than one poll is caught (Herdr's
-completion counter); a finish while the orchestrator had typed text was held, then delivered
-within 30 s of the input clearing. Not yet proved: a Codex orchestrator being woken (its dim
-placeholder reads as empty, checked on a live pane), a watcher across a handoff, a long run with
-several agents finishing together.
+Proved 2026-10-07 with two Haiku test agents: a turn shorter than one poll is caught; a finish
+while the orchestrator had typed text was held, then delivered within 30 s of the input
+clearing. Not yet proved: a Codex orchestrator being woken, a watcher across a handoff, a long
+run with several agents finishing together.

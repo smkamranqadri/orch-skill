@@ -21,35 +21,33 @@ the default), in a new tab on an existing worktree (`--place tab <workspace>`, a
 on the same branch that never runs at the same time), or a helper pane (`--place pane`, not an
 agent). Say the home in the ledger row.
 
-**Sub-agent route (`--sub`).** Steps 1 to 3 as below (source, brief, usage check for claude),
-then: call the `Agent` tool with that type, in the background, for `worker` with
+**Sub-agent route (`--sub`).** Steps 1 to 3 and the gate as below (source, brief, usage check for
+claude; a `worker` passes the gate, its row is in the Sub-agents table), then: call the `Agent` tool with that type, in the background, for `worker` with
 `isolation: "worktree"` (its working directory is then its own worktree, never main's
 checkout; an Agent-tool sub-agent otherwise starts where the orchestrator sits), with the same
 pointer prompt as step 6 plus "reply with the report and, if you changed files, your worktree
 path and branch; do not wait for anything"; add a row to the ledger's **Sub-agents** table
 (name, owner, type, started, report path, status); end the turn. The harness notifies you when it
-finishes: verify its report like any other (coordination rule 35), commit from its worktree
+finishes: verify its report like any other, commit from its worktree
 yourself when it changed files, remove that worktree, update the row. A read-only type cannot write the
 report file: save its reply under `.orch/<agent>/report.md` yourself.
 
 1. Source: find the task. A KIS item (`kis/intent/backlog.md` or a plan file) when the repo has
    `kis/`, a task in the project's status space (`search`, then `get_item`) when the notes MCP
    is present, or the user's words. Quote it in the brief and name where it came from. A
-   status-space task gets a thought "assigned to <agent>" now and is marked done on merge
-   (preference 33). A whole new module still gets a requirements interview first (coordination
-   rule 5); task is for one task.
+   status-space task gets a thought "assigned to <agent>" now and is marked done
+   on merge. A whole new module still gets a requirements interview first;
+   task is for one task.
 2. Brief: write `$D/<agent>/brief-<slug>.md` (`D` from `scripts/orch-dir.sh`), one page: the task and its source,
    out of scope, the files or worktree the agent owns, where the design or plan lives, how to
    prove it, where to write report and handoff (`handoff.md` beside the brief), and the standing
    rules (`references/brief-rules.md`: disk, daemons, format only edited files, log files, no
    git checkout or reset in main, no CPU stress, report to a file, default permission mode). Point at files, paste nothing. Then the loop the
    agent runs. With KIS: "/kis:plan this task; put every question for the user in one message
-   and stop; on the answers, /kis:act, prove it, sync your own KIS on your branch (coordination
-   rule 38), write the handoff, reply with a short summary." Without KIS: "plan it in one reply
+   and stop; on the answers, /kis:act, prove it, sync your own KIS on your branch, write the handoff, reply with a short summary." Without KIS: "plan it in one reply
    (scope, files, acceptance checks, questions for the user) and stop; on the answers, build it,
-   prove it, write the handoff, reply with a short summary." Without lore notes, the brief
-   also carries the standing rules in full, copied from
-   `~/.agents/skills/orch/references/brief-rules.md`, since the agent cannot load them.
+   prove it, write the handoff, reply with a short summary." The brief also carries the standing rules in full, copied from
+   `~/.agents/skills/orch/references/brief-rules.md`.
 3. Kind, by usage first (owner's rule, 2026-10-09: "when choose agent the first rule is where
    usage available for the task then choose that, if not clear then ask user"). Decide it
    before the brief names the agent. For every kind that can do this task (its row in
@@ -60,6 +58,23 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    clearly available (every candidate is 3 or 2), show `orch-usage.py show` and ask the user,
    with a recommendation. A kind the user named still gets the check; at exit 3, ask before
    starting there.
+   **Gate (after 3, before any worktree or pane).** Every task that writes files (not a read-only
+   `--sub` type) passes the split gate. Fill the row's `depends` (task names that must merge
+   first) and `owns` (paths or globs it writes; `none` for a pane agent that writes nothing, such
+   as a diff reviewer: it never holds another task and `admit --owns none` runs it now; an empty
+   cell would hold everything), then run
+   `python3 ~/.agents/skills/orch/scripts/orch-gate.py admit <dir> <agent> --owns "<paths>" [--depends "<tasks>"]`
+   (`<dir>` = the run dir). Exit 0, `run`: continue at step 4. Exit 3, `queue` (a dependency has not
+   merged), `sequential` (owned paths overlap an active task, or its `owns` cell is empty), or
+   `hold` (a dependency ended unmerged, `closed` without a merge or `gone`: tell the user, who
+   decides; it never launches by itself):
+   add the row with the `status:` line it printed (`queued: after <task>`), `depends` and `owns`
+   filled, the brief written, kind/model as planned, no pane, no worktree, no watcher
+   registration; set Next action to the release, tell the user which task holds it and why, and
+   end the turn. Exit 2 (unknown dependency, unreadable ledger, no `--owns`): fix the row and run it again.
+   A `--place tab` stream on a worktree owns the same paths, so it is always sequential. The
+   queued task starts later from `commands/event.md` (its release step) at step 4 below, from its
+   saved brief; re-run `admit` first only if its `owns` changed.
 4. Home: by `--place`. `worktree` (default), if the agent has no row with a worktree:
    `herdr worktree create --cwd "$PWD" --branch <slug> --base main --path ../<repo>.wt/<slug>
    --label <agent> --no-focus`; keep the workspace and pane ids from the JSON. `tab`: `herdr tab
@@ -80,15 +95,15 @@ report file: save its reply under `.orch/<agent>/report.md` yourself.
    ten lines of the pane and decide. Never prompt an agent whose model you have not confirmed:
    a wrong model is cheapest to fix before it has read anything.
 6. Prompt: `herdr agent prompt <agent> "The user asked for this: <one line>. Your brief is
-   <path>. Read it in full and follow it. Load lore first if the lore skill is
-   installed, then continue straight into the plan."` Confirm the status is working (rule 22).
+   <path>. Read it in full and follow it, then continue straight into the plan."` Confirm the status is
+   working.
 7. Ledger: add or update the row (name, owner as your pane id, kind/model as `orch-model.sh` reported it, pane,
    worktree and branch, brief, handoff, status working, last event "prompted: plan <slug>").
    Set Next action.
 8. Watcher: `python3 ~/.agents/skills/orch/scripts/orch-watch.py add <dir> <agent> --orch <your pane id>` (the running
    watcher picks it up; no restart). No watcher running: `commands/watch.md`.
 9. Plan questions: on an "orch event" saying the agent finished with questions, read `tail -15` of
-   its pane, ask the user one question at a time with a recommended option (core rule 60),
+   its pane, ask the user one question at a time with a recommended option,
    record each answer under Open decisions in the ledger with the agent's name, then send all
    answers in one `herdr agent prompt` and confirm it is working again.
     Sending a finished agent back to redo work (its proof failed, a review found a defect) is a
