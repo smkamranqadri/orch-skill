@@ -89,3 +89,17 @@ Verdicts are `orch-watch.py mark` lines (tiers, attempts); `add`, `move` and `re
 Needs you; `check`, `show` and `stats` read the same files. Detail: `skills/orch/references/visibility.md`.
 Live Herdr reads go through `scripts/orch-agents.sh` (0.9.1); a guard test keeps raw
 `herdr agent list` out of the orchestrator-facing files.
+
+## Agents, test home, machine
+
+- Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
+  `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
+  Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
+  model; the same host is fine. Picks come from `kis/knowledge/models.md`.
+- Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
+  memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
+  cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run
+  --home <test home> --out <dir>`.
+- Machine: fresh Linux laptop (2026-10). orch installed here (version: State's Branch line); session-close removed.
+  In `~/.agents/skills`, also linked for Claude and agy: lore 1.0.0, herdr (upstream 143bf5f; CLI
+  0.9.5) and humanizer 3.1.0. The earlier setup and its `.orch/` proof logs stay on the owner's Mac.

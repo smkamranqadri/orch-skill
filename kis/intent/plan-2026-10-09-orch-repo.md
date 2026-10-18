@@ -1,5 +1,7 @@
 # Plan: the orch repo and the four fixes (approved 2026-10-09)
 
+Status: COMPLETE 2026-10-09 (all six phases, orch 0.7.1; see the end of this file).
+
 Approved by the owner on 2026-10-09 in the tartib session that created this repo. Work mode:
 Phase. One phase is proved and checked before the next begins (preference 21).
 

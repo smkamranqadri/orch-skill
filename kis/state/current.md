@@ -1,7 +1,7 @@
 # Current
 
-- Stamp: main 5dfac31 1cca1e56b45f
-- Branch: `main` (local, NOT pushed), tip 5dfac31. orch 0.12.2 installed in the real home
+- Stamp: main 693da06 1cca1e56b45f
+- Branch: `main` (local, NOT pushed; code tip 5dfac31). orch 0.12.2 installed in the real home
   2026-10-18 (`bootstrap.sh update --source .`, check rc 0; Codex prompts, cmd commands, agy skill
   link wired). Vendored KIS 0.11.0. Board plugin linked in the real Herdr from the p3 worktree path
   (`herdr plugin unlink orch` to remove; relink from skills/orch/plugin before deleting worktrees).
@@ -23,21 +23,10 @@
   kis-reviewer (Opus 5.5 high) review: ready, plus a major in the phase 3 fixes (`merged()` took
   "closed: not merged" as landed), fixed with three minors in `842683f` (merge 5dfac31), re-review
   ready; tests rc 0 rerun by the coordinator after each merge.
-- Agents (owner, 2026-10-17): Herdr panes, reused across tasks, each replaced before 200k context.
-  `kis-builder` Claude Sonnet 5.5 (effort per task: medium, high for task 4); `kis-reviewer`
-  Claude Opus 5.5 (high, read and shell only). Reviewer rule: a different agent on a different
-  model; the same host is fine. Picks come from `kis/knowledge/models.md`. None running now.
-- Test home: `~/.cache/orch-skill-test-home/home` (orch 0.10.0, session-close 1.0.2, lore 1.0.0,
-  memory files copied without the hub config, Herdr skill), with the owner's Claude, Codex and
-  cmd credential files linked (agy uses the keyring). Live runs: `scripts/measure-live.py run
-  --home <test home> --out <dir>`.
 - Proof on record: plan reviewed twice 2026-10-17 by Codex gpt-6.1-sol (high, read-only). Pass 1:
   rework (1 blocker, 11 major, 1 minor); pass 2: ready after fixes (10 major, 1 minor); all
   folded in. Re-checked by hand: the PreCompact blocker (Claude hooks docs), the watcher finding
   (`orch-watch.py:454`) and per-repo KIS delivery (`install-skill.sh:110`, KIS README).
-- Machine: fresh Linux laptop (2026-10). orch installed here (see Branch); session-close removed.
-  In `~/.agents/skills`, also linked for Claude and agy: lore 1.0.0, herdr (upstream 143bf5f; CLI
-  0.9.5) and humanizer 3.1.0. The earlier setup and its `.orch/` proof logs stay on the owner's Mac.
 - Research: doc "Agent Stack Landscape Report"
   (https://claude.ai/code/artifact/461cac36-c255-4f21-b056-fe80a896c54f); raw files in
   `.orch/research-2026-10-16/` (untracked, not git-ignored: never stage it).

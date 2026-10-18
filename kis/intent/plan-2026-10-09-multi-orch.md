@@ -1,5 +1,7 @@
 # Plan: one watcher, many orchestrators
 
+Status: COMPLETE 2026-10-09 (orch 0.9.0, 3432eab; closed in 0ac04c9).
+
 Approved 2026-10-09 by the owner, answers relayed by orch-3. Standard mode.
 
 ## Decisions and scope
