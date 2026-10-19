@@ -11,6 +11,12 @@ title = "Open orch board"
 contexts = ["pane"]
 command = ["python3", "board.py", "--open"]
 
+[[actions]]
+id = "board-full"
+title = "Orch board, full screen"
+contexts = ["pane"]
+command = ["python3", "board.py", "--open", "--placement", "overlay"]
+
 [[panes]]
 id = "board"
 title = "Orch board"

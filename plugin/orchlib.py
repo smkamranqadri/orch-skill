@@ -111,6 +111,8 @@ def workspace():
     return v
 def register(name=None):
     require_runtime(); project,_=project_and_tree(); pane=os.environ["HERDR_PANE_ID"]; key=session_key(pane); name=name or "orch"
+    direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
+    if direction not in ("right","down"): fail("ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     with locked() as d:
         if key in d["orchs"] and not d["orchs"][key].get("gone"):
             deliver(d); return
@@ -131,7 +133,7 @@ def register(name=None):
         for agent in orphaned:
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
-        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction","right",check=False)
+        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
         if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):
@@ -185,6 +187,49 @@ def spawn(a):
             else: d["agents"][key].update(state="cleanup",status="cleanup")
             if isinstance(exc,SystemExit): raise
             fail(f"failed step: spawn {a.name}: {exc}")
+def adopt(a):
+    require_runtime(); project,tree=project_and_tree(); owner=session_key(os.environ["HERDR_PANE_ID"])
+    with locked() as d:
+        require_registered(d)
+        response=herdr("agent","get",a.target,check=False)
+        info=result(response,"result","agent")
+        name=info.get("name"); pane=info.get("pane_id")
+        kind=info.get("agent") or info.get("kind"); status=info.get("agent_status") or info.get("status")
+        if not name or not pane or not kind or not status: fail(f"unknown agent or pane: {a.target}")
+        adopted_name=a.name or name
+        prefix=os.environ["HERDR_SESSION"]+"/"; key=session_key(adopted_name)
+        conflicts=[(old_key,entry) for old_key,entry in d["agents"].items() if old_key.startswith(prefix) and (old_key==key or entry.get("pane")==pane or entry.get("name")==adopted_name)]
+        tombstones=[]; idempotent=None
+        for old_key,entry in conflicts:
+            same_pane=entry.get("pane")==pane
+            if (old_key==key or entry.get("name")==adopted_name) and not same_pane:
+                fail(f"agent name already in use in this session: {adopted_name}")
+            if not same_pane:
+                continue
+            if entry.get("adopted") and entry.get("state")=="closed":
+                tombstones.append(old_key)
+                continue
+            if entry.get("adopted") and entry.get("orch")==owner and old_key==key and entry.get("name")==adopted_name:
+                idempotent=(old_key,entry)
+                continue
+            if entry.get("adopted") and entry.get("orch")==owner:
+                fail(f"cannot change adopted agent name from {entry.get('name',old_key)} to {adopted_name}; close it before adopting with a new name")
+            if not d["orchs"].get(entry.get("orch"),{}).get("gone",True):
+                fail(f"agent already owned by a live orch: {entry.get('name',name)}")
+            if entry.get("created") or not entry.get("adopted"):
+                fail(f"agent already exists in registry: {entry.get('name',name)}")
+            tombstones.append(old_key)
+        if idempotent:
+            for old_key in tombstones:
+                d["agents"].pop(old_key,None)
+            entry=idempotent[1]
+            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False)
+            deliver(d)
+            return
+        for old_key in tombstones:
+            d["agents"].pop(old_key,None)
+        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"adopted":True}
+        deliver(d)
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
@@ -198,6 +243,9 @@ def close_agent(a):
         require_registered(d)
         key=session_key(a.name); agent=d["agents"].get(key)
         if not agent: fail(f"unknown agent: {a.name}")
+        if agent.get("adopted"):
+            if agent.get("orch")!=session_key(os.environ["HERDR_PANE_ID"]): fail("agent is not owned by this orch")
+            agent.update(state="closed",status="closed"); deliver(d); return
         if agent.get("state")=="closed" and not agent.get("created"):
             deliver(d); return
         if agent.get("state")=="closed":
@@ -238,6 +286,7 @@ def parser():
     p=argparse.ArgumentParser(prog="orch"); sub=p.add_subparsers(dest="command",required=True)
     r=sub.add_parser("register"); r.add_argument("--name")
     s=sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("--role",required=True,choices=["plan","build","review","explore"]); s.add_argument("--kind",required=True,choices=["claude","codex"]); s.add_argument("--model"); s.add_argument("--effort"); s.add_argument("--where",required=True,choices=["pane","tab","worktree"]); s.add_argument("--writes",action="store_true"); s.add_argument("--base"); s.add_argument("--brief",required=True,type=Path)
+    ad=sub.add_parser("adopt"); ad.add_argument("target"); ad.add_argument("--role",choices=["plan","build","review","explore"]); ad.add_argument("--name")
     l=sub.add_parser("list"); l.add_argument("--all",action="store_true"); l.add_argument("--idle",action="store_true"); l.add_argument("--role",choices=["plan","build","review","explore"])
     c=sub.add_parser("close"); c.add_argument("name"); c.add_argument("--keep-checkout",action="store_true"); c.add_argument("--discard",action="store_true")
     sub.add_parser("deregister"); return p
@@ -245,6 +294,7 @@ def main(argv=None):
     a=parser().parse_args(argv)
     if a.command=="register": register(a.name)
     elif a.command=="spawn": spawn(a)
+    elif a.command=="adopt": adopt(a)
     elif a.command=="list": list_agents(a)
     elif a.command=="close": close_agent(a)
     elif a.command=="deregister": deregister()

@@ -65,7 +65,16 @@ elif args[:2]==["worktree","remove"]:
  print(json.dumps({"result":{}}))
 elif args[:2]==["plugin","pane"]: print(json.dumps({"result":{"pane":{"pane_id":"board"}}}))
 elif args[:2]==["agent","list"]: print(json.dumps({"result":{"agents":[{"name":os.environ["LIVE_AGENT"]}] if os.environ.get("LIVE_AGENT") else []}}))
-elif args[:2]==["agent","get"]: print(json.dumps({"result":{"agent":{"agent_status":os.environ.get("ORCH_STATUS","idle")}}}))
+elif args[:2]==["agent","get"]:
+ catalog=os.environ.get("AGENT_CATALOG")
+ if catalog:
+  agents=json.load(open(catalog)); target=args[2] if len(args)>2 else ""
+  agent=next((x for x in agents if x.get("herdr_session",os.environ["HERDR_SESSION"])==os.environ["HERDR_SESSION"] and target in (x.get("name"),x.get("pane_id"))),None)
+  if not agent and target==os.environ.get("HERDR_PANE_ID"):
+   agent={"name":"orch","pane_id":target,"agent":"claude","agent_status":os.environ.get("ORCH_STATUS","idle")}
+  if not agent: print("unknown target",file=sys.stderr); sys.exit(3)
+  print(json.dumps({"result":{"agent":agent}}))
+ else: print(json.dumps({"result":{"agent":{"agent_status":os.environ.get("ORCH_STATUS","idle")}}}))
 elif args[:2]==["agent","prompt"] and os.environ.get("FAIL_PROMPT")=="1": print("prompt failed",file=sys.stderr); sys.exit(2)
 else: print(json.dumps({"result":{}}))
 '''); fake.chmod(0o755)
@@ -79,6 +88,8 @@ else: print(json.dumps({"result":{}}))
   return p
  def calls(self): return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
  def state(self): return json.loads((self.home/'orch/registry.json').read_text())
+ def catalog(self,*agents):
+  path=self.root/f"agent-catalog-{len(list(self.root.glob('agent-catalog-*.json')))}.json"; path.write_text(json.dumps([dict(agent,herdr_session=agent.get('herdr_session','session-a')) for agent in agents])); return self.env|{'AGENT_CATALOG':str(path)}
  def reg(self,pane='p1',session='session-a',cwd=None):
   e=self.env|{'HERDR_PANE_ID':pane,'HERDR_SESSION':session}; self.runcli('register',env=e,cwd=cwd)
  def spawn(self,name='worker',where='pane',kind='claude',extra=()):
@@ -87,6 +98,74 @@ else: print(json.dumps({"result":{}}))
  def test_two_registers_idempotence_adoption_and_sessions(self):
   self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
   self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
+ def test_register_board_direction_uses_environment(self):
+  self.runcli('register'); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls())
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_BOARD_DIRECTION':'down'}); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p2','--direction','down'],self.calls())
+  before=self.calls(); result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'p3','ORCH_BOARD_DIRECTION':'left'}); self.assertEqual(result.stderr.strip(),"orch: ORCH_BOARD_DIRECTION must be 'right' or 'down'"); self.assertEqual(self.calls(),before)
+ def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
+  self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle'}; env=self.catalog(agent)
+  self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']
+  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[]))
+  self.assertIn(['agent','get','p7'],self.calls()); self.assertEqual(self.runcli('list').stdout,'build\torch-builder\tidle\tadopted\n')
+  self.runcli('adopt','fictional-builder','--role','build','--name','orch-builder',env=env); self.assertEqual(self.state()['agents']['session-a/orch-builder'],row)
+ def test_adopt_rejects_unknown_foreign_and_unregistered(self):
+  self.reg()
+  agent={'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}
+  unknown=self.runcli('adopt','missing-agent',ok=False,env=self.catalog(agent)); self.assertEqual(unknown.stderr.strip(),'orch: unknown agent or pane: missing-agent')
+  foreign=dict(agent,herdr_session='session-b'); other=self.runcli('adopt','p8',ok=False,env=self.catalog(foreign)); self.assertEqual(other.stderr.strip(),'orch: unknown agent or pane: p8')
+  same_session_other_workspace=dict(agent,workspace_id='ws-other'); self.runcli('adopt','p8','--name','other-workspace-agent',env=self.catalog(same_session_other_workspace)); self.assertEqual(self.state()['agents']['session-a/other-workspace-agent']['pane'],'p8')
+  unregistered=self.runcli('adopt','p8',ok=False,env=self.catalog(agent)|{'HERDR_PANE_ID':'p9'}); self.assertEqual(unregistered.stderr.strip(),'orch: caller is not a registered orch')
+  self.assertNotIn('session-a/fictional-reviewer',self.state()['agents'])
+ def test_adopt_refuses_agent_owned_by_another_live_orch(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/p2']={'project':str(self.repo),'pane':'p2','workspace':'ws1','gone':False,'queue':[]}; d['agents']['session-a/owned']={'name':'owned','pane':'p8','orch':'session-a/p2','created':[],'state':'live'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  p=self.runcli('adopt','p8',ok=False,env=self.catalog({'name':'owned','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'idle'})); self.assertEqual(p.stderr.strip(),'orch: agent already owned by a live orch: owned')
+ def test_adopted_close_only_deregisters_even_with_discard(self):
+  self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8','--role','review',env=env)
+  d=self.state(); d['agents']['session-a/fictional-reviewer']['created']=['pane:p8','tab:tab8']; d['agents']['session-a/fictional-reviewer']['started']=True; (self.home/'orch/registry.json').write_text(json.dumps(d)); before=self.calls()
+  self.runcli('close','fictional-reviewer','--discard'); self.assertEqual(self.calls(),before); row=self.state()['agents']['session-a/fictional-reviewer']; self.assertEqual((row['state'],row['status'],row['created']),('closed','closed',['pane:p8','tab:tab8']))
+ def test_closed_adopted_pane_can_be_adopted_by_another_owner(self):
+  self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8',env=env); self.runcli('close','fictional-reviewer')
+  self.reg('p2'); self.runcli('adopt','p8','--name','new-reviewer',env=env|{'HERDR_PANE_ID':'p2'})
+  d=self.state(); self.assertEqual(d['agents']['session-a/new-reviewer']['orch'],'session-a/p2'); self.assertNotIn('session-a/fictional-reviewer',d['agents'])
+  self.assertEqual([c for c in self.calls() if c[:2] in (['pane','close'],['tab','close'],['agent','send-keys'])],[])
+ def test_active_adoption_rejects_alias_change_without_rekeying(self):
+  self.reg(); env=self.catalog({'name':'fictional-worker','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'idle'}); self.runcli('adopt','p8','--name','old-alias',env=env)
+  before=self.state()['agents'].copy(); failed=self.runcli('adopt','p8','--name','new-alias',env=env,ok=False)
+  self.assertEqual(failed.stderr.strip(),'orch: cannot change adopted agent name from old-alias to new-alias; close it before adopting with a new name')
+  self.assertEqual(self.state()['agents'],before); self.assertEqual(self.runcli('list').stdout,'explore\told-alias\tidle\tadopted\n')
+  self.runcli('adopt','p8','--name','old-alias',env=env); self.runcli('close','old-alias'); self.assertEqual(self.state()['agents']['session-a/old-alias']['state'],'closed')
+ def test_alias_collision_does_not_mask_another_live_pane_owner(self):
+  self.reg('p1'); self.reg('p2'); d=self.state(); d['orchs']['session-a/p2'].update(gone=False,queue=[]); self.save_state(d)
+  env1=self.catalog({'name':'fictional-alpha','pane_id':'p7','agent':'claude','agent_status':'idle'},{'name':'fictional-zeta','pane_id':'p8','agent':'claude','agent_status':'idle'}); env2=self.catalog({'name':'fictional-zeta','pane_id':'p8','agent':'claude','agent_status':'idle'})
+  self.runcli('adopt','p7','--name','a-owned',env=env1); self.runcli('adopt','p8','--name','z-owned',env=env2|{'HERDR_PANE_ID':'p2'})
+  before=self.state()['agents'].copy(); failed=self.runcli('adopt','p8','--name','a-owned',env=env1,ok=False)
+  self.assertEqual(failed.stderr.strip(),'orch: agent name already in use in this session: a-owned'); self.assertEqual(self.state()['agents'],before)
+  self.assertEqual(self.state()['agents']['session-a/z-owned']['orch'],'session-a/p2')
+ def test_idempotent_adoption_removes_stale_pane_tombstones(self):
+  self.reg(); env=self.catalog({'name':'fictional-worker','pane_id':'p8','agent':'claude','agent_status':'idle'}); self.runcli('adopt','p8','--name','active',env=env)
+  d=self.state(); d['orchs']['session-a/p9']={'project':str(self.repo),'pane':'p9','gone':True,'queue':[]}; d['agents']['session-a/stale']={'name':'stale','pane':'p8','orch':'session-a/p9','created':[],'state':'live','adopted':True}; self.save_state(d)
+  self.runcli('adopt','p8','--name','active',env=env)
+  rows=[key for key,agent in self.state()['agents'].items() if key.startswith('session-a/') and agent.get('pane')=='p8']
+  self.assertEqual(rows,['session-a/active'])
+ def save_state(self,data): (self.home/'orch/registry.json').write_text(json.dumps(data))
+ def test_foreign_session_pane_collision_does_not_block_adoption(self):
+  self.reg(); d=self.state(); d['agents']['session-b/foreign']={'name':'foreign','pane':'p8','orch':'session-b/p2','created':[],'state':'live','adopted':True}; self.save_state(d)
+  env=self.catalog({'name':'fictional-local','pane_id':'p8','agent':'claude','agent_status':'idle'})
+  self.runcli('adopt','p8','--name','local',env=env)
+  d=self.state(); self.assertEqual(d['agents']['session-a/local']['orch'],'session-a/p1'); self.assertEqual(d['agents'].get('session-b/foreign',{}).get('orch'),'session-b/p2')
+ def test_adoption_retries_pending_delivery_on_new_and_idempotent_success(self):
+  self.reg(); env=self.catalog({'name':'fictional-worker','pane_id':'p8','agent':'claude','agent_status':'idle'}); d=self.state(); d['orchs']['session-a/p1']['queue']=['queued notice']; self.save_state(d)
+  self.runcli('adopt','p8',env=env); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],[])
+  self.assertEqual(len([c for c in self.calls() if c[:2]==['agent','prompt']]),1)
+  d=self.state(); d['orchs']['session-a/p1']['queue']=['retry notice']; self.save_state(d)
+  self.runcli('adopt','p8',env=env|{'FAIL_PROMPT':'1'}); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],['retry notice'])
+  self.runcli('adopt','p8',env=env); self.assertEqual(self.state()['orchs']['session-a/p1']['queue'],[])
+ def test_adopted_agent_hook_notice_routes_to_registered_owner(self):
+  self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8','--role','review',env=env)
+  catalog_path=pathlib.Path(env['AGENT_CATALOG']); catalog=json.loads(catalog_path.read_text()); catalog[0]['agent_status']='done'; catalog_path.write_text(json.dumps(catalog))
+  event_env=env|{'HERDR_PLUGIN_EVENT':'pane.agent_status_changed','HERDR_PLUGIN_EVENT_JSON':json.dumps({'pane_id':'p8'}),'ORCH_STATUS':'working'}
+  result=subprocess.run(['python3',str(ROOT/'plugin'/'hook.py')],env=event_env,cwd=ROOT,text=True,capture_output=True); self.assertEqual(result.returncode,0,result.stderr)
+  d=self.state(); self.assertEqual(d['agents']['session-a/fictional-reviewer']['orch'],'session-a/p1'); self.assertEqual(d['orchs']['session-a/p1']['queue'],['[orch] fictional-reviewer done · pane p8 · read: herdr agent read fictional-reviewer'])
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])

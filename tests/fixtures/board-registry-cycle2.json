@@ -1,0 +1,101 @@
+{
+  "agents": {
+    "session-a/fictional-adopted-builder": {
+      "adopted": true,
+      "agent_closed": false,
+      "branch": null,
+      "created": [],
+      "effort": null,
+      "kind": "codex",
+      "model": "fictional-model",
+      "name": "fictional-adopted-builder",
+      "orch": "session-a/p1",
+      "pane": "p-adopted",
+      "pane_closed": false,
+      "project": "/fictional/cycle2-garden",
+      "role": "build",
+      "since": 1792389015,
+      "started": false,
+      "state": "live",
+      "status": "working",
+      "stopped": false,
+      "tree": "/fictional/cycle2-garden",
+      "where": "adopted",
+      "worktree": null,
+      "writes": false
+    },
+    "session-a/fictional-closed-worker": {
+      "agent_closed": false,
+      "branch": null,
+      "created": [],
+      "effort": null,
+      "kind": "claude",
+      "model": null,
+      "name": "fictional-closed-worker",
+      "orch": "session-a/p1",
+      "pane": "newpane",
+      "pane_closed": false,
+      "project": "/fictional/cycle2-garden",
+      "role": "build",
+      "since": 1792389015,
+      "started": true,
+      "state": "closed",
+      "status": "closed",
+      "stopped": true,
+      "tree": "/fictional/cycle2-garden",
+      "where": "pane",
+      "worktree": null,
+      "writes": false
+    },
+    "session-orphan/fictional-orphan-worker": {
+      "agent_closed": false,
+      "branch": null,
+      "created": [
+        "pane:newpane"
+      ],
+      "effort": null,
+      "kind": "claude",
+      "model": null,
+      "name": "fictional-orphan-worker",
+      "orch": "session-orphan/p-orphan",
+      "pane": "newpane",
+      "pane_closed": false,
+      "project": "/fictional/cycle2-garden",
+      "role": "explore",
+      "since": 1792389016,
+      "started": true,
+      "state": "live",
+      "status": "working",
+      "stopped": false,
+      "tree": "/fictional/cycle2-garden",
+      "where": "pane",
+      "worktree": null,
+      "writes": false
+    }
+  },
+  "orchs": {
+    "session-a/p1": {
+      "gone": false,
+      "kind": "claude",
+      "name": "orch",
+      "pane": "p1",
+      "project": "/fictional/cycle2-garden",
+      "queue": [],
+      "status": "idle",
+      "tab": "tab1",
+      "workspace": "ws1"
+    },
+    "session-orphan/p-orphan": {
+      "gone": true,
+      "kind": "claude",
+      "name": "orch",
+      "pane": "p-orphan",
+      "project": "/fictional/cycle2-garden",
+      "queue": [],
+      "status": "idle",
+      "tab": "tab1",
+      "workspace": "ws1"
+    }
+  },
+  "version": 1
+}
