@@ -309,11 +309,52 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(self.calls(env), [["pane", "current", "--current"], ["agent", "get", "fixture-pane"],
                                            ["plugin", "action", "invoke", "board-full", "--plugin", "orch"]])
 
+    def test_agent_lookup_uncertainty_and_present_done_status_route_to_overlay(self):
+        for response, status in (("transport", "working"), ("malformed", "working"), ("empty", "working"), ("", "done")):
+            with self.subTest(response=response, status=status):
+                env = self.board_cli_env(ORCH_BOARD_AGENT_RESPONSE=response, ORCH_BOARD_AGENT_STATUS=status)
+                master, slave = pty.openpty()
+                try:
+                    process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board", "--once"],
+                                               stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+                    process.wait(timeout=3)
+                    error = process.stderr.read()
+                    process.stderr.close()
+                finally:
+                    os.close(master)
+                    os.close(slave)
+                self.assertEqual(process.returncode, 0, error)
+                self.assertEqual(self.calls(env)[-1], ["plugin", "action", "invoke", "board-full", "--plugin", "orch"])
+
+    def test_explicit_agent_absence_allows_in_place_board(self):
+        env = self.board_cli_env(ORCH_BOARD_AGENT_RESPONSE="absent")
+        master, slave = pty.openpty()
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board", "--once", "--width", "55"],
+                                       stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+            output = self.read_pty(master, 3)
+            process.wait(timeout=3)
+            error = process.stderr.read()
+            process.stderr.close()
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(process.returncode, 0, error)
+        self.assertIn("orch board v0.1.0", output)
+        self.assertNotIn("plugin", [call[0] for call in self.calls(env)[-1:]])
+
     def test_overlay_failure_prints_exact_command(self):
         env = self.board_cli_env(ORCH_BOARD_OVERLAY_FAIL="1")
         result = self.run_orch("board", env=env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "herdr plugin action invoke board-full --plugin orch")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "herdr plugin action invoke board-full --plugin orch")
+
+    def test_missing_herdr_prints_diagnostic_and_fallback(self):
+        env = self.board_cli_env(PATH="/no-such-herdr-path")
+        result = self.run_orch("board", env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("herdr", result.stderr.lower())
+        self.assertIn("herdr plugin action invoke board-full --plugin orch", result.stdout)
 
     def test_q_exits_and_width_30_remains_clipped(self):
         master, slave = pty.openpty()

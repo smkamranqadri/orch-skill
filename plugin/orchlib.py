@@ -39,7 +39,10 @@ def save_registry(path,data):
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False,return_status=False):
-    p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
+    try:
+        p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
+    except FileNotFoundError as exc:
+        p=subprocess.CompletedProcess(["herdr",*map(str,args)],127,"",str(exc))
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
@@ -197,26 +200,43 @@ def current_pane():
 
 def pane_has_running_agent(pane):
     succeeded,response=herdr("agent","get",pane,check=False,return_status=True)
-    if not succeeded: return False
-    agent=result(response,"result","agent")
-    status=agent.get("agent_status") or agent.get("status")
-    return bool(agent) and status not in ("done","closed")
+    if succeeded:
+        result_data=result(response,"result")
+        agent=result_data.get("agent")
+        if isinstance(agent,dict) and agent:
+            return True
+        return None
+    error=result(response,"error")
+    code=str(error.get("code", "")).lower()
+    message=str(error.get("message", "")).lower()
+    if code in {"agent_not_found", "agent_not_running", "not_found", "not_running"} or "agent not found" in message or "agent not running" in message:
+        return False
+    return None
 
 def board_command(a):
     if sys.stdin.isatty() and sys.stdout.isatty():
         succeeded,response=herdr("pane","current","--current",check=False,return_status=True)
         pane=result(response,"result","pane").get("pane_id") if succeeded else None
         if not isinstance(pane,str) or not pane: pane=None
-        if pane and not pane_has_running_agent(pane):
+        if pane and pane_has_running_agent(pane) is False:
             command=[sys.executable,str(Path(__file__).with_name("board.py"))]
             if a.once: command.append("--once")
             if a.width is not None: command.extend(["--width",str(a.width)])
             completed=subprocess.run(command,check=False)
             return completed.returncode
     command=["herdr","plugin","action","invoke","board-full","--plugin","orch"]
-    opened=subprocess.run(command,text=True,capture_output=True,check=False)
-    if opened.returncode:
+    try:
+        opened=subprocess.run(command,text=True,capture_output=True,check=False)
+    except FileNotFoundError as exc:
+        print(f"orch board: could not launch herdr: {exc}", file=sys.stderr)
         print(" ".join(command))
+        return 127
+    if opened.returncode:
+        diagnostic=(opened.stderr or opened.stdout).strip()
+        if diagnostic:
+            print(f"orch board: overlay failed: {diagnostic}", file=sys.stderr)
+        print(" ".join(command))
+        return opened.returncode
     return 0
 
 def carry_delivery_state(recipient, donors, now=None):

@@ -64,8 +64,9 @@ Herdr's default sidebar key is also `prefix+b`. Choose which action should own t
 adding the snippet. The installer leaves `~/.config/herdr/config.toml` unchanged.
 
 Run `orch board` to show the board in the current terminal. When it has no interactive terminal,
-or the current pane hosts an agent, it opens the full-screen overlay. `orch board --once` renders
-one frame; `orch board --width COLUMNS` sets the board width.
+or the current pane hosts an agent or its status cannot be confirmed, it opens the full-screen
+overlay. `--once` renders one frame when the board runs in place; in overlay mode it opens the
+overlay. `--width COLUMNS` sets the board width when the board runs in place.
 
 ## What it does
 
