@@ -321,12 +321,9 @@ def open_board() -> None:
     pane = os.environ.get("HERDR_PANE_ID")
     if not os.environ.get("HERDR_ENV") or not pane:
         raise SystemExit("orch board: --open must run inside a Herdr pane")
-    project = subprocess.run(["git", "rev-parse", "--show-toplevel"], text=True, capture_output=True)
-    if project.returncode:
-        raise SystemExit("orch board: current directory is not in a git repository")
     opened = subprocess.run([
         "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board",
-        "--placement", "split", "--target-pane", pane, "--direction", "right", "--cwd", project.stdout.strip(),
+        "--placement", "split", "--target-pane", pane, "--direction", "right",
     ], text=True, capture_output=True)
     if opened.returncode:
         raise SystemExit(f"orch board: failed to open board pane: {(opened.stderr or opened.stdout).strip()}")

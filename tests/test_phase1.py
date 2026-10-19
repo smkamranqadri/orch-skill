@@ -52,6 +52,7 @@ elif args[:2]==["tab","close"]:
  for child in r['tabs'].pop(ident): r['panes'].pop(child,None)
  save_resources(r); print(json.dumps({"result":{}}))
 elif args[:2]==["worktree","create"]:
+ if "--workspace" in args and "--cwd" in args: print("--workspace and --cwd are mutually exclusive",file=sys.stderr); sys.exit(2)
  cwd=args[args.index("--cwd")+1]; branch=args[args.index("--branch")+1]; base=args[args.index("--base")+1]; path=args[args.index("--path")+1]
  subprocess.run(["git","-C",cwd,"worktree","add","-qb",branch,path,base],check=True)
  open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
@@ -84,7 +85,7 @@ else: print(json.dumps({"result":{}}))
   brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
   return self.runcli('spawn',name,'--role','build','--kind',kind,'--where',where,'--brief',str(brief),*extra)
  def test_two_registers_idempotence_adoption_and_sessions(self):
-  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right','--cwd',str(self.repo)],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
+  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
   self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
@@ -130,9 +131,13 @@ else: print(json.dumps({"result":{}}))
   self.assertIn(['agent','start','tabber','--kind','codex','--pane','tabpane','--','-m','fake-codex','-c','model_reasoning_effort=low'],c)
  def test_worktree_spawn_and_writer_refusal(self):
   self.reg(); self.spawn('writer','worktree'); d=self.state()['agents']['session-a/writer']; self.assertTrue(d['writes']); self.assertEqual(d['branch'],'orch/writer')
-  self.assertIn(['worktree','create','--workspace','ws1','--cwd',str(self.repo),'--branch','orch/writer','--base','HEAD','--path','../repo.wt/writer','--label','writer','--no-focus'],self.calls())
+  self.assertIn(['worktree','create','--cwd',str(self.repo),'--branch','orch/writer','--base','HEAD','--path','../repo.wt/writer','--label','writer','--no-focus'],self.calls())
   self.spawn('writer2','pane',extra=('--writes',))
   self.runcli('spawn','writer3','--role','build','--kind','claude','--where','pane','--writes','--brief',str(self.root/'brief.txt'),ok=False)
+ def test_fake_herdr_rejects_worktree_workspace_and_cwd_together(self):
+  result=subprocess.run([str(self.bin/'herdr'),'worktree','create','--workspace','ws1','--cwd',str(self.repo)],env=self.env,text=True,capture_output=True)
+  self.assertEqual(result.returncode,2)
+  self.assertEqual(result.stderr.strip(),'--workspace and --cwd are mutually exclusive')
  def test_duplicate_live_herdr_agent_name_refused_exactly(self):
   self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); e=self.env|{'LIVE_AGENT':'occupied'}
   p=self.runcli('spawn','occupied','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
@@ -210,7 +215,7 @@ else: print(json.dumps({"result":{}}))
   resources=json.loads(self.resources.read_text()); self.assertNotIn('newtab',resources['tabs']); self.assertNotIn('tabpane',resources['panes'])
  def test_spawn_failure_rolls_back_created_resources(self):
   self.reg(); e=self.env|{'FAIL_START':'1'}; p=self.runcli('spawn','broken','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'brief.txt'),ok=False,env=e)
-  self.assertNotIn('session-a/broken',self.state()['agents']); self.assertIn(['pane','close','--pane','newpane'],self.calls())
+  self.assertNotIn('session-a/broken',self.state()['agents']); self.assertIn(['pane','close','newpane'],self.calls())
  def test_worktree_start_failure_removes_branch_without_force(self):
   self.reg(); (self.root/'brief.txt').write_text('Build fictional widget'); self.runcli('spawn','broken-writer','--role','build','--kind','claude','--where','worktree','--brief',str(self.root/'brief.txt'),ok=False,env=self.env|{'FAIL_START':'1'})
   self.assertNotIn('session-a/broken-writer',self.state()['agents'])
@@ -246,6 +251,7 @@ else: print(json.dumps({"result":{}}))
   wt=pathlib.Path(self.state()['agents']['session-a/linked-worker']['worktree']); (wt/'fictional-work.txt').write_text('worker change'); git(wt,'add','fictional-work.txt'); git(wt,'commit','-qm','fictional worker change'); git(linked,'merge','--ff-only','orch/linked-worker')
   self.runcli('close','linked-worker',cwd=linked)
   agent=self.state()['agents']['session-a/linked-worker']; self.assertEqual(agent['state'],'closed'); self.assertEqual(agent['created'],[])
+  self.assertIn(['workspace','close','wtws'],self.calls())
   self.assertEqual(git(self.repo,'branch','--list','orch/linked-worker').stdout,'')
  def test_discard_overrides_close_preflight(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'change.txt').write_text('unmerged change')
@@ -261,7 +267,7 @@ else: print(json.dumps({"result":{}}))
     else: (wt/'seed.txt').write_text('modified fictional seed')
     self.runcli('close','dirty-'+kind,'--discard'); self.assertFalse(wt.exists()); self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
  def test_close_only_created_and_discard_override(self):
-  self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber','--keep-checkout'); c=self.calls(); self.assertIn(['agent','send-keys','tabber','ctrl+c'],c); self.assertIn(['pane','close','--pane','tabpane'],c); self.assertIn(['tab','close','--tab','newtab'],c)
+  self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber','--keep-checkout'); c=self.calls(); self.assertIn(['agent','send-keys','tabber','ctrl+c'],c); self.assertIn(['pane','close','tabpane'],c); self.assertIn(['tab','close','newtab'],c)
  def test_python_version_guard(self):
   import sys
   sys.path.insert(0,str(ROOT/'plugin'))
