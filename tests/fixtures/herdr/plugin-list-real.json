@@ -1,0 +1,173 @@
+{
+  "type": "plugin_list",
+  "plugins": [
+    {
+      "actions": [
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "contexts": [
+            "workspace",
+            "tab",
+            "pane"
+          ],
+          "id": "sync",
+          "title": "Sync pane + tab topics"
+        }
+      ],
+      "description": "Rename each agent pane to its live topic (terminal_title_stripped) and name each tab after its first pane's topic.",
+      "enabled": true,
+      "events": [
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.agent_detected"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.agent_status_changed"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.closed"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.created"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.focused"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "pane.moved"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "tab.focused"
+        },
+        {
+          "command": [
+            "bun",
+            "sync-labels.js"
+          ],
+          "on": "workspace.focused"
+        }
+      ],
+      "manifest_path": "/home/fictional-user/.config/herdr/plugins/github/dan.pane-topic-sync-1bfae7219dc1/herdr-plugin.toml",
+      "min_herdr_version": "0.7.0",
+      "name": "Pane Topic Sync",
+      "platforms": [
+        "macos",
+        "linux",
+        "windows"
+      ],
+      "plugin_id": "dan.pane-topic-sync",
+      "plugin_root": "/home/fictional-user/.config/herdr/plugins/github/dan.pane-topic-sync-1bfae7219dc1",
+      "source": {
+        "installed_unix_ms": 1792039363726,
+        "kind": "github",
+        "managed_path": "/home/fictional-user/.config/herdr/plugins/github/dan.pane-topic-sync-1bfae7219dc1",
+        "owner": "danbuhler",
+        "repo": "herdr-pane-topic-sync",
+        "resolved_commit": "a2eb4b254c1ecb12a0fa9bc7a1e18c8a1a553d5d"
+      },
+      "version": "0.3.0"
+    },
+    {
+      "actions": [
+        {
+          "command": [
+            "python3",
+            "board.py",
+            "--open"
+          ],
+          "contexts": [
+            "pane"
+          ],
+          "id": "board",
+          "title": "Open orch board"
+        },
+        {
+          "command": [
+            "python3",
+            "board.py",
+            "--open",
+            "--placement",
+            "overlay"
+          ],
+          "contexts": [
+            "pane"
+          ],
+          "id": "board-full",
+          "title": "Orch board, full screen"
+        }
+      ],
+      "description": "Routes agent status events to the owning orch pane",
+      "enabled": true,
+      "events": [
+        {
+          "command": [
+            "python3",
+            "hook.py"
+          ],
+          "on": "pane.agent_status_changed"
+        },
+        {
+          "command": [
+            "python3",
+            "hook.py"
+          ],
+          "on": "pane.closed"
+        }
+      ],
+      "manifest_path": "/home/fictional-user/Repositories/side projects/orch-skill/plugin/herdr-plugin.toml",
+      "min_herdr_version": "0.9.5",
+      "name": "orch",
+      "panes": [
+        {
+          "command": [
+            "python3",
+            "board.py"
+          ],
+          "id": "board",
+          "placement": "split",
+          "title": "Orch board"
+        }
+      ],
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "plugin_id": "orch",
+      "plugin_root": "/home/fictional-user/Repositories/side projects/orch-skill/plugin",
+      "source": {
+        "kind": "local"
+      },
+      "version": "0.1.0"
+    }
+  ]
+}

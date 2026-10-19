@@ -2,6 +2,12 @@
 import json
 import os
 import sys
+from pathlib import Path
+
+with open(os.environ["ORCH_TEST_REAL_PLUGIN_LIST"], encoding="utf-8") as fixture:
+    real_plugin_list = json.load(fixture)
+real_plugins = real_plugin_list["plugins"]
+real_orch = next(item for item in real_plugins if item["plugin_id"] == "orch")
 
 args = sys.argv[1:]
 with open(os.environ["ORCH_TEST_CALLS"], "a", encoding="utf-8") as out:
@@ -17,21 +23,32 @@ if args[:3] == ["plugin", "list", "--plugin"]:
         raise SystemExit(2)
     linked = os.environ["ORCH_TEST_LINKED_FILE"]
     if os.environ.get("ORCH_TEST_NO_PLUGIN") == "1" and not os.path.exists(linked):
-        print("[]")
+        print(json.dumps({"type": "plugin_list", "plugins": []}))
         raise SystemExit(0)
     path = (
         open(linked, encoding="utf-8").read()
         if os.path.exists(linked)
         else os.environ["ORCH_TEST_PLUGIN_ROOT"]
     )
-    print(json.dumps([{"id": os.environ.get("ORCH_TEST_PLUGIN_ID", "orch"), "path": path}]))
+    source_file = os.environ["ORCH_TEST_PLUGIN_SOURCE_FILE"]
+    source_kind = Path(source_file).read_text(encoding="utf-8") if Path(source_file).exists() else "github"
+    orch_entry = real_orch | {
+        "plugin_id": os.environ.get("ORCH_TEST_PLUGIN_ID", "orch"),
+        "name": os.environ.get("ORCH_TEST_PLUGIN_ID", "orch"),
+        "plugin_root": path,
+        "manifest_path": str(Path(path) / "herdr-plugin.toml"),
+        "source": {"kind": source_kind},
+    }
+    print(json.dumps({"type": "plugin_list", "plugins": [*real_plugins[:1], orch_entry]}))
 elif args[:2] in (["plugin", "link"], ["plugin", "install"], ["plugin", "update"], ["plugin", "unlink"]):
     if args[:2] == ["plugin", "link"]:
         with open(os.environ["ORCH_TEST_LINKED_FILE"], "w", encoding="utf-8") as out:
             out.write(args[2])
+        Path(os.environ["ORCH_TEST_PLUGIN_SOURCE_FILE"]).write_text("local", encoding="utf-8")
     if args[:2] == ["plugin", "install"]:
         with open(os.environ["ORCH_TEST_LINKED_FILE"], "w", encoding="utf-8") as out:
             out.write(os.environ.get("ORCH_TEST_NEW_PLUGIN_ROOT", os.environ["ORCH_TEST_PLUGIN_ROOT"]))
+        Path(os.environ["ORCH_TEST_PLUGIN_SOURCE_FILE"]).write_text("github", encoding="utf-8")
         if os.environ.get("ORCH_TEST_MUTATE_PLUGIN") == "1":
             with open(os.path.join(os.environ["ORCH_TEST_PLUGIN_ROOT"], "orch"), "w", encoding="utf-8") as out:
                 out.write("partially replaced plugin\n")

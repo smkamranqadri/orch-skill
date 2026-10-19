@@ -38,6 +38,8 @@ class InstallTests(unittest.TestCase):
             "ORCH_TEST_ENV_CALLS": str(self.env_calls),
             "ORCH_TEST_GIT_CALLS": str(self.root / "git-calls"),
             "ORCH_TEST_PLUGIN_ROOT": str(self.plugin_root),
+            "ORCH_TEST_PLUGIN_SOURCE_FILE": str(self.root / "plugin-source-kind"),
+            "ORCH_TEST_REAL_PLUGIN_LIST": str(ROOT / "tests/fixtures/herdr/plugin-list-real.json"),
             "ORCH_TEST_LINKED_FILE": str(self.root / "linked-plugin"),
         }
         self.env.pop("HERDR_ENV", None)
@@ -460,6 +462,86 @@ exec /usr/bin/python3 "$@"
         )
         self.assertNotEqual(invalid_json.returncode, 0)
         self.assertIn("invalid Herdr plugin list JSON", invalid_json.stderr)
+
+    def test_plugin_path_resolves_real_local_and_github_entries(self):
+        fixture = json.loads((ROOT / "tests/fixtures/herdr/plugin-list-real.json").read_text())
+        real_orch = next(item for item in fixture["plugins"] if item["plugin_id"] == "orch")
+        resolver = ROOT / "scripts/plugin-path.py"
+
+        local_root = self.root / "local source with spaces" / "plugin"
+        local_root.mkdir(parents=True)
+        shutil.copy2(ROOT / "plugin/herdr-plugin.toml", local_root / "herdr-plugin.toml")
+        shutil.copy2(ROOT / "plugin/orch", local_root / "orch")
+        (local_root / "orch").chmod(0o755)
+        local_entry = real_orch | {
+            "plugin_root": str(local_root),
+        }
+        local_entry.pop("manifest_path")
+        local_result = subprocess.run(
+            ["python3", str(resolver)],
+            input=json.dumps({"type": fixture["type"], "plugins": [local_entry]}),
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(local_result.returncode, 0, local_result.stderr)
+        self.assertEqual(local_result.stdout.strip(), str(local_root.resolve()))
+
+        github_source = next(
+            item for item in fixture["plugins"] if item.get("source", {}).get("kind") == "github"
+        )
+        github_root = self.root / "github install with spaces" / "plugin"
+        github_root.mkdir(parents=True)
+        shutil.copy2(ROOT / "plugin/herdr-plugin.toml", github_root / "herdr-plugin.toml")
+        shutil.copy2(ROOT / "plugin/orch", github_root / "orch")
+        (github_root / "orch").chmod(0o755)
+        github_entry = github_source | {
+            "plugin_id": "orch",
+            "name": "orch",
+            "manifest_path": str(github_root / "herdr-plugin.toml"),
+        }
+        github_entry.pop("plugin_root")
+        github_result = subprocess.run(
+            ["python3", str(resolver)],
+            input=json.dumps({"type": fixture["type"], "plugins": [github_entry]}),
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(github_result.returncode, 0, github_result.stderr)
+        self.assertEqual(github_result.stdout.strip(), str(github_root.resolve()))
+
+        decoy_entry = github_source | {
+            "plugin_root": str(github_root),
+        }
+        mixed_result = subprocess.run(
+            ["python3", str(resolver)],
+            input=json.dumps({"type": fixture["type"], "plugins": [decoy_entry, local_entry]}),
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(mixed_result.returncode, 0, mixed_result.stderr)
+        self.assertEqual(mixed_result.stdout.strip(), str(local_root.resolve()))
+
+    def test_bootstrap_local_install_check_round_trip_with_real_herdr_shape(self):
+        self.run_bootstrap("install", "--source", str(ROOT))
+        checked = self.run_bootstrap("check", "--source", str(ROOT))
+
+        self.assertIn("Orch skill and command links are current.", checked.stdout)
+        self.assertTrue((self.home / ".agents/skills/orch/SKILL.md").is_file())
+        listed = subprocess.run(
+            [str(self.bin / "herdr"), "plugin", "list", "--plugin", "orch", "--json"],
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        orch_entry = next(
+            item for item in json.loads(listed.stdout)["plugins"] if item["plugin_id"] == "orch"
+        )
+        self.assertEqual(orch_entry["name"], "orch")
+        self.assertEqual(orch_entry["plugin_root"], str(ROOT / "plugin"))
+        self.assertEqual(orch_entry["manifest_path"], str(ROOT / "plugin/herdr-plugin.toml"))
+        self.assertEqual(orch_entry["source"]["kind"], "local")
+        self.assertTrue((self.home / ".local/bin/orch").is_symlink())
 
     def test_release_update_installs_plugin_if_herdr_has_no_existing_one(self):
         self._write_fake_git()
