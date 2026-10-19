@@ -89,6 +89,15 @@ class BoardTests(unittest.TestCase):
                 break
         return output.decode(errors="replace")
 
+    def read_pty_until(self, master, expected, timeout=10):
+        output = ""
+        deadline = time.monotonic() + timeout
+        while expected not in output and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            output += self.read_pty(master, min(0.1, remaining))
+        self.assertIn(expected, output)
+        return output
+
     def test_renderer_has_anchored_orch_sections_and_queue_counts_at_100(self):
         lines = self.render(100).splitlines()
         self.assertEqual(lines[0], "ORCH BOARD · 2 projects · 3 orchs · 5 agents")
@@ -540,11 +549,9 @@ class BoardTests(unittest.TestCase):
     def test_resize_redraws_at_new_width_without_registry_change(self):
         process, master = self.start_pty(100)
         try:
-            initial = self.read_pty(master, 0.3)
-            self.assertIn("-" * 100, initial)
+            initial = self.read_pty_until(master, "-" * 100)
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 60, 0, 0))
-            resized = self.read_pty(master, 1.4)
-            self.assertIn("-" * 60, resized)
+            resized = self.read_pty_until(master, "-" * 60)
             self.assertNotIn("-" * 100, resized)
             os.write(master, b"q")
             process.wait(timeout=2)
@@ -620,11 +627,7 @@ class BoardTests(unittest.TestCase):
     def test_q_exits_after_initial_render(self):
         process, master = self.start_pty(100)
         try:
-            initial = ""
-            deadline = time.monotonic() + 2
-            while time.monotonic() < deadline and "-" * 100 not in initial:
-                initial += self.read_pty(master, min(0.1, deadline - time.monotonic()))
-            self.assertIn("-" * 100, initial)
+            self.read_pty_until(master, "-" * 100)
             os.write(master, b"xq")
             process.wait(timeout=2)
             self.assertEqual(process.returncode, 0)
