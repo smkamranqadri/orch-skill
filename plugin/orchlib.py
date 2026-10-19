@@ -111,6 +111,8 @@ def workspace():
     return v
 def register(name=None):
     require_runtime(); project,_=project_and_tree(); pane=os.environ["HERDR_PANE_ID"]; key=session_key(pane); name=name or "orch"
+    direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
+    if direction not in ("right","down"): fail("ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     with locked() as d:
         if key in d["orchs"] and not d["orchs"][key].get("gone"):
             deliver(d); return
@@ -131,7 +133,7 @@ def register(name=None):
         for agent in orphaned:
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
-        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction","right",check=False)
+        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
         if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):

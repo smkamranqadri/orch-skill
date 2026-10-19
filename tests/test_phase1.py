@@ -87,6 +87,10 @@ else: print(json.dumps({"result":{}}))
  def test_two_registers_idempotence_adoption_and_sessions(self):
   self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
   self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
+ def test_register_board_direction_uses_environment(self):
+  self.runcli('register'); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls())
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_BOARD_DIRECTION':'down'}); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p2','--direction','down'],self.calls())
+  before=self.calls(); result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'p3','ORCH_BOARD_DIRECTION':'left'}); self.assertEqual(result.stderr.strip(),"orch: ORCH_BOARD_DIRECTION must be 'right' or 'down'"); self.assertEqual(self.calls(),before)
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])

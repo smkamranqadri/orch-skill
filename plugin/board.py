@@ -16,9 +16,12 @@ from pathlib import Path
 
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3}
-STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓", "unknown": "?"}
-STATUS_COLORS = {"blocked": "1;31", "working": "1;34", "idle": "36", "done": "32", "unknown": "33"}
+STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
+STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}
+STATUS_COLORS = {"blocked": "1;31", "working": "1;34", "idle": "36", "done": "32", "unknown": "33", "closed": "2;37"}
+STATE_WIDTH = 18
+MIN_PATH_WIDTH = 14
+MIN_RUNTIME_WIDTH = len("HOST / MODEL")
 
 
 def color(value: str, code: str, enabled: bool) -> str:
@@ -78,7 +81,8 @@ def build_projects(data: dict) -> list[dict]:
         project = projects.setdefault(project_path, {"path": project_path, "name": Path(project_path).name or "unknown project", "queue_count": 0, "rows": []})
         project["queue_count"] += len(orch.get("queue", []))
         if not orch.get("gone", False):
-            project["rows"].append({"node": orch, "kind": "ORCH", "path": [orch.get("name") or key.split("/", 1)[-1]], "orphan": False})
+            name = orch.get("name") or key.split("/", 1)[-1]
+            project["rows"].append({"node": orch, "kind": "ORCH", "path": [name], "orphan": False, "group": key, "group_name": name})
 
     for key, agent in data.get("agents", {}).items():
         project_path = str(agent.get("project", ""))
@@ -88,9 +92,13 @@ def build_projects(data: dict) -> list[dict]:
         is_orphan = not owner or owner.get("gone", False) or owner.get("project") != project_path
         if is_orphan:
             parts = ["ORPHAN", agent.get("name") or key.split("/", 1)[-1]]
+            group = "__orphans__"
+            group_name = "ORPHANS"
         else:
             parts = [owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
-        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan})
+            group = owner_key
+            group_name = owner.get("name") or owner_key.split("/", 1)[-1]
+        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan, "group": group, "group_name": group_name})
 
     result = list(projects.values())
     for project in result:
@@ -104,13 +112,18 @@ def row_sort_key(row: dict) -> tuple:
     rank = STATUS_ORDER.get(status, 3)
     if row["orphan"]:
         rank = 1
-    return rank, str(row["path"][-1]).casefold(), row["kind"]
+    return row["orphan"], str(row["group_name"]).casefold(), str(row["group"]).casefold(), 0 if row["kind"] == "ORCH" else 1, rank, str(row["path"][-1]).casefold(), row["kind"]
 
 
 def status_cell(row: dict, enabled: bool) -> str:
     status = str(row["node"].get("status", "unknown")).lower()
-    glyph = STATUS_GLYPHS.get(status, STATUS_GLYPHS["unknown"])
-    label = f"{glyph} {status.upper()}"
+    display_status = status if status in STATUS_GLYPHS else "unknown"
+    glyph = STATUS_GLYPHS[display_status]
+    label = f"{glyph} {display_status.upper()}"
+    if status == "closed":
+        if row["orphan"]:
+            label += " *"
+        return color(label, STATUS_COLORS["closed"], enabled)
     if row["orphan"]:
         label += " *"
         return color(label, "1;35", enabled)
@@ -128,9 +141,11 @@ def runtime_label(row: dict) -> str:
 
 
 def table_layout(width: int, required_runtime_width: int | None = None) -> tuple[int, int, int]:
-    state_width = 18
-    runtime_width = min(26, max(12, required_runtime_width or 12)) if width >= 84 else 0
-    path_width = width - state_width - 3 - (3 + runtime_width if runtime_width else 0)
+    state_limit = 11 if width < 84 else STATE_WIDTH
+    state_width = min(state_limit, max(1, width - 4))
+    available_runtime = width - state_width - 6 - MIN_PATH_WIDTH
+    runtime_width = min(26, max(MIN_RUNTIME_WIDTH, required_runtime_width or MIN_RUNTIME_WIDTH), available_runtime) if available_runtime >= MIN_RUNTIME_WIDTH else 0
+    path_width = max(0, width - state_width - 3 - (3 + runtime_width if runtime_width else 0))
     return state_width, path_width, runtime_width
 
 
@@ -140,17 +155,14 @@ def fit_path(parts: list[str], width: int) -> str:
     separator = " > "
     if sum(display_width(part) for part in parts) + display_width(separator) * (len(parts) - 1) <= width:
         return separator.join(parts)
-    budget = max(1, width - display_width(separator) * (len(parts) - 1))
-    last_width = min(display_width(parts[-1]), max(24, budget // 2))
-    ancestor_budget = max(0, budget - last_width)
-    ancestors = parts[:-1]
-    fitted = []
-    for index, part in enumerate(ancestors):
-        remaining = len(ancestors) - index
-        allowance = ancestor_budget // remaining if remaining else 0
-        fitted.append(truncate(part, allowance))
-        ancestor_budget -= allowance
-    fitted.append(truncate(parts[-1], max(1, budget - sum(display_width(part) for part in fitted))))
+    budget = width - display_width(separator) * (len(parts) - 1)
+    if budget < len(parts):
+        return truncate(separator.join(parts), width)
+    ancestor_width = max(1, budget // 4)
+    ancestor_budget = min(budget - 1, ancestor_width * (len(parts) - 1))
+    fitted = [truncate(part, max(1, ancestor_budget // (len(parts) - 1))) for part in parts[:-1]]
+    last_width = budget - sum(display_width(part) for part in fitted)
+    fitted.append(truncate(parts[-1], max(1, last_width)))
     return separator.join(fitted)
 
 
@@ -164,38 +176,13 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool, runtime_w
     line = f"{state}{' ' * max(0, state_width - display_width(state))} | {path}{' ' * max(0, path_width - display_width(path))}"
     if with_runtime:
         line += f" | {truncate(runtime_label(row), runtime_width)}"
-    return line
+    return truncate(line, width)
 
 
 def footer(registry: str, refreshed_at: str, width: int) -> str:
     clock = re.search(r"\d{2}:\d{2}:\d{2}", refreshed_at)
     short_time = clock.group(0) if clock else refreshed_at[-8:]
-    if width >= 75:
-        prefix, ending = "Registry: ", f" · refreshed {refreshed_at}"
-    elif width >= 50:
-        prefix, ending = "Reg: ", f" · {short_time}"
-    else:
-        prefix, ending = "R: ", f" {short_time[:5]}"
-    path_limit = max(1, width - display_width(prefix + ending))
-    path = registry
-    if display_width(path) > path_limit:
-        tail = ""
-        used = 0
-        for char in reversed(path):
-            char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
-            if used + char_width > max(0, path_limit - 1):
-                break
-            tail = char + tail
-            used += char_width
-        path = "…" + tail if path_limit > 1 else "…"
-    result = prefix + path + ending
-    return truncate(result, width)
-
-
-def legend(width: int) -> str:
-    if width >= 60:
-        return "Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan"
-    return "○i ▶w !b ✓d ?u *o"
+    return truncate(f"refreshed {short_time}", width)
 
 
 def count_label(count: int, singular: str, plural: str) -> str:
@@ -208,15 +195,17 @@ def count_label(count: int, singular: str, plural: str) -> str:
 def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None) -> str:
     projects = build_projects(data)
     orch_count = sum(row["kind"] == "ORCH" for project in projects for row in project["rows"])
-    agent_count = sum(row["kind"] == "AGENT" for project in projects for row in project["rows"])
+    agent_count = sum(row["kind"] == "AGENT" and str(row["node"].get("status", "unknown")).lower() != "closed" for project in projects for row in project["rows"])
     required_runtime_width = max(
         (display_width(runtime_label(row)) for project in projects for row in project["rows"]),
         default=12,
     )
-    _, _, runtime_width = table_layout(width, required_runtime_width)
+    state_width, path_width, runtime_width = table_layout(width, required_runtime_width)
+    heading = f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}"
+    if display_width(heading) > width:
+        heading = f"ORCH · {len(projects)}P · {orch_count}O · {agent_count}A"
     lines = [
-        truncate(color(f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", "1;37", enabled), width),
-        truncate(legend(width), width),
+        truncate(color(heading, "1;37", enabled), width),
         "-" * width,
     ]
     if error:
@@ -224,19 +213,22 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     elif not projects:
         lines.append(truncate("No projects or agents registered.", width))
     else:
-        with_runtime = width >= 84
+        with_runtime = runtime_width > 0
         if with_runtime:
-            state_width, path_width, runtime_width = table_layout(width, required_runtime_width)
-            lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}} | {'HOST / MODEL':<{runtime_width}}")
+            lines.append(truncate(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}} | {'HOST / MODEL':<{runtime_width}}", width))
         else:
-            state_width, path_width, _ = table_layout(width)
-            lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}")
+            lines.append(truncate(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}", width))
         for project in projects:
             lines.append(truncate(color(f"{project['name']} · {count_label(project['queue_count'], 'queued notice', 'queued notices')}", "1;36", enabled), width))
             if not project["rows"]:
                 lines.append(truncate("  No orchs or agents.", width))
             else:
-                lines.extend(row_line(row, width, enabled, with_runtime, runtime_width) for row in project["rows"])
+                previous_group = None
+                for row in project["rows"]:
+                    if previous_group is not None and row["group"] != previous_group:
+                        lines.append("")
+                    lines.append(row_line(row, width, enabled, with_runtime, runtime_width))
+                    previous_group = row["group"]
             lines.append("")
     while lines and lines[-1] == "":
         lines.pop()
@@ -321,9 +313,12 @@ def open_board() -> None:
     pane = os.environ.get("HERDR_PANE_ID")
     if not os.environ.get("HERDR_ENV") or not pane:
         raise SystemExit("orch board: --open must run inside a Herdr pane")
+    direction = os.environ.get("ORCH_BOARD_DIRECTION", "right")
+    if direction not in ("right", "down"):
+        raise SystemExit("orch board: ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     opened = subprocess.run([
         "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board",
-        "--placement", "split", "--target-pane", pane, "--direction", "right",
+        "--placement", "split", "--target-pane", pane, "--direction", direction,
     ], text=True, capture_output=True)
     if opened.returncode:
         raise SystemExit(f"orch board: failed to open board pane: {(opened.stderr or opened.stdout).strip()}")
@@ -338,8 +333,8 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     dynamic_width = args.width is None
     width = args.width if args.width is not None else shutil.get_terminal_size((100, 24)).columns
-    if width < 40:
-        parser.error("--width must be at least 40 columns")
+    if width < 1:
+        parser.error("--width must be a positive number of columns")
     if args.open:
         open_board()
         return
