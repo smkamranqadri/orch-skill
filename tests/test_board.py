@@ -154,9 +154,9 @@ class BoardTests(unittest.TestCase):
         lines = self.render(60).splitlines()
         header = next(line for line in lines if line.startswith("STATE"))
         rows = [line for line in lines if re.match(r"(?:!|▶|○|✓|×|\?) ", line)]
-        self.assertEqual([index for index, char in enumerate(header) if char == "|"], [12, 41])
+        self.assertEqual([index for index, char in enumerate(header) if char == "|"], [12, 44])
         self.assertTrue(rows)
-        self.assertTrue(all([index for index, char in enumerate(line) if char == "|"] == [12, 41] for line in rows))
+        self.assertTrue(all([index for index, char in enumerate(line) if char == "|"] == [12, 44] for line in rows))
 
     def test_footer_fits_real_timestamp_at_accepted_widths(self):
         timestamp = "2026-10-19 09:19:05 PKT"
@@ -184,7 +184,7 @@ class BoardTests(unittest.TestCase):
                 "header": "ORCH · 1P · 1O · 2A",
                 "rows": [
                     "○ IDLE      | amber-orch                ",
-                    "▶ WORKING   | ambe… > adopted-builder   ",
+                    "▶ WORKING   | amber… > adopted-builder  ",
                     "× CLOSED    | amber-orch > closed-worker",
                     "○ IDLE *    | ORPHAN > orphan-worker    ",
                 ],
@@ -223,12 +223,87 @@ class BoardTests(unittest.TestCase):
 
     def test_runtime_column_fits_narrow_width_and_smaller_width_degrades(self):
         data = cycle2_status_data()
-        for width in (30, 40, 42, 43, 44, 50, 60, 65, 100):
+        projects = board.build_projects(data)
+        required_runtime = max(board.display_width(board.runtime_label(row)) for project in projects for row in project["rows"])
+        required_path = max(board.path_reservation(row) for project in projects for row in project["rows"])
+        for width in (30, 40, 42, 43, 44, 50, 51, 52, 53, 60, 65, 100):
             with self.subTest(width=width):
                 lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
                 self.assertTrue(all(board.display_width(line) <= width for line in lines))
                 header = next((line for line in lines if line.startswith("STATE")), "")
-                self.assertEqual("HOST / MODEL" in header, width >= 43)
+                self.assertEqual("HOST / MODEL" in header, width >= 53)
+                layout = board.table_layout(width, required_runtime, required_path)
+                self.assertEqual(layout[2] > 0, width >= 53)
+
+    def test_runtime_reserves_owner_separator_and_worker_leaf_at_50_60_and_67(self):
+        project = "/fictional/amber-garden"
+        data = {
+            "version": 1,
+            "orchs": {"s/p": {"project": project, "name": "orch-owner", "gone": False, "queue": []}},
+            "agents": {},
+        }
+        for name in ("fictional-worker-prefix-alpha-A-tail", "fictional-worker-prefix-bravo-B-tail"):
+            data["agents"]["s/" + name] = {
+                "project": project, "name": name, "orch": "s/p", "status": "working",
+                "kind": "claude", "model": "fictional-extraordinarily-long-model-name",
+            }
+        expected = {
+            50: {
+                "layout": (11, 36, 0), "runtime": False,
+                "rows": [
+                    "▶ WORKING   | orch-… > fictional-wor…-alpha-A-tail",
+                    "▶ WORKING   | orch-… > fictional-wor…-bravo-B-tail",
+                ],
+            },
+            60: {
+                "layout": (11, 29, 14), "runtime": True,
+                "rows": [
+                    "▶ WORKING   | orch-… > fictional-…ha-A-tail | claude fictio…",
+                    "▶ WORKING   | orch-… > fictional-…vo-B-tail | claude fictio…",
+                ],
+            },
+            67: {
+                "layout": (11, 29, 21), "runtime": True,
+                "rows": [
+                    "▶ WORKING   | orch-… > fictional-…ha-A-tail | claude fictional-ext…",
+                    "▶ WORKING   | orch-… > fictional-…vo-B-tail | claude fictional-ext…",
+                ],
+            },
+            57: {
+                "layout": (11, 43, 0), "runtime": False,
+                "rows": [
+                    "▶ WORKING   | orch-… > fictional-worker-…fix-alpha-A-tail",
+                    "▶ WORKING   | orch-… > fictional-worker-…fix-bravo-B-tail",
+                ],
+            },
+        }
+        for width, wanted in expected.items():
+            with self.subTest(width=width):
+                state_width, path_width, runtime_width = board.table_layout(width, 26, 29)
+                self.assertEqual((state_width, path_width, runtime_width), wanted["layout"])
+                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
+                header = next(line for line in lines if line.startswith("STATE"))
+                self.assertEqual("HOST / MODEL" in header, wanted["runtime"])
+                rows = [line for line in lines if line.startswith("▶ WORKING")]
+                self.assertEqual(rows, wanted["rows"])
+                self.assertTrue(all(board.display_width(line) == width for line in rows))
+                self.assertIn("A-tail", rows[0])
+                self.assertIn("B-tail", rows[1])
+                self.assertNotEqual(rows[0], rows[1])
+
+    def test_orphan_rows_keep_status_order(self):
+        project = "/fictional/amber-garden"
+        data = {
+            "version": 1, "orchs": {},
+            "agents": {
+                "s/closed": {"project": project, "name": "fictional-closed-leaf", "orch": "s/missing", "status": "closed"},
+                "s/working": {"project": project, "name": "fictional-working-leaf", "orch": "s/missing", "status": "working"},
+                "s/blocked": {"project": project, "name": "fictional-blocked-leaf", "orch": "s/missing", "status": "blocked"},
+            },
+        }
+        rows = [line for line in board.render(data, 100, False, "registry.json", "12:34:56").splitlines() if line.startswith(("! BLOCKED", "▶ WORKING", "× CLOSED"))]
+        self.assertEqual([line.split("|")[0].strip() for line in rows], ["! BLOCKED *", "▶ WORKING *", "× CLOSED *"])
+        self.assertEqual([line.split("|")[1].strip().rsplit(" > ", 1)[-1] for line in rows], ["fictional-blocked-leaf", "fictional-working-leaf", "fictional-closed-leaf"])
 
     def test_orch_groups_and_projects_have_exactly_one_blank_line_between_them(self):
         data = {
@@ -285,24 +360,24 @@ class BoardTests(unittest.TestCase):
             100: [
                 "▶ WORKING          | amber-lead-orch > fictional-amber-worker                         | claude",
                 "○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name          | claude · Q:0",
-                "? UNKNOWN          | fictional-coor… > fictional-worker-with-an-extraordinarily-long… | claude",
+                "? UNKNOWN          | ficti… > fictional-worker-with-an-ex…-name-for-narrow-board-view | claude",
                 "○ IDLE *           | ORPHAN > fictional-orphan-fir-worker                             | claude",
             ],
             60: [
                 "○ IDLE      | amber-lead-orch                 | claude · Q:1",
-                "▶ WORKING   | amber-… > fictional-amber-work… | claude",
+                "▶ WORKING   | amber… > fictional-amber-worker | claude",
                 "○ IDLE      | amber-review-orch               | claude · Q:0",
-                "○ IDLE      | amber-… > fictional-idle-revie… | claude",
-                "○ IDLE *    | ORPHAN > fictional-orphan-fir-… | claude",
+                "○ IDLE      | amber… > fictional-i…e-reviewer | claude",
+                "○ IDLE *    | ORPHAN > fictional-o…fir-worker | claude",
                 "○ IDLE      | blue-lead-orch                  | claude · Q:0",
-                "! BLOCKED   | blue-l… > fictional-blocked-bu… | claude",
+                "! BLOCKED   | blue-… > fictional-b…ed-builder | claude",
                 "○ IDLE      | fictional-coordinator-with-an-… | claude · Q:0",
-                "? UNKNOWN   | fictio… > fictional-worker-wit… | claude",
+                "? UNKNOWN   | ficti… > fictional-w…board-view | claude",
                 "○ IDLE      | copper-lead-orch                | claude · Q:0",
-                "✓ DONE      | copper… > fictional-completed-… | claude",
+                "✓ DONE      | coppe… > fictional-c…ted-worker | claude",
                 "○ IDLE      | copper-review-orch              | claude · Q:0",
-                "▶ WORKING   | copper… > fictional-copper-rev… | claude",
-                "? UNKNOWN * | ORPHAN > fictional-orphan-ash-… | claude",
+                "▶ WORKING   | coppe… > fictional-c…r-reviewer | claude",
+                "? UNKNOWN * | ORPHAN > fictional-o…ash-worker | claude",
             ],
         }
         for width, wanted_rows in expected.items():
@@ -360,8 +435,8 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(lines[1], "-" * 60)
         self.assertEqual(sum(line == "-" * 60 for line in lines), 1)
         self.assertIn("HOST / MODEL", lines[2])
-        self.assertTrue(any("! BLOCKED" in line and "blocked-spruce-wo" in line for line in lines))
-        self.assertTrue(any("○ IDLE *" in line and "orphaned-birch-ag" in line for line in lines))
+        self.assertTrue(any("! BLOCKED" in line and "blocked-sp…ce-worker" in line for line in lines))
+        self.assertTrue(any("○ IDLE *" in line and "orphaned-birch-agent" in line for line in lines))
         self.assertTrue(all(board.display_width(line) <= 60 for line in lines))
         self.assertEqual(lines[-1], "refreshed 12:34:56")
 
@@ -369,7 +444,7 @@ class BoardTests(unittest.TestCase):
         lines = self.render(60).splitlines()
         matching = [line for line in lines if "✓ DONE" in line and "extraordinarily-long-fictional-agent-name-for-truncation-check" not in line]
         self.assertEqual(len(matching), 1)
-        self.assertIn("extraordinarily-l…", matching[0])
+        self.assertIn("…ion-check", matching[0])
         self.assertIn("…", matching[0])
         self.assertLessEqual(board.display_width(matching[0]), 60)
 

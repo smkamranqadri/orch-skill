@@ -21,7 +21,11 @@ STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓",
 STATUS_COLORS = {"blocked": "1;31", "working": "1;34", "idle": "36", "done": "32", "unknown": "33", "closed": "2;37"}
 STATE_WIDTH = 18
 MIN_PATH_WIDTH = 14
+MIN_OWNER_WIDTH = 6
+MIN_WORKER_WIDTH = 20
+MIN_WORKER_PATH_WIDTH = MIN_OWNER_WIDTH + 3 + MIN_WORKER_WIDTH
 MIN_RUNTIME_WIDTH = len("HOST / MODEL")
+MAX_RUNTIME_WIDTH = 26
 
 
 def color(value: str, code: str, enabled: bool) -> str:
@@ -110,8 +114,6 @@ def build_projects(data: dict) -> list[dict]:
 def row_sort_key(row: dict) -> tuple:
     status = str(row["node"].get("status", "unknown")).lower()
     rank = STATUS_ORDER.get(status, 3)
-    if row["orphan"]:
-        rank = 1
     return row["orphan"], str(row["group_name"]).casefold(), str(row["group"]).casefold(), 0 if row["kind"] == "ORCH" else 1, rank, str(row["path"][-1]).casefold(), row["kind"]
 
 
@@ -140,34 +142,72 @@ def runtime_label(row: dict) -> str:
     return suffix
 
 
-def table_layout(width: int, required_runtime_width: int | None = None) -> tuple[int, int, int]:
+def table_layout(width: int, required_runtime_width: int | None = None, required_path_width: int = MIN_WORKER_PATH_WIDTH) -> tuple[int, int, int]:
     state_limit = 11 if width < 84 else STATE_WIDTH
     state_width = min(state_limit, max(1, width - 4))
-    available_runtime = width - state_width - 6 - MIN_PATH_WIDTH
-    runtime_width = min(26, max(MIN_RUNTIME_WIDTH, required_runtime_width or MIN_RUNTIME_WIDTH), available_runtime) if available_runtime >= MIN_RUNTIME_WIDTH else 0
+    path_reservation = max(MIN_PATH_WIDTH, required_path_width)
+    available_runtime = width - state_width - 6 - path_reservation
+    runtime_width = min(MAX_RUNTIME_WIDTH, max(MIN_RUNTIME_WIDTH, required_runtime_width or MIN_RUNTIME_WIDTH), available_runtime) if available_runtime >= MIN_RUNTIME_WIDTH else 0
     path_width = max(0, width - state_width - 3 - (3 + runtime_width if runtime_width else 0))
     return state_width, path_width, runtime_width
+
+
+def middle_truncate(value: str, limit: int) -> str:
+    if limit <= 0:
+        return ""
+    if display_width(value) <= limit:
+        return value
+    if limit == 1:
+        return "…"
+    left_budget = (limit - 1 + 1) // 2
+    right_budget = limit - 1 - left_budget
+    left = ""
+    used = 0
+    for char in value:
+        char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        if used + char_width > left_budget:
+            break
+        left += char
+        used += char_width
+    right = ""
+    used = 0
+    for char in reversed(value[len(left):]):
+        char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        if used + char_width > right_budget:
+            break
+        right = char + right
+        used += char_width
+    return left + "…" + right
+
+
+def path_reservation(row: dict) -> int:
+    parts = [str(part) for part in row.get("path", [])]
+    if len(parts) < 2:
+        return MIN_PATH_WIDTH
+    owner_width = min(MIN_OWNER_WIDTH, display_width(" > ".join(parts[:-1])))
+    worker_width = min(MIN_WORKER_WIDTH, display_width(parts[-1]))
+    return max(MIN_PATH_WIDTH, owner_width + display_width(" > ") + worker_width)
 
 
 def fit_path(parts: list[str], width: int) -> str:
     if not parts:
         return truncate("", width)
+    if len(parts) == 1:
+        return truncate(parts[0], width)
     separator = " > "
     if sum(display_width(part) for part in parts) + display_width(separator) * (len(parts) - 1) <= width:
         return separator.join(parts)
-    budget = width - display_width(separator) * (len(parts) - 1)
-    if budget < len(parts):
+    owner = " > ".join(parts[:-1])
+    owner_width = min(MIN_OWNER_WIDTH, display_width(owner))
+    separator_width = display_width(separator)
+    if width < owner_width + separator_width + 1:
         return truncate(separator.join(parts), width)
-    ancestor_width = max(1, budget // 4)
-    ancestor_budget = min(budget - 1, ancestor_width * (len(parts) - 1))
-    fitted = [truncate(part, max(1, ancestor_budget // (len(parts) - 1))) for part in parts[:-1]]
-    last_width = budget - sum(display_width(part) for part in fitted)
-    fitted.append(truncate(parts[-1], max(1, last_width)))
-    return separator.join(fitted)
+    worker_width = width - owner_width - separator_width
+    return f"{truncate(owner, owner_width)}{separator}{middle_truncate(parts[-1], worker_width)}"
 
 
-def row_line(row: dict, width: int, enabled: bool, with_runtime: bool, runtime_width: int = 0) -> str:
-    state_width, path_width, runtime_width = table_layout(width, runtime_width)
+def row_line(row: dict, width: int, enabled: bool, with_runtime: bool, runtime_width: int = 0, required_path_width: int = MIN_WORKER_PATH_WIDTH) -> str:
+    state_width, path_width, runtime_width = table_layout(width, runtime_width, required_path_width)
     path = fit_path([str(part) for part in row["path"]], path_width)
     if row["orphan"]:
         path = path.replace("ORPHAN", color("ORPHAN", "1;35", enabled), 1)
@@ -200,7 +240,8 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         (display_width(runtime_label(row)) for project in projects for row in project["rows"]),
         default=12,
     )
-    state_width, path_width, runtime_width = table_layout(width, required_runtime_width)
+    required_path_width = max((path_reservation(row) for project in projects for row in project["rows"]), default=MIN_PATH_WIDTH)
+    state_width, path_width, runtime_width = table_layout(width, required_runtime_width, required_path_width)
     heading = f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}"
     if display_width(heading) > width:
         heading = f"ORCH · {len(projects)}P · {orch_count}O · {agent_count}A"
@@ -227,7 +268,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
                 for row in project["rows"]:
                     if previous_group is not None and row["group"] != previous_group:
                         lines.append("")
-                    lines.append(row_line(row, width, enabled, with_runtime, runtime_width))
+                    lines.append(row_line(row, width, enabled, with_runtime, runtime_width, required_path_width))
                     previous_group = row["group"]
             lines.append("")
     while lines and lines[-1] == "":
