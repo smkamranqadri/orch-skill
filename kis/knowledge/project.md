@@ -51,11 +51,13 @@ Reuse agents across tasks instead of starting new ones (each start costs about 1
 
 | Job | First choice | Alternative |
 | --- | --- | --- |
-| Orch | Claude Sonnet 5.5 medium | Codex gpt-6.1-sol low or medium |
-| Design, plan | Claude Opus 5.5 medium | Codex gpt-6.1-sol medium |
-| Build | Claude Sonnet 5.5 medium | Codex gpt-6-luna medium for mechanical briefs |
-| Review | a different model from the builder: Opus 5.5 medium on Sonnet's work | Codex gpt-6.1-sol medium |
-| Explore | Claude Haiku 5.5 low | Codex gpt-6-luna low |
+| Orch | the session's own model | |
+| Design, plan | Codex gpt-6.1-sol medium | |
+| Build | Codex gpt-6-luna medium (high when a result is not good) | |
+| Review | Codex gpt-6.1-sol medium, a different model from the builder | |
+| Explore | Codex gpt-6.1-sol medium | |
 | Test runs, repetitive commands | no agent: `herdr pane run` in a plain pane | |
 
-These seed the owner's matrix when `/orch:model` exists (phase 5).
+Owner decision 2026-10-18/19: Codex only for workers.
+
+These seed the owner's matrix for `/orch:model`.
