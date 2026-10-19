@@ -5,6 +5,18 @@ min_herdr_version = "0.9.5"
 description = "Routes agent status events to the owning orch pane"
 platforms = ["linux", "macos"]
 
+[[actions]]
+id = "board"
+title = "Open orch board"
+contexts = ["pane"]
+command = ["python3", "board.py", "--open"]
+
+[[panes]]
+id = "board"
+title = "Orch board"
+placement = "split"
+command = ["python3", "board.py"]
+
 [[events]]
 on = "pane.agent_status_changed"
 command = ["python3", "hook.py"]
