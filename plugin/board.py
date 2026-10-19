@@ -155,7 +155,7 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
     if with_runtime:
         node = row["node"]
         host = str(node.get("kind", node.get("host", "unknown")))
-        model = str(node.get("model", ""))
+        model = str(node.get("model") or "")
         suffix = f"{host} {model}".strip()
         if row["kind"] == "ORCH":
             suffix += f" · Q:{len(node.get('queue', []))}"
@@ -171,7 +171,7 @@ def footer(registry: str, refreshed_at: str, width: int) -> str:
     elif width >= 50:
         prefix, ending = "Reg: ", f" · {short_time}"
     else:
-        prefix, ending = "R: ", f" {short_time[-5:]}"
+        prefix, ending = "R: ", f" {short_time[:5]}"
     path_limit = max(1, width - display_width(prefix + ending))
     path = registry
     if display_width(path) > path_limit:
