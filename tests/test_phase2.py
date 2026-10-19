@@ -16,6 +16,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "herdr"
 sys.path.insert(0, str(ROOT / "plugin"))
 import hook
 import orchlib
+from plugin import board
 SESSION = "orch-phase2-test"
 ORCH = f"{SESSION}/w2:p9"
 OTHER_ORCH = f"{SESSION}/w2:p8"
@@ -420,6 +421,26 @@ else:
         self.assertEqual(agent["created"], [])
         self.assertEqual(data["orchs"][ORCH]["queue"], [notice("quartz-builder", "closed", "w2:p1")])
         self.assertEqual(data["agents"][f"{SESSION}/quartz-builder"]["closed_at"], first_closed_at)
+
+    def test_readopted_worker_gets_fresh_close_timestamp_and_stays_visible(self):
+        alias = "fictional-adopted"
+        self.write_herdr_state(**{"w2:p7": {"name": alias, "pane_id": "w2:p7", "agent": "claude", "agent_status": "idle"}})
+        self.run_cli("adopt", "w2:p7", "--name", alias)
+        with mock.patch.dict(os.environ, self.env), mock.patch.object(orchlib.time, "time", return_value=1000.0):
+            hook.process_event("pane.closed", {"pane_id": "w2:p7", "type": "pane_closed", "workspace_id": "w2"})
+        self.assertEqual(self.registry()["agents"][f"{SESSION}/{alias}"]["closed_at"], 1000.0)
+
+        self.run_cli("adopt", "w2:p7", "--name", alias)
+        revived = self.registry()["agents"][f"{SESSION}/{alias}"]
+        self.assertEqual((revived["state"], revived["status"]), ("live", "idle"))
+        self.assertNotIn("closed_at", revived)
+
+        with mock.patch.dict(os.environ, self.env), mock.patch.object(orchlib.time, "time", return_value=2000.0):
+            orchlib.close_agent(type("CloseArgs", (), {"name": alias})())
+        data = self.registry()
+        self.assertEqual(data["agents"][f"{SESSION}/{alias}"]["closed_at"], 2000.0)
+        output = board.render(data, 100, False, str(self.registry_path), "12:34:56", now=2000.0)
+        self.assertEqual([line for line in output.splitlines() if alias in line], ["× CLOSED           |   └─ fictional-adopted"])
 
     def test_closed_worker_notice_delivers_to_idle_owner(self):
         close = {"event": "pane.closed", "data": {"pane_id": "w2:p1", "type": "pane_closed", "workspace_id": "w2"}}
