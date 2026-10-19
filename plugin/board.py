@@ -17,9 +17,11 @@ from pathlib import Path
 
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+BOARD_VERSION = "0.1.0"
+REFRESH_SECONDS = 1
 STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
 STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}
-STATUS_COLORS = {"blocked": "1;31", "working": "1;34", "idle": "36", "done": "32", "unknown": "33", "closed": "2;37"}
+STATUS_COLORS = {"blocked": "blocked", "working": "working", "idle": "dim", "done": "done", "unknown": "amber", "closed": "dim"}
 STATE_WIDTH = 18
 MIN_PATH_WIDTH = 14
 MIN_OWNER_WIDTH = 6
@@ -30,10 +32,43 @@ MAX_RUNTIME_WIDTH = 26
 CLOSED_ROW_SECONDS = 600
 
 
-def color(value: str, code: str, enabled: bool) -> str:
+COLOR_16 = {
+    "app": "1;34", "orch": "1;34", "agent": "35", "header": "1;37", "orphan": "1;33",
+    "dim": "2;37", "working": "32", "done": "32", "blocked": "1;31", "purple": "35",
+    "amber": "33", "key": "1;37",
+}
+COLOR_256 = {"app": 111, "orch": 111, "agent": 140, "header": 255, "orphan": 179, "dim": 244,
+             "working": 114, "done": 114, "blocked": 167, "purple": 141, "amber": 179, "key": 255}
+COLOR_RGB = {"app": (130, 156, 255), "orch": (130, 156, 255), "agent": (186, 151, 221),
+             "header": (224, 228, 237), "orphan": (218, 176, 82), "dim": (112, 119, 135),
+             "working": (137, 202, 132), "done": (137, 202, 132), "blocked": (231, 105, 105),
+             "purple": (190, 139, 222), "amber": (218, 176, 82), "key": (222, 226, 236)}
+
+
+def color(value: str, code: str, enabled: bool, mode: str = "16") -> str:
     if not enabled:
         return value
-    return f"\033[{code}m{value}\033[0m"
+    if code not in COLOR_16:
+        return f"\033[{code}m{value}\033[0m"
+    if mode == "truecolor":
+        red, green, blue = COLOR_RGB[code]
+        ansi = f"1;38;2;{red};{green};{blue}" if code in ("app", "orch", "header", "key", "orphan") else f"38;2;{red};{green};{blue}"
+    elif mode == "256":
+        ansi = f"1;38;5;{COLOR_256[code]}" if code in ("app", "orch", "header", "key", "orphan") else f"38;5;{COLOR_256[code]}"
+    else:
+        ansi = COLOR_16[code]
+    return f"\033[{ansi}m{value}\033[0m"
+
+
+def terminal_color_mode(environ: dict[str, str] | None = None) -> str:
+    environ = os.environ if environ is None else environ
+    colorterm = environ.get("COLORTERM", "").lower()
+    term = environ.get("TERM", "").lower()
+    if colorterm in ("truecolor", "24bit"):
+        return "truecolor"
+    if "256color" in term:
+        return "256"
+    return "16"
 
 
 def display_width(value: str) -> int:
@@ -79,7 +114,36 @@ def registry_path() -> Path:
     return base / "orch" / "registry.json"
 
 
-def build_projects(data: dict) -> list[dict]:
+def pane_titles_from_payload(payload: dict) -> dict[str, str]:
+    result = payload.get("result", {})
+    panes = result.get("panes", []) if isinstance(result, dict) else []
+    if not isinstance(panes, list):
+        return {}
+    titles = {}
+    for pane in panes:
+        if not isinstance(pane, dict) or pane.get("pane_id") is None:
+            continue
+        title = pane.get("terminal_title_stripped") or pane.get("label") or pane.get("terminal_title") or ""
+        titles[str(pane["pane_id"])] = str(title)
+    return titles
+
+
+def read_pane_titles() -> dict[str, str]:
+    try:
+        response = subprocess.run(["herdr", "pane", "list"], text=True, capture_output=True, check=False, timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if response.returncode != 0:
+        return {}
+    try:
+        payload = json.loads(response.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return pane_titles_from_payload(payload) if isinstance(payload, dict) else {}
+
+
+def build_projects(data: dict, pane_titles: dict[str, str] | None = None) -> list[dict]:
+    pane_titles = pane_titles or {}
     projects: dict[str, dict] = {}
     all_orchs = data.get("orchs", {})
     for key, orch in all_orchs.items():
@@ -88,7 +152,7 @@ def build_projects(data: dict) -> list[dict]:
         project["queue_count"] += len(orch.get("queue", []))
         if not orch.get("gone", False):
             name = orch.get("name") or key.split("/", 1)[-1]
-            project["rows"].append({"node": orch, "kind": "ORCH", "path": [name], "orphan": False, "group": key, "group_name": name})
+            project["rows"].append({"node": orch, "kind": "ORCH", "path": [name], "orphan": False, "group": key, "group_name": name, "title": pane_titles.get(str(orch.get("pane")), "")})
 
     for key, agent in data.get("agents", {}).items():
         project_path = str(agent.get("project", ""))
@@ -104,7 +168,7 @@ def build_projects(data: dict) -> list[dict]:
             parts = [owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
             group = owner_key
             group_name = owner.get("name") or owner_key.split("/", 1)[-1]
-        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan, "group": group, "group_name": group_name})
+        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan, "group": group, "group_name": group_name, "title": pane_titles.get(str(agent.get("pane")), "")})
 
     result = list(projects.values())
     for project in result:
@@ -122,19 +186,11 @@ def row_sort_key(row: dict) -> tuple:
 def status_cell(row: dict, enabled: bool) -> str:
     if row["kind"] == "ORCH" and row["node"].get("paused"):
         held = int(row["node"]["paused"].get("count", 0))
-        return color(f"PAUSED {held}", "1;33", enabled)
+        return color(f"PAUSED {held}", "amber", enabled, terminal_color_mode())
     status = str(row["node"].get("status", "unknown")).lower()
-    display_status = status if status in STATUS_GLYPHS else "unknown"
-    glyph = STATUS_GLYPHS[display_status]
-    label = f"{glyph} {display_status.upper()}"
-    if status == "closed":
-        if row["orphan"]:
-            label += " *"
-        return color(label, STATUS_COLORS["closed"], enabled)
-    if row["orphan"]:
-        label += " *"
-        return color(label, "1;35", enabled)
-    return color(label, STATUS_COLORS.get(status, STATUS_COLORS["unknown"]), enabled)
+    display_status = status if status in STATUS_COLORS else "unknown"
+    role = STATUS_COLORS[display_status]
+    return color(status, role, enabled, terminal_color_mode())
 
 
 def runtime_label(row: dict) -> str:
@@ -225,9 +281,13 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool, runtime_w
 
 
 def footer(registry: str, refreshed_at: str, width: int) -> str:
-    clock = re.search(r"\d{2}:\d{2}:\d{2}", refreshed_at)
-    short_time = clock.group(0) if clock else refreshed_at[-8:]
-    return truncate(f"refreshed {short_time}", width)
+    return padded_line("q quit", width)
+
+
+def padded_line(value: str, width: int) -> str:
+    inner = max(0, width - 4)
+    value = truncate(value, inner)
+    return f"  {value}{' ' * max(0, inner - display_width(value))}  "
 
 
 def count_label(count: int, singular: str, plural: str) -> str:
@@ -248,90 +308,95 @@ def visible_rows(projects: list[dict], now: float) -> list[dict]:
 
 
 def agent_lines(row: dict, width: int, enabled: bool, last: bool) -> list[str]:
-    state_width = 11 if width < 84 else STATE_WIDTH
-    state = truncate(status_cell(row, enabled), state_width)
-    connector = "└─" if last else "├─"
     name = str(row["node"].get("name") or row["path"][-1])
-    prefix = f"{state}{' ' * max(0, state_width - display_width(state))} |   {connector} "
-    continuation = " " * display_width(prefix)
-    available = max(1, width - display_width(prefix))
-    chunks = []
-    current = ""
-    for char in name:
-        if current and display_width(current + char) > available:
-            chunks.append(current)
-            current = ""
-        current += char
-    if current or not chunks:
-        chunks.append(current)
-    return [truncate((prefix if index == 0 else continuation) + chunk, width) for index, chunk in enumerate(chunks)]
+    connector = "└ " if last else "├ "
+    if row.get("orphan"):
+        connector = "* "
+    return [format_row(connector + name, status_cell(row, enabled), "", row.get("title", ""), width)]
+
+
+def column_widths(width: int) -> tuple[int, int, int, int]:
+    available = max(1, width - 4 - 6)
+    if available < 50:
+        name = max(1, available * 38 // 100)
+        status = max(1, available * 22 // 100)
+        project = max(1, available * 23 // 100)
+    else:
+        name = min(30, max(22, available // 3))
+        status = 12
+        project = 16
+    title = max(1, available - name - status - project)
+    return name, status, project, title
+
+
+def format_row(name: str, status: str, project: str, title: str, width: int) -> str:
+    widths = column_widths(width)
+    values = (name, status, project, title)
+    cells = [truncate(value, limit) for value, limit in zip(values, widths)]
+    plain = "  ".join(f"{value}{' ' * max(0, limit - display_width(value))}" for value, limit in zip(cells, widths))
+    return padded_line(plain, width)
 
 
 def orch_section(row: dict, agents: list[dict], project_name: str, multiple_projects: bool, width: int, enabled: bool) -> list[str]:
     node = row["node"]
-    status = status_cell(row, enabled)
     name = str(node.get("name") or row["group_name"])
-    if multiple_projects:
-        name = f"{name} · {project_name}"
-    runtime = runtime_label(row)
-    state_width = 11 if width < 84 else STATE_WIDTH
-    suffix = f" | {runtime}"
-    name_width = max(0, width - state_width - 3 - display_width(suffix))
-    section_name = truncate(name, name_width)
-    heading = f"{status}{' ' * max(0, state_width - display_width(status))} | {section_name}{suffix}"
-    lines = [truncate(heading, width)]
+    status = status_cell(row, enabled)
+    queue = len(node.get("queue", []))
+    if node.get("paused"):
+        status = color(f"PAUSED {int(node['paused'].get('count', 0))}", "amber", enabled, terminal_color_mode())
+    else:
+        status += color(f"  Q:{queue}", "amber", enabled, terminal_color_mode())
+    lines = [format_row("▾ " + name, status, project_name, row.get("title", ""), width)]
     for index, agent in enumerate(agents):
         lines.extend(agent_lines(agent, width, enabled, index == len(agents) - 1))
     return lines
 
 
-def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None, now: float | None = None) -> str:
+def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None, now: float | None = None, pane_titles: dict[str, str] | None = None) -> str:
     if now is None:
         now = time.time()
-    projects = build_projects(data)
+    projects = build_projects(data, pane_titles)
     rows = visible_rows(projects, now)
     orch_rows = [row for row in rows if row["kind"] == "ORCH"]
     agent_rows = [row for row in rows if row["kind"] == "AGENT"]
     orch_count = len(orch_rows)
     agent_count = sum(str(row["node"].get("status", "unknown")).lower() != "closed" for row in agent_rows)
-    project_names = {project["path"]: project["name"] for project in projects}
-    multiple_projects = len(projects) > 1
-    heading = f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}"
-    if display_width(heading) > width:
-        heading = f"ORCH · {len(projects)}P · {orch_count}O · {agent_count}A"
+    stamp = re.search(r"\d{2}:\d{2}:\d{2}", refreshed_at)
+    last = stamp.group(0) if stamp else refreshed_at[-8:]
     lines = [
-        truncate(color(heading, "1;37", enabled), width),
-        "-" * width,
+        padded_line(color(f"orch board v{BOARD_VERSION}", "header", enabled, terminal_color_mode()), width),
+        padded_line(f"refresh: {REFRESH_SECONDS}s · last: {last}", width),
+        padded_line(f"Status: All · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", width),
+        "",
+        padded_line("  ".join(("Name", "Status", "Project", "Title")), width),
+        padded_line("─" * max(1, width - 4), width),
+        "",
     ]
     if error:
-        lines.append(truncate(color(f"Registry read failed: {error}", "1;31", enabled), width))
+        lines.append(padded_line(color(f"Registry read failed: {error}", "blocked", enabled, terminal_color_mode()), width))
     elif not projects:
-        lines.append(truncate("No projects or agents registered.", width))
+        lines.append(padded_line("No projects or agents registered.", width))
     elif not orch_rows and not agent_rows:
-        lines.append(truncate("No live orchs or agents.", width))
+        lines.append(padded_line("No live orchs or agents.", width))
     else:
-        sections = []
-        for orch in orch_rows:
-            project_name = project_names.get(str(orch["node"].get("project", "")), "unknown project")
-            agents = sorted((agent for agent in agent_rows if agent["group"] == orch["group"] and not agent["orphan"]), key=row_sort_key)
-            sections.append((project_name.casefold(), str(orch["node"].get("name") or orch["group_name"]).casefold(), orch, agents, project_name))
-        sections.sort(key=lambda section: (section[0], section[1]))
-        for _, _, orch, agents, project_name in sections:
-            lines.extend(orch_section(orch, agents, project_name, multiple_projects, width, enabled))
-            lines.append("")
-        orphan_rows = sorted((row for row in agent_rows if row["orphan"]), key=lambda row: (project_names.get(str(row["node"].get("project", "")), "unknown project").casefold(), *row_sort_key(row)))
-        if orphan_rows:
-            lines.append("ORPHANS")
-            for index, row in enumerate(orphan_rows):
-                lines.extend(agent_lines(row, width, enabled, index == len(orphan_rows) - 1))
-        elif not sections:
-            lines.append(truncate("No live orchs or agents.", width))
-    for project in projects:
-        if project["queue_count"]:
-            label = count_label(project["queue_count"], "queued notice", "queued notices")
-            lines.append(truncate(color(f"{project['name']} · {label}", "1;36", enabled), width))
-    while lines and lines[-1] == "":
-        lines.pop()
+        for project in projects:
+            queue_label = f" · {project['queue_count']} queued" if project["queue_count"] else ""
+            heading = color(f"{project['name']}{queue_label}", "app", enabled, terminal_color_mode())
+            lines.append(padded_line(heading, width))
+            rows = visible_rows([project], now)
+            orchs = [row for row in rows if row["kind"] == "ORCH"]
+            agents = [row for row in rows if row["kind"] == "AGENT"]
+            for orch in sorted(orchs, key=row_sort_key):
+                children = sorted((agent for agent in agents if agent["group"] == orch["group"] and not agent["orphan"]), key=row_sort_key)
+                lines.extend(orch_section(orch, children, project["name"], False, width, enabled))
+            orphans = sorted((row for row in agents if row["orphan"]), key=row_sort_key)
+            if orphans:
+                lines.append(padded_line(color("orphans", "orphan", enabled, terminal_color_mode()), width))
+                for index, row in enumerate(orphans):
+                    lines.extend(agent_lines(row, width, enabled, index == len(orphans) - 1))
+            if project is not projects[-1]:
+                lines.append("")
+    lines.append("")
     lines.append(footer(registry, refreshed_at, width))
     return "\n".join(lines)
 
@@ -349,22 +414,24 @@ class Board:
         self.data = {"version": 1, "orchs": {}, "agents": {}}
         self.error = None
         self.now = time.time
+        self.titles = {}
 
     def set_width(self, width: int) -> bool:
         if width == self.width:
             return False
         self.width = width
         if self.loaded:
-            self.output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error)
+            self.output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error, pane_titles=self.titles)
         return True
 
     def refresh(self) -> bool:
+        self.titles = read_pane_titles() if os.environ.get("HERDR_ENV") else {}
         try:
             mtime_ns = self.path.stat().st_mtime_ns
         except OSError:
             mtime_ns = None
         if self.loaded and mtime_ns == self.mtime_ns:
-            output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error, now=self.now())
+            output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error, now=self.now(), pane_titles=self.titles)
             changed = output != self.output
             self.output = output
             return changed
@@ -380,7 +447,7 @@ class Board:
         self.data = data
         self.error = error
         self.refreshed_at = self.clock()
-        self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error, now=self.now())
+        self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error, now=self.now(), pane_titles=self.titles)
         return True
 
 

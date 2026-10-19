@@ -195,6 +195,30 @@ def current_pane():
         fail("could not resolve current pane; re-run orch register from the orch pane")
     return pane
 
+def pane_has_running_agent(pane):
+    succeeded,response=herdr("agent","get",pane,check=False,return_status=True)
+    if not succeeded: return False
+    agent=result(response,"result","agent")
+    status=agent.get("agent_status") or agent.get("status")
+    return bool(agent) and status not in ("done","closed")
+
+def board_command(a):
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        succeeded,response=herdr("pane","current","--current",check=False,return_status=True)
+        pane=result(response,"result","pane").get("pane_id") if succeeded else None
+        if not isinstance(pane,str) or not pane: pane=None
+        if pane and not pane_has_running_agent(pane):
+            command=[sys.executable,str(Path(__file__).with_name("board.py"))]
+            if a.once: command.append("--once")
+            if a.width is not None: command.extend(["--width",str(a.width)])
+            completed=subprocess.run(command,check=False)
+            return completed.returncode
+    command=["herdr","plugin","action","invoke","board-full","--plugin","orch"]
+    opened=subprocess.run(command,text=True,capture_output=True,check=False)
+    if opened.returncode:
+        print(" ".join(command))
+    return 0
+
 def carry_delivery_state(recipient, donors, now=None):
     now = time.time() if now is None else now
     prompt_times = list(recipient.get("prompt_times", []))
@@ -398,6 +422,7 @@ def deregister():
 def parser():
     import argparse
     p=argparse.ArgumentParser(prog="orch"); sub=p.add_subparsers(dest="command",required=True)
+    b=sub.add_parser("board",help="show the orch board"); b.add_argument("--once",action="store_true"); b.add_argument("--width",type=int)
     r=sub.add_parser("register"); r.add_argument("--name")
     s=sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("--role",required=True,choices=["plan","build","review","explore"]); s.add_argument("--kind",required=True,choices=["claude","codex"]); s.add_argument("--model"); s.add_argument("--effort"); s.add_argument("--where",required=True,choices=["pane","tab","worktree"]); s.add_argument("--writes",action="store_true"); s.add_argument("--base"); s.add_argument("--brief",required=True,type=Path)
     ad=sub.add_parser("adopt"); ad.add_argument("target"); ad.add_argument("--role",choices=["plan","build","review","explore"]); ad.add_argument("--name")
@@ -406,7 +431,8 @@ def parser():
     sub.add_parser("deregister"); rs=sub.add_parser("resume"); rs.add_argument("--name"); return p
 def main(argv=None):
     a=parser().parse_args(argv)
-    if a.command=="register": register(a.name)
+    if a.command=="board": raise SystemExit(board_command(a))
+    elif a.command=="register": register(a.name)
     elif a.command=="spawn": spawn(a)
     elif a.command=="adopt": adopt(a)
     elif a.command=="list": list_agents(a)

@@ -21,6 +21,7 @@ stale, register again from the current pane.
 Run these commands from the registered orch pane inside Herdr:
 
 ```text
+orch board [--once] [--width COLUMNS]
 orch register [--name NAME]
 orch spawn NAME --role plan|build|review|explore --kind claude|codex [--model MODEL] [--effort EFFORT] --where pane|tab|worktree [--writes] [--base REF] --brief FILE
 orch adopt TARGET [--role plan|build|review|explore] [--name NAME]
@@ -29,6 +30,10 @@ orch close NAME [--keep-checkout] [--discard]
 orch deregister
 orch resume [--name ORCH]
 ```
+
+`orch board` runs in the current pane when stdin and stdout are interactive and the pane does not
+host a running agent. Otherwise it opens the full-screen overlay. If Herdr cannot open the overlay,
+the command prints the exact Herdr command to run.
 
 `orch list --idle --role ROLE` finds a reusable worker. `--all` lists agents across projects.
 `orch close` preflights worktrees and refuses to remove unmerged or dirty work unless `--discard`
