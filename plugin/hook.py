@@ -51,7 +51,10 @@ def notification(name, status, pane):
 
 def queue_notice(registry, orch_key, message):
     if orch_key in registry["orchs"]:
-        registry["orchs"][orch_key].setdefault("queue", []).append(message)
+        queue = registry["orchs"][orch_key].setdefault("queue", [])
+        queue[:] = orchlib.unique_messages(queue)
+        if message not in queue:
+            queue.append(message)
 
 
 def close_agent(registry, agent, pane, *, pane_closed):

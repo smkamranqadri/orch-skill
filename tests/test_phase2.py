@@ -12,6 +12,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = ROOT / "plugin" / "hook.py"
 CLI = ROOT / "plugin" / "orch"
 FIXTURES = ROOT / "tests" / "fixtures" / "herdr"
+sys.path.insert(0, str(ROOT / "plugin"))
+import hook
 SESSION = "orch-phase2-test"
 ORCH = f"{SESSION}/w2:p9"
 OTHER_ORCH = f"{SESSION}/w2:p8"
@@ -219,6 +221,29 @@ else:
         data = self.registry()
         self.assertEqual(data["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
         self.assertEqual(data["orchs"][OTHER_ORCH]["queue"], [])
+
+    def test_queue_notice_coalesces_duplicate_done_and_closed_messages(self):
+        fixture = json.loads((FIXTURES / "duplicate-pending-notices.json").read_text())
+        data = self.registry()
+        data["orchs"][ORCH]["queue"] = []
+        for message in fixture["queue"]:
+            hook.queue_notice(data, ORCH, message)
+        self.assertEqual(data["orchs"][ORCH]["queue"], fixture["unique_queue"])
+
+    def test_adoption_coalesces_duplicate_pending_notices_before_delivery(self):
+        fixture = json.loads((FIXTURES / "duplicate-pending-notices.json").read_text())
+        self.write_registry(worker_status="done")
+        data = self.registry()
+        data["orchs"][ORCH].update({"gone": True, "queue": fixture["queue"]})
+        data["agents"][f"{SESSION}/sample-worker"]["orch"] = OTHER_ORCH
+        self.registry_path.write_text(json.dumps(data))
+        adopter = f"{SESSION}/w2:p7"
+        self.write_herdr_state(**{"w2:p7": {"agent": "claude", "agent_status": "idle"}})
+        self.run_cli("register", "--name", "orch-adopter", env=self.env | {"HERDR_PANE_ID": "w2:p7"})
+        self.assertEqual(self.prompt_calls(), [["w2:p7", "\n".join(fixture["unique_queue"])]])
+        adopted = self.registry()
+        self.assertEqual(adopted["orchs"][ORCH]["queue"], [])
+        self.assertEqual(adopted["orchs"][adopter]["queue"], [])
 
     def test_repeated_status_queues_one_notice(self):
         self.write_herdr_state(**{"w2:p3": {"agent": "sample-worker", "agent_status": "blocked"}})

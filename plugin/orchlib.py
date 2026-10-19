@@ -68,6 +68,7 @@ def deliver(data):
     session=os.environ["HERDR_SESSION"] + "/"
     for key,orch in data["orchs"].items():
         if not key.startswith(session): continue
+        orch["queue"] = unique_messages(orch.get("queue", []))
         if orch.get("gone") or not orch.get("queue"): continue
         live=herdr("agent","get",orch["pane"],check=False) or {}
         live_agent=result(live,"result","agent")
@@ -76,6 +77,8 @@ def deliver(data):
         message="\n".join(orch["queue"])
         if herdr("agent","prompt",orch["pane"],message,check=False) is not None:
             orch["queue"].clear(); orch["status"]="working"
+def unique_messages(messages):
+    return list(dict.fromkeys(messages))
 def require_registered(data=None):
     key=session_key(os.environ.get("HERDR_PANE_ID", ""))
     if data is not None:
