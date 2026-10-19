@@ -1,0 +1,40 @@
+{
+  "id": "cli:agent:get",
+  "result": {
+    "agent": {
+      "agent": "codex",
+      "agent_session": {
+        "agent": "codex",
+        "kind": "id",
+        "source": "herdr:codex",
+        "value": "fixture-codex-session"
+      },
+      "agent_status": "idle",
+      "completion_seq": 8,
+      "cwd": "/workspace/fixture-project",
+      "focused": false,
+      "foreground_cwd": "/workspace/fixture-project",
+      "interactive_ready": true,
+      "name": "maple-worker",
+      "pane_id": "w2:p2",
+      "revision": 63,
+      "state_change_seq": 8,
+      "tab_id": "w2:t1",
+      "terminal_id": "term_65e22de9589473",
+      "terminal_title": "Ask about a fictional preference | orch-phase2-herdr",
+      "terminal_title_stripped": "Ask about a fictional preference | orch-phase2-herdr",
+      "tokens": {
+        "gap": "\u200b",
+        "harness_logo": "\ue1a1",
+        "logo": "\u200b  \ue1a1",
+        "sort_key": "000029872565",
+        "state_done": "\ue1c0",
+        "tab_key": "000029872565-w2:t1-0-000029872565",
+        "title_done": "\ue1c0 Ask about a fictional preference | orch-phase2-herdr",
+        "ws_key": "000029872565-w2-1-000029872565-w2"
+      },
+      "workspace_id": "w2"
+    },
+    "type": "agent_info"
+  }
+}

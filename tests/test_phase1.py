@@ -64,7 +64,7 @@ elif args[:2]==["worktree","remove"]:
  print(json.dumps({"result":{}}))
 elif args[:2]==["plugin","pane"]: print(json.dumps({"result":{"pane":{"pane_id":"board"}}}))
 elif args[:2]==["agent","list"]: print(json.dumps({"result":{"agents":[{"name":os.environ["LIVE_AGENT"]}] if os.environ.get("LIVE_AGENT") else []}}))
-elif args[:2]==["agent","get"]: print(json.dumps({"result":{"agent":{"status":os.environ.get("ORCH_STATUS","idle")}}}))
+elif args[:2]==["agent","get"]: print(json.dumps({"result":{"agent":{"agent_status":os.environ.get("ORCH_STATUS","idle")}}}))
 elif args[:2]==["agent","prompt"] and os.environ.get("FAIL_PROMPT")=="1": print("prompt failed",file=sys.stderr); sys.exit(2)
 else: print(json.dumps({"result":{}}))
 '''); fake.chmod(0o755)

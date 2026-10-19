@@ -38,13 +38,17 @@ def save_registry(path,data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def herdr(*args,check=True,missing_workspace_ok=False):
+def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False):
     p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
         fail(f"herdr {' '.join(map(str,args))} failed: {error}")
-    if p.returncode: return None
+    if p.returncode:
+        if not return_errors: return None
+        output=(p.stdout or p.stderr).strip()
+        try: return json.loads(output)
+        except json.JSONDecodeError: return {"error":{"code":"command_failed","message":output or f"exit {p.returncode}"}}
     if not p.stdout.strip(): return {}
     try: return json.loads(p.stdout)
     except json.JSONDecodeError: return {"raw":p.stdout.strip()}
@@ -66,7 +70,8 @@ def deliver(data):
         if not key.startswith(session): continue
         if orch.get("gone") or not orch.get("queue"): continue
         live=herdr("agent","get",orch["pane"],check=False) or {}
-        status=(result(live,"result","agent").get("status") or result(live,"result").get("status") or "unknown")
+        live_agent=result(live,"result","agent")
+        status=live_agent.get("agent_status") or live_agent.get("status") or result(live,"result").get("agent_status") or result(live,"result").get("status") or "unknown"
         if status not in ("idle","done"): continue
         message="\n".join(orch["queue"])
         if herdr("agent","prompt",orch["pane"],message,check=False) is not None:
@@ -135,7 +140,7 @@ def spawn(a):
         if a.name in agent_names(live): fail(f"agent already exists in Herdr: {a.name}")
         destination=tree if a.where!="worktree" else str((Path(project)/f"../{Path(project).name}.wt/{a.name}").resolve())
         if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
-        d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False}
+        d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False}
         save_registry(registry_path(),d)
         try:
             if a.where=="pane":
@@ -190,8 +195,10 @@ def close_agent(a):
         require_registered(d)
         key=session_key(a.name); agent=d["agents"].get(key)
         if not agent: fail(f"unknown agent: {a.name}")
-        if agent.get("state")=="closed":
+        if agent.get("state")=="closed" and not agent.get("created"):
             deliver(d); return
+        if agent.get("state")=="closed":
+            agent["state"]="cleanup"; agent["agent_closed"]=True
         wt=agent.get("worktree")
         if wt and Path(wt).exists() and not a.discard:
             base=subprocess.run(["git","merge-base","--is-ancestor",agent["branch"],"HEAD"],cwd=os.getcwd(),capture_output=True)
@@ -200,7 +207,7 @@ def close_agent(a):
                 log=subprocess.run(["git","log","--oneline",f"HEAD..{agent['branch']}"],text=True,capture_output=True).stdout.strip()
                 fail(f"close refused; unmerged commits: {log or '(none)'}; dirty paths: {status.stdout.strip() or '(none)'}")
         agent["state"]="closing"; save_registry(registry_path(),d)
-        if agent.get("started") and not agent.get("stopped"):
+        if agent.get("started") and not agent.get("stopped") and not agent.get("agent_closed"):
             herdr("agent","send-keys",a.name,"ctrl+c"); agent["stopped"]=True; save_registry(registry_path(),d)
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
