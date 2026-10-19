@@ -214,6 +214,30 @@ class BoardTests(unittest.TestCase):
                 rows = [board.ANSI_RE.sub("", line) for line in lines if re.match(r"(?:!|▶|○|✓|×|\?) ", board.ANSI_RE.sub("", line))]
                 self.assertEqual(rows, wanted)
 
+    def test_project_queue_total_survives_owner_close_and_closed_row_expiry(self):
+        project = "/fictional/retained-garden"
+        data = {
+            "version": 1,
+            "orchs": {"session-fixture/pane": {
+                "project": project, "name": "orch", "kind": "claude", "pane": "pane",
+                "gone": False, "queue": ["fictional retained notice"], "status": "idle",
+            }},
+            "agents": {"session-fixture/worker": {
+                "project": project, "name": "retained-worker", "orch": "session-fixture/pane",
+                "kind": "claude", "status": "closed", "closed_at": 1000.0,
+            }},
+        }
+        def queue_totals():
+            output = board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0)
+            return [line for line in output.splitlines() if line.endswith("queued notice")]
+
+        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
+        data["orchs"]["session-fixture/pane"]["gone"] = True
+        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
+        data["agents"]["session-fixture/worker"]["closed_at"] = 399.0
+        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
+        self.assertNotIn("retained-worker", board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0))
+
     def test_expired_orphan_is_hidden_and_empty_project_and_queue_are_preserved(self):
         data = {
             "version": 1, "orchs": {},
@@ -268,6 +292,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
             67: [
                 "○ IDLE      | amber-lead-orch · fictional-amber-gar… | claude · Q:1",
@@ -286,6 +311,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
             100: [
                 "○ IDLE             | amber-lead-orch · fictional-amber-garden | claude · Q:1",
@@ -303,6 +329,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
             160: [
                 "○ IDLE             | amber-lead-orch · fictional-amber-garden | claude · Q:1",
@@ -320,6 +347,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
         }
         for width, wanted_rows in expected.items():
@@ -480,6 +508,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
             60: [
                 "○ IDLE      | amber-lead-orch · fictional-am… | claude · Q:1",
@@ -498,6 +527,7 @@ class BoardTests(unittest.TestCase):
                 "ORPHANS",
                 "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
                 "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
+                "fictional-amber-garden · 1 queued notice",
             ],
         }
         for width, wanted_rows in expected.items():
@@ -590,7 +620,11 @@ class BoardTests(unittest.TestCase):
     def test_q_exits_after_initial_render(self):
         process, master = self.start_pty(100)
         try:
-            self.read_pty(master, 0.3)
+            initial = ""
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and "-" * 100 not in initial:
+                initial += self.read_pty(master, min(0.1, deadline - time.monotonic()))
+            self.assertIn("-" * 100, initial)
             os.write(master, b"xq")
             process.wait(timeout=2)
             self.assertEqual(process.returncode, 0)

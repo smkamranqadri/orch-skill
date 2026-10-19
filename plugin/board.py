@@ -326,6 +326,10 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
                 lines.extend(agent_lines(row, width, enabled, index == len(orphan_rows) - 1))
         elif not sections:
             lines.append(truncate("No live orchs or agents.", width))
+    for project in projects:
+        if project["queue_count"]:
+            label = count_label(project["queue_count"], "queued notice", "queued notices")
+            lines.append(truncate(color(f"{project['name']} · {label}", "1;36", enabled), width))
     while lines and lines[-1] == "":
         lines.pop()
     lines.append(footer(registry, refreshed_at, width))
