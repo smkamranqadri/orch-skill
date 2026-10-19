@@ -65,7 +65,14 @@ elif args[:2]==["worktree","remove"]:
  print(json.dumps({"result":{}}))
 elif args[:2]==["plugin","pane"]: print(json.dumps({"result":{"pane":{"pane_id":"board"}}}))
 elif args[:2]==["agent","list"]: print(json.dumps({"result":{"agents":[{"name":os.environ["LIVE_AGENT"]}] if os.environ.get("LIVE_AGENT") else []}}))
-elif args[:2]==["agent","get"]: print(json.dumps({"result":{"agent":{"agent_status":os.environ.get("ORCH_STATUS","idle")}}}))
+elif args[:2]==["agent","get"]:
+ catalog=os.environ.get("AGENT_CATALOG")
+ if catalog:
+  agents=json.load(open(catalog)); target=args[2] if len(args)>2 else ""
+  agent=next((x for x in agents if target in (x.get("name"),x.get("pane_id"))),None)
+  if not agent: print("unknown target",file=sys.stderr); sys.exit(3)
+  print(json.dumps({"result":{"agent":agent}}))
+ else: print(json.dumps({"result":{"agent":{"agent_status":os.environ.get("ORCH_STATUS","idle")}}}))
 elif args[:2]==["agent","prompt"] and os.environ.get("FAIL_PROMPT")=="1": print("prompt failed",file=sys.stderr); sys.exit(2)
 else: print(json.dumps({"result":{}}))
 '''); fake.chmod(0o755)
@@ -79,6 +86,8 @@ else: print(json.dumps({"result":{}}))
   return p
  def calls(self): return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
  def state(self): return json.loads((self.home/'orch/registry.json').read_text())
+ def catalog(self,*agents):
+  path=self.root/'agent-catalog.json'; path.write_text(json.dumps(list(agents))); return self.env|{'AGENT_CATALOG':str(path)}
  def reg(self,pane='p1',session='session-a',cwd=None):
   e=self.env|{'HERDR_PANE_ID':pane,'HERDR_SESSION':session}; self.runcli('register',env=e,cwd=cwd)
  def spawn(self,name='worker',where='pane',kind='claude',extra=()):
@@ -91,6 +100,32 @@ else: print(json.dumps({"result":{}}))
   self.runcli('register'); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls())
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_BOARD_DIRECTION':'down'}); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p2','--direction','down'],self.calls())
   before=self.calls(); result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'p3','ORCH_BOARD_DIRECTION':'left'}); self.assertEqual(result.stderr.strip(),"orch: ORCH_BOARD_DIRECTION must be 'right' or 'down'"); self.assertEqual(self.calls(),before)
+ def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
+  self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle'}; env=self.catalog(agent)
+  self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']
+  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[]))
+  self.assertIn(['agent','get','p7'],self.calls()); self.assertEqual(self.runcli('list').stdout,'build\torch-builder\tidle\tadopted\n')
+  self.runcli('adopt','fictional-builder','--role','build','--name','orch-builder',env=env); self.assertEqual(self.state()['agents']['session-a/orch-builder'],row)
+ def test_adopt_rejects_unknown_foreign_and_unregistered(self):
+  self.reg()
+  agent={'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}
+  unknown=self.runcli('adopt','missing-agent',ok=False,env=self.catalog(agent)); self.assertEqual(unknown.stderr.strip(),'orch: unknown agent or pane: missing-agent')
+  foreign=dict(agent,workspace_id='ws-other'); other=self.runcli('adopt','p8',ok=False,env=self.catalog(foreign)); self.assertEqual(other.stderr.strip(),'orch: cannot adopt an agent from another session')
+  unregistered=self.runcli('adopt','p8',ok=False,env=self.catalog(agent)|{'HERDR_PANE_ID':'p9'}); self.assertEqual(unregistered.stderr.strip(),'orch: caller is not a registered orch')
+  self.assertNotIn('session-a/fictional-reviewer',self.state()['agents'])
+ def test_adopt_refuses_agent_owned_by_another_live_orch(self):
+  self.reg(); d=self.state(); d['orchs']['session-a/p2']={'project':str(self.repo),'pane':'p2','workspace':'ws1','gone':False,'queue':[]}; d['agents']['session-a/owned']={'name':'owned','pane':'p8','orch':'session-a/p2','created':[],'state':'live'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
+  p=self.runcli('adopt','p8',ok=False,env=self.catalog({'name':'owned','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'idle'})); self.assertEqual(p.stderr.strip(),'orch: agent already owned by a live orch: owned')
+ def test_adopted_close_only_deregisters_even_with_discard(self):
+  self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8','--role','review',env=env)
+  d=self.state(); d['agents']['session-a/fictional-reviewer']['created']=['pane:p8','tab:tab8']; d['agents']['session-a/fictional-reviewer']['started']=True; (self.home/'orch/registry.json').write_text(json.dumps(d)); before=self.calls()
+  self.runcli('close','fictional-reviewer','--discard'); self.assertEqual(self.calls(),before); row=self.state()['agents']['session-a/fictional-reviewer']; self.assertEqual((row['state'],row['status'],row['created']),('closed','closed',['pane:p8','tab:tab8']))
+ def test_adopted_agent_hook_notice_routes_to_registered_owner(self):
+  self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8','--role','review',env=env)
+  catalog_path=pathlib.Path(env['AGENT_CATALOG']); catalog=json.loads(catalog_path.read_text()); catalog[0]['agent_status']='done'; catalog_path.write_text(json.dumps(catalog))
+  event_env=env|{'HERDR_PLUGIN_EVENT':'pane.agent_status_changed','HERDR_PLUGIN_EVENT_JSON':json.dumps({'pane_id':'p8'}),'ORCH_STATUS':'working'}
+  result=subprocess.run(['python3',str(ROOT/'plugin'/'hook.py')],env=event_env,cwd=ROOT,text=True,capture_output=True); self.assertEqual(result.returncode,0,result.stderr)
+  d=self.state(); self.assertEqual(d['agents']['session-a/fictional-reviewer']['orch'],'session-a/p1'); self.assertEqual(d['orchs']['session-a/p1']['queue'],['[orch] fictional-reviewer done · pane p8 · read: herdr agent read fictional-reviewer'])
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])
