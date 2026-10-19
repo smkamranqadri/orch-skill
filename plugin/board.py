@@ -17,7 +17,8 @@ from pathlib import Path
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3}
-STATUS_COLORS = {"blocked": "1;31", "working": "32", "idle": "36", "done": "32", "unknown": "33"}
+STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓", "unknown": "?"}
+STATUS_COLORS = {"blocked": "1;31", "working": "1;34", "idle": "36", "done": "32", "unknown": "33"}
 
 
 def color(value: str, code: str, enabled: bool) -> str:
@@ -108,12 +109,11 @@ def row_sort_key(row: dict) -> tuple:
 
 def status_cell(row: dict, enabled: bool) -> str:
     status = str(row["node"].get("status", "unknown")).lower()
-    label = status.upper()
+    glyph = STATUS_GLYPHS.get(status, STATUS_GLYPHS["unknown"])
+    label = f"{glyph} {status.upper()}"
     if row["orphan"]:
         label += " *"
         return color(label, "1;35", enabled)
-    if status == "blocked":
-        label += " !"
     return color(label, STATUS_COLORS.get(status, STATUS_COLORS["unknown"]), enabled)
 
 
@@ -200,7 +200,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     agent_count = sum(row["kind"] == "AGENT" for project in projects for row in project["rows"])
     lines = [
         truncate(color(f"ORCH BOARD · {len(projects)} projects · {orch_count} orchs · {agent_count} agents", "1;37", enabled), width),
-        truncate("Legend: ! blocked; * orphan; working; idle; done; unknown", width),
+        truncate(legend(width), width),
         "-" * width,
     ]
     if error:
