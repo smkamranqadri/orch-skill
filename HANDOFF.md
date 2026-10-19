@@ -1,9 +1,9 @@
 # Cycle 2 review-fix handoff
 
-Branch: `cycle2`  
-Date: 2026-10-19  
-Push: not performed.  
-KIS: unchanged as instructed.  
+Branch: `cycle2`
+Date: 2026-10-19
+Push: not performed.
+KIS: unchanged as instructed.
 Live Herdr panes: not opened, closed, or moved. Plugin link state was not changed.
 
 ## Fix commits
@@ -11,6 +11,7 @@ Live Herdr panes: not opened, closed, or moved. Plugin link state was not change
 ```text
 9e495f9 fix(board): reserve worker identity in narrow layouts
 3fbc255 fix(orch): scope adoption ownership to session and pane
+2ef0fa4 fix(orch): prune stale pane rows during idempotent adopt
 ```
 
 ## Changes
@@ -19,13 +20,14 @@ Live Herdr panes: not opened, closed, or moved. Plugin link state was not change
 - Same-session agents can be adopted across workspace IDs. Foreign session targets stay unresolvable through Herdr’s session-scoped lookup.
 - Closing an adopted agent retains the safe external-resource early return and releases the pane for a later adoption. New and idempotent adoption successes retry queued delivery under the registry lock; failed prompts leave the queue intact.
 - Board layout reserves the state field, separators, up to six owner columns, and up to twenty worker-leaf columns before showing HOST / MODEL. Runtime is omitted if fewer than twelve columns remain and capped to the available width. Long worker names retain their suffix; orphan rows keep their status rank.
+- Idempotent adoption removes stale tombstones before returning, keeping at most one active registry row for a session and pane.
 - Added regression tests for the eight reviewer findings, including exact 50/60/67 layouts with shared worker prefixes, session collisions, alias consistency, tombstone reuse, retry delivery, and orphan ordering.
 
 ## Verification
 
-Command: `./tests/run.sh`  
-Exit: 0  
-Result: 106 tests passed in 38.319s. The exact full output follows.
+Command: `./tests/run.sh`
+Exit: 0
+Result: 107 tests passed in 34.955s. The exact full output follows.
 
 ```text
 test_blocked_and_orphan_rows_use_distinct_styles_and_markers (test_board.BoardTests.test_blocked_and_orphan_rows_use_distinct_styles_and_markers) ... ok
@@ -90,6 +92,7 @@ test_fake_herdr_rejects_worktree_workspace_and_cwd_together (test_phase1.PhaseOn
 test_fixture_git_environment_is_isolated (test_phase1.PhaseOne.test_fixture_git_environment_is_isolated) ... ok
 test_foreign_session_orphan_is_not_adopted (test_phase1.PhaseOne.test_foreign_session_orphan_is_not_adopted) ... ok
 test_foreign_session_pane_collision_does_not_block_adoption (test_phase1.PhaseOne.test_foreign_session_pane_collision_does_not_block_adoption) ... ok
+test_idempotent_adoption_removes_stale_pane_tombstones (test_phase1.PhaseOne.test_idempotent_adoption_removes_stale_pane_tombstones) ... ok
 test_linked_worktree_project_resolution (test_phase1.PhaseOne.test_linked_worktree_project_resolution) ... ok
 test_list_role_idle_filters (test_phase1.PhaseOne.test_list_role_idle_filters) ... ok
 test_liveness_reconcile_marks_missing_orch_gone (test_phase1.PhaseOne.test_liveness_reconcile_marks_missing_orch_gone) ... ok
@@ -137,14 +140,14 @@ test_queue_notice_coalesces_duplicate_done_and_closed_messages (test_phase2.Phas
 test_repeated_status_queues_one_notice (test_phase2.PhaseTwo.test_repeated_status_queues_one_notice) ... ok
 
 ----------------------------------------------------------------------
-Ran 106 tests in 38.319s
+Ran 107 tests in 34.955s
 
 OK
 ```
 
 ## Mutation checks
 
-Each literal mutation made its named test fail. The changed file was restored from saved bytes and verified byte-identical with `cmp` before moving on.
+Each of the 14 literal mutations made its named test fail. The changed file was restored from saved bytes and verified byte-identical with `cmp` before moving on.
 
 | Guard | Mutation | Test result | Restore |
 |---|---|---|---|
@@ -157,6 +160,7 @@ Each literal mutation made its named test fail. The changed file was restored fr
 | Adopted close safety | Bypassed close’s adopted-agent external-resource early return. | `test_adopted_close_only_deregisters_even_with_discard` failed | Byte-identical (`cmp`) |
 | New adoption delivery | Removed pending delivery on the new-adoption success path. | `test_adoption_retries_pending_delivery_on_new_and_idempotent_success` failed | Byte-identical (`cmp`) |
 | Idempotent adoption delivery | Removed pending delivery on the idempotent success path. | `test_adoption_retries_pending_delivery_on_new_and_idempotent_success` failed | Byte-identical (`cmp`) |
+| Idempotent stale-row cleanup | Removed stale pane tombstone pruning from the idempotent success path. | `test_idempotent_adoption_removes_stale_pane_tombstones` failed | Byte-identical (`cmp`) |
 | Orphan status ranking | Forced orphan rows to a fixed rank ahead of status ordering. | `test_orphan_rows_keep_status_order` failed | Byte-identical (`cmp`) |
 | Worker leaf reservation | Reduced the reserved worker leaf from 20 to 6 columns. | `test_runtime_reserves_owner_separator_and_worker_leaf_at_50_60_and_67` failed | Byte-identical (`cmp`) |
 | Suffix-preserving truncation | Replaced middle truncation with prefix-only truncation. | `test_runtime_reserves_owner_separator_and_worker_leaf_at_50_60_and_67` failed | Byte-identical (`cmp`) |
@@ -180,6 +184,7 @@ cycle2-garden · 0 queued notices
 ▶ WORKING *        | ORPHAN > fictional-orphan-worker                        | claude
 refreshed 11:20:40
 ```
+
 ### 67 columns
 
 ```text
@@ -194,6 +199,7 @@ cycle2-garden · 0 queued notices
 ▶ WORKING * | ORPHAN > fictional-…an-worker | claude
 refreshed 11:20:40
 ```
+
 ### 60 columns
 
 ```text
@@ -208,6 +214,7 @@ cycle2-garden · 0 queued notices
 ▶ WORKING * | ORPHAN > fictional-…an-worker | claude
 refreshed 11:20:40
 ```
+
 ### 50 columns
 
 ```text
