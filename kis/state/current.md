@@ -1,12 +1,12 @@
 # Current
 
-Stamp: main 6f7df41 3b13b9288f59
+Stamp: main b476b61 86687d22ccf2
 
 - Branch: `main` (phases 1, 2, 4, the live fixes and cycle 2 merged, local only; old build in
   `archive/`). `main` is far ahead of `origin/main` (not pushed). `phase3-board-design` holds
   throwaway mockups, not merged.
-- Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-5 built and merged (phase 5: skill plus the notice cap, not reviewed by the reviewer,
-  orchestrator read the skill and the cap code).
+- Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-5 built and merged (phase 5: skill plus the notice cap; reviewed once, 1 P1 + 2 P2 fixed in 73f8080,
+  merged, 123 tests; the fixes were not re-reviewed).
   Cycle 2 (owner's board polish, `orch adopt`, `board-full` overlay action) merged. Next: the
   owner's live checks, then Phase 6 (release).
 - Blocker: none.
