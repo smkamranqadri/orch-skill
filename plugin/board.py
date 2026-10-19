@@ -193,6 +193,17 @@ def status_cell(row: dict, enabled: bool) -> str:
     return color(status, role, enabled, terminal_color_mode())
 
 
+def orch_status_text(row: dict) -> str:
+    node = row["node"]
+    status = str(node.get("status", "unknown")).lower()
+    if status not in STATUS_COLORS:
+        status = "unknown"
+    queue_count = len(node.get("queue", []))
+    if node.get("paused"):
+        return f"PAUSED {int(node['paused'].get('count', 0))}  Q:{queue_count}"
+    return f"{status}  Q:{queue_count}"
+
+
 def runtime_label(row: dict) -> str:
     node = row["node"]
     host = str(node.get("kind", node.get("host", "unknown")))
@@ -307,38 +318,37 @@ def visible_rows(projects: list[dict], now: float) -> list[dict]:
     ]
 
 
-def agent_lines(row: dict, width: int, enabled: bool, last: bool) -> list[str]:
+def agent_lines(row: dict, width: int, enabled: bool, last: bool, status_width: int | None = None) -> list[str]:
     name = str(row["node"].get("name") or row["path"][-1])
     connector = "└ " if last else "├ "
     if row.get("orphan"):
         connector = "* "
-    return [format_row(connector + name, status_cell(row, enabled), "", row.get("title", ""), width)]
+    return [format_row(connector + name, status_cell(row, enabled), "", row.get("title", ""), width, status_width)]
 
 
-def column_widths(width: int) -> tuple[int, int, int, int]:
+def column_widths(width: int, required_status_width: int = 12) -> tuple[int, int, int, int]:
     available = max(1, width - 4 - 6)
+    status = min(max(12, required_status_width), max(1, available - 3))
     if available < 50:
-        status = min(12, max(1, available - 3))
         remaining = max(3, available - status)
         name = min(13, max(1, remaining // 3 + 2))
         project = min(10, max(1, remaining // 3))
     else:
         name = min(30, max(22, available // 3))
-        status = 12
         project = 16
     title = max(1, available - name - status - project)
     return name, status, project, title
 
 
-def format_row(name: str, status: str, project: str, title: str, width: int) -> str:
-    widths = column_widths(width)
+def format_row(name: str, status: str, project: str, title: str, width: int, status_width: int | None = None) -> str:
+    widths = column_widths(width, status_width or 12)
     values = (name, status, project, title)
     cells = [truncate(value, limit) for value, limit in zip(values, widths)]
     plain = "  ".join(f"{value}{' ' * max(0, limit - display_width(value))}" for value, limit in zip(cells, widths))
     return padded_line(plain, width)
 
 
-def orch_section(row: dict, agents: list[dict], project_name: str, multiple_projects: bool, width: int, enabled: bool) -> list[str]:
+def orch_section(row: dict, agents: list[dict], project_name: str, multiple_projects: bool, width: int, enabled: bool, status_width: int | None = None) -> list[str]:
     node = row["node"]
     name = str(node.get("name") or row["group_name"])
     status = status_cell(row, enabled)
@@ -347,9 +357,11 @@ def orch_section(row: dict, agents: list[dict], project_name: str, multiple_proj
         status = color(f"PAUSED {int(node['paused'].get('count', 0))}", "amber", enabled, terminal_color_mode())
     else:
         status += color(f"  Q:{queue}", "amber", enabled, terminal_color_mode())
-    lines = [format_row("▾ " + name, status, project_name, row.get("title", ""), width)]
+    if node.get("paused"):
+        status += color(f"  Q:{queue}", "amber", enabled, terminal_color_mode())
+    lines = [format_row("▾ " + name, status, project_name, row.get("title", ""), width, status_width)]
     for index, agent in enumerate(agents):
-        lines.extend(agent_lines(agent, width, enabled, index == len(agents) - 1))
+        lines.extend(agent_lines(agent, width, enabled, index == len(agents) - 1, status_width))
     return lines
 
 
@@ -362,6 +374,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     agent_rows = [row for row in rows if row["kind"] == "AGENT"]
     orch_count = len(orch_rows)
     agent_count = sum(str(row["node"].get("status", "unknown")).lower() != "closed" for row in agent_rows)
+    status_width = max((display_width(orch_status_text(row)) for row in orch_rows), default=12)
     stamp = re.search(r"\d{2}:\d{2}:\d{2}", refreshed_at)
     last = stamp.group(0) if stamp else refreshed_at[-8:]
     lines = [
@@ -369,7 +382,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         padded_line(f"refresh: {REFRESH_SECONDS}s · last: {last}", width),
         padded_line(f"Status: All · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", width),
         "",
-        format_row("Name", "Status", "Project", "Title", width),
+        format_row("Name", "Status", "Project", "Title", width, status_width),
         padded_line("─" * max(1, width - 4), width),
         "",
     ]
@@ -389,12 +402,12 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
                 lines.append(padded_line("No live orchs or agents.", width))
             for orch in sorted(orchs, key=row_sort_key):
                 children = sorted((agent for agent in agents if agent["group"] == orch["group"] and not agent["orphan"]), key=row_sort_key)
-                lines.extend(orch_section(orch, children, project["name"], False, width, enabled))
+                lines.extend(orch_section(orch, children, project["name"], False, width, enabled, status_width))
             orphans = sorted((row for row in agents if row["orphan"]), key=row_sort_key)
             if orphans:
                 lines.append(padded_line(color("orphans", "orphan", enabled, terminal_color_mode()), width))
                 for index, row in enumerate(orphans):
-                    lines.extend(agent_lines(row, width, enabled, index == len(orphans) - 1))
+                    lines.extend(agent_lines(row, width, enabled, index == len(orphans) - 1, status_width))
             if project is not projects[-1]:
                 lines.append("")
     lines.append("")

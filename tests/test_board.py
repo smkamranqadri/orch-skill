@@ -121,6 +121,17 @@ class BoardTests(unittest.TestCase):
         row = next(line for line in lines if "▾ orch-codex" in line)
         self.assertEqual(row[status_start:status_start + status].strip(), "working  Q:0")
 
+    def test_status_column_keeps_large_queue_counts_and_paused_counts_at_all_widths(self):
+        data = {"version": 1, "orchs": {
+            "s/working": {"project": "/fictional/status-garden", "name": "working-orch", "status": "working", "queue": ["n"] * 10},
+            "s/paused": {"project": "/fictional/status-garden", "name": "paused-orch", "status": "blocked", "queue": ["n"] * 10, "paused": {"count": 10}},
+        }, "agents": {}}
+        for width in (160, 100, 67, 55, 40):
+            with self.subTest(width=width):
+                rows = [line.strip() for line in self.render(width=width, data=data).splitlines()]
+                self.assertTrue(any("working  Q:10" in line for line in rows))
+                self.assertTrue(any("PAUSED 10  Q:10" in line for line in rows))
+
     def test_each_project_has_heading_even_without_queue_and_gone_queues_remain(self):
         data = {"version": 1, "orchs": {
             "s/live": {"project": "/fictional/quiet-garden", "name": "quiet-orch", "status": "idle", "queue": []},
