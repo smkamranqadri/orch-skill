@@ -1,6 +1,6 @@
 # Current
 
-Stamp: main bca1b05 f9aff0060c38
+Stamp: main f1b0fa5 f9aff0060c38
 
 - Branch: `main` (phases 1, 2, 4, the live fixes and cycle 2 merged, local only; old build in
   `archive/`). `main` is far ahead of `origin/main` (not pushed). `phase3-board-design` holds
@@ -27,5 +27,10 @@ Stamp: main bca1b05 f9aff0060c38
   `prefix+b` (bound in `~/.config/herdr/config.toml` to `orch.board-full`, 2026-10-19; backup of
   the previous file in the session scratchpad) opens the board overlay, `q` closes it (not
   documented by Herdr for plugin overlays); one worktree spawn. (2) Phase 5 (skill). (3) Capture raw
-  `HERDR_PLUGIN_EVENT_JSON` for one worker run to find the duplicate-notice root cause.
+  `HERDR_PLUGIN_EVENT_JSON` for one worker run to find the duplicate-notice root cause. (4) Board
+  whitespace (owner, 2026-10-19, after seeing cycle 2 live): blank line after the project heading
+  and before the footer, between orchs and between projects, orch children indented under the
+  orch; at 55 columns `orch-claude > live-test` is cut to `orch-… > live-test` though it needs
+  one more column (path/runtime split too greedy). Board key: owner keeps `prefix+b` for the
+  board and wants the sidebar moved (Herdr default `prefix+s` is `settings`, so pick a key).
 - Owner may delete the stale remote branch: `git push origin --delete orch-0.12.2`.
