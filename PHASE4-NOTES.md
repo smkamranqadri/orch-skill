@@ -20,7 +20,7 @@ ORCH BOARD · 3 projects · 6 orchs · 8 agents
 Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan
 ----------------------------------------------------------------------------------------------------
 STATE              | HIERARCHY PATH                                     | HOST / MODEL
-fictional-amber-garden · 1 queued notices
+fictional-amber-garden · 1 queued notice
 ○ IDLE *           | fictional… > ORPHAN > fictional-orphan-fir-worker  | claude
 ▶ WORKING          | fictional-… > amber-lead… > fictional-amber-worker | claude
 ○ IDLE             | fictional-amber-garden > amber-lead-orch           | claude · Q:1
@@ -39,7 +39,7 @@ fictional-copper-hill · 0 queued notices
 ○ IDLE             | fictional-copper-hill > copper-lead-orch           | claude · Q:0
 ○ IDLE             | fictional-copper-hill > copper-review-orch         | claude · Q:0
 ✓ DONE             | fictional… > copper-le… > fictional-completed-wor… | claude
-Registry: tests/fixtures/board-registry-crowded.json · refreshed 2026-10-19 09:51:57 PKT
+Registry: tests/fixtures/board-registry-crowded.json · refreshed 2026-10-19 09:54:00 PKT
 ```
 
 ## 60 columns
@@ -49,7 +49,7 @@ ORCH BOARD · 3 projects · 6 orchs · 8 agents
 Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan
 ------------------------------------------------------------
 STATE              | HIERARCHY PATH
-fictional-amber-garden · 1 queued notices
+fictional-amber-garden · 1 queued notice
 ○ IDLE *           | fic… > ORPH… > fictional-orphan-fir-wo…
 ▶ WORKING          | fict… > amber… > fictional-amber-worker
 ○ IDLE             | fictional-amber-gard… > amber-lead-orch
@@ -68,7 +68,7 @@ fictional-copper-hill · 0 queued notices
 ○ IDLE             | fictional-copper-hi… > copper-lead-orch
 ○ IDLE             | fictional-copper-… > copper-review-orch
 ✓ DONE             | fic… > copp… > fictional-completed-wor…
-Reg: tests/fixtures/board-registry-crowded.json · 09:51:57
+Reg: tests/fixtures/board-registry-crowded.json · 09:54:00
 ```
 
 ## Herdr integration not verified
