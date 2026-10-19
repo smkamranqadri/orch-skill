@@ -23,6 +23,12 @@ def plugin_directory(item):
         return item
     if not isinstance(item, dict):
         return None
+    plugin_root = item.get("plugin_root")
+    if isinstance(plugin_root, str) and plugin_root:
+        return plugin_root
+    manifest_path = item.get("manifest_path")
+    if isinstance(manifest_path, str) and manifest_path:
+        return str(Path(manifest_path).parent)
     for key in ("path", "plugin_path", "directory", "dir", "root", "source", "install_path"):
         value = item.get(key)
         if isinstance(value, str) and value:
@@ -51,7 +57,7 @@ except (json.JSONDecodeError, UnicodeDecodeError) as exc:
 
 for entry in entries(data):
     if isinstance(entry, dict):
-        identity = entry.get("id") or entry.get("name") or entry.get("plugin")
+        identity = entry.get("plugin_id") or entry.get("name") or entry.get("id") or entry.get("plugin")
         if identity and str(identity).split("/")[-1] != "orch":
             continue
     candidate = plugin_directory(entry)
