@@ -22,7 +22,8 @@ Herdr's plugin installer. The installer does not edit Herdr's keybinding config;
 ## Safeguards
 
 - Registry changes are locked and scoped by Herdr session.
-- Installer links and skill paths are checked before writing. A foreign skill directory or file
-  is preserved and the operation stops.
+- Before Herdr changes, the installer validates the complete skill source, skill ownership, host
+  destinations, and their existing ancestors. It preserves foreign paths and rolls back newly
+  published skill files and links if a later install step fails.
 - Automatic notices are capped; a paused orch stays paused until an explicit resume.
 - Tests use temporary homes and fake Herdr commands.

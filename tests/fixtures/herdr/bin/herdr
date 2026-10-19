@@ -6,21 +6,40 @@ import sys
 args = sys.argv[1:]
 with open(os.environ["ORCH_TEST_CALLS"], "a", encoding="utf-8") as out:
     out.write(json.dumps(args) + "\n")
+with open(os.environ["ORCH_TEST_ENV_CALLS"], "a", encoding="utf-8") as out:
+    out.write(json.dumps({"args": args, "HOME": os.environ.get("HOME"), "XDG_CONFIG_HOME": os.environ.get("XDG_CONFIG_HOME"), "XDG_STATE_HOME": os.environ.get("XDG_STATE_HOME")}) + "\n")
+if args[:2] in (["plugin", "link"], ["plugin", "install"], ["plugin", "update"], ["plugin", "unlink"], ["plugin", "uninstall"]):
+    with open(os.environ["ORCH_TEST_MUTATIONS"], "a", encoding="utf-8") as out:
+        out.write(json.dumps({"args": args, "HOME": os.environ.get("HOME"), "XDG_CONFIG_HOME": os.environ.get("XDG_CONFIG_HOME"), "XDG_STATE_HOME": os.environ.get("XDG_STATE_HOME")}) + "\n")
 
 if args[:3] == ["plugin", "list", "--plugin"]:
     if "--json" not in args:
         raise SystemExit(2)
     linked = os.environ["ORCH_TEST_LINKED_FILE"]
+    if os.environ.get("ORCH_TEST_NO_PLUGIN") == "1" and not os.path.exists(linked):
+        print("[]")
+        raise SystemExit(0)
     path = (
         open(linked, encoding="utf-8").read()
         if os.path.exists(linked)
         else os.environ["ORCH_TEST_PLUGIN_ROOT"]
     )
     print(json.dumps([{"id": os.environ.get("ORCH_TEST_PLUGIN_ID", "orch"), "path": path}]))
-elif args[:2] in (["plugin", "link"], ["plugin", "install"], ["plugin", "update"]):
+elif args[:2] in (["plugin", "link"], ["plugin", "install"], ["plugin", "update"], ["plugin", "unlink"]):
     if args[:2] == ["plugin", "link"]:
         with open(os.environ["ORCH_TEST_LINKED_FILE"], "w", encoding="utf-8") as out:
             out.write(args[2])
+    if args[:2] == ["plugin", "install"]:
+        with open(os.environ["ORCH_TEST_LINKED_FILE"], "w", encoding="utf-8") as out:
+            out.write(os.environ.get("ORCH_TEST_NEW_PLUGIN_ROOT", os.environ["ORCH_TEST_PLUGIN_ROOT"]))
+        if os.environ.get("ORCH_TEST_MUTATE_PLUGIN") == "1":
+            with open(os.path.join(os.environ["ORCH_TEST_PLUGIN_ROOT"], "orch"), "w", encoding="utf-8") as out:
+                out.write("partially replaced plugin\n")
+    if args[:2] == ["plugin", "unlink"]:
+        try:
+            os.unlink(os.environ["ORCH_TEST_LINKED_FILE"])
+        except FileNotFoundError:
+            pass
     if args[:2] == ["plugin", "update"] and os.environ.get("ORCH_TEST_UPDATE_FAIL") == "1":
         print("plugin is not installed", file=sys.stderr)
         raise SystemExit(1)
