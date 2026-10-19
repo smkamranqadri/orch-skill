@@ -117,13 +117,36 @@ def status_cell(row: dict, enabled: bool) -> str:
     return color(label, STATUS_COLORS.get(status, STATUS_COLORS["unknown"]), enabled)
 
 
-def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
+def table_layout(width: int) -> tuple[int, int, int]:
     state_width = 18
-    runtime_width = min(26, max(18, width // 4)) if with_runtime else 0
-    separators = 3 + (3 + runtime_width if with_runtime else 0)
-    path_width = max(1, width - state_width - separators)
-    parts = row["path"]
-    path = " / ".join(str(part) for part in parts)
+    runtime_width = min(26, max(18, width // 4 + 1)) if width >= 84 else 0
+    path_width = width - state_width - 3 - (3 + runtime_width if runtime_width else 0)
+    return state_width, path_width, runtime_width
+
+
+def fit_path(parts: list[str], width: int) -> str:
+    if not parts:
+        return truncate("", width)
+    separator = " > "
+    if sum(display_width(part) for part in parts) + display_width(separator) * (len(parts) - 1) <= width:
+        return separator.join(parts)
+    budget = max(1, width - display_width(separator) * (len(parts) - 1))
+    last_width = min(display_width(parts[-1]), max(24, budget // 2))
+    ancestor_budget = max(0, budget - last_width)
+    ancestors = parts[:-1]
+    fitted = []
+    for index, part in enumerate(ancestors):
+        remaining = len(ancestors) - index
+        allowance = ancestor_budget // remaining if remaining else 0
+        fitted.append(truncate(part, allowance))
+        ancestor_budget -= allowance
+    fitted.append(truncate(parts[-1], max(1, budget - sum(display_width(part) for part in fitted))))
+    return separator.join(fitted)
+
+
+def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
+    state_width, path_width, runtime_width = table_layout(width)
+    path = fit_path([str(part) for part in row["path"]], path_width)
     if row["orphan"]:
         path = path.replace("ORPHAN", color("ORPHAN", "1;35", enabled), 1)
     state = status_cell(row, enabled)
