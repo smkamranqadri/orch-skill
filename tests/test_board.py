@@ -1,52 +1,37 @@
 import json
 import os
-import re
-import fcntl
 import pty
 import select
-import struct
 import subprocess
 import sys
 import tempfile
-import termios
 import time
-import unittest
-from pathlib import Path
 import tomllib
-from unittest.mock import patch
+import unittest
 from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
 from plugin import board
 
 
-FIXTURE = Path(__file__).parent / "fixtures" / "board-registry.json"
-CROWDED_FIXTURE = Path(__file__).parent / "fixtures" / "board-registry-crowded.json"
-CYCLE2_FIXTURE = Path(__file__).parent / "fixtures" / "board-registry-cycle2.json"
+ROOT = Path(__file__).resolve().parents[1]
+FAKE_HERDR = ROOT / "tests" / "fixtures" / "herdr" / "board-bin"
 
 
-def cycle2_status_data():
-    project = "/fictional/cycle2-garden"
+def sample_registry():
+    project = "/fictional/orch-skill"
     return {
         "version": 1,
         "orchs": {
-            "session-main/pane-main": {
-                "project": project, "name": "amber-orch", "pane": "pane-main", "kind": "claude",
-                "gone": False, "queue": ["fictional queued notice"], "status": "idle",
-            },
+            "session-a/p1": {"project": project, "name": "orch-claude", "pane": "p1", "status": "idle", "queue": ["notice one", "notice two"]},
+            "session-b/p1": {"project": project, "name": "orch-codex", "pane": "p2", "status": "working", "queue": [], "paused": {"count": 1}},
         },
         "agents": {
-            "session-main/adopted-builder": {
-                "project": project, "name": "adopted-builder", "pane": "pane-builder", "orch": "session-main/pane-main",
-                "kind": "codex", "model": "GPT-X", "status": "working", "role": "build", "adopted": True,
-            },
-            "session-main/closed-worker": {
-                "project": project, "name": "closed-worker", "pane": "pane-closed", "orch": "session-main/pane-main",
-                "kind": "claude", "status": "closed", "closed_at": time.time(), "role": "build",
-            },
-            "session-main/orphan-worker": {
-                "project": project, "name": "orphan-worker", "pane": "pane-orphan", "orch": "session-missing/gone-orch",
-                "kind": "claude", "status": "idle", "role": "explore",
-            },
+            "session-a/closedrows": {"project": project, "name": "closedrows", "pane": "a1", "orch": "session-a/p1", "status": "done"},
+            "session-a/rel-reviewer": {"project": project, "name": "rel-reviewer", "pane": "a2", "orch": "session-a/p1", "status": "closed", "closed_at": 999},
+            "session-b/worker": {"project": project, "name": "other-session-worker", "pane": "b1", "orch": "session-b/p1", "status": "working"},
+            "session-a/orphan": {"project": project, "name": "orphan-worker", "pane": "a3", "orch": "session-gone/gone", "status": "blocked"},
         },
     }
 
@@ -54,27 +39,261 @@ def cycle2_status_data():
 class BoardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.registry = Path(self.temp.name) / "registry.json"
-        self.registry.write_bytes(FIXTURE.read_bytes())
+        self.root = Path(self.temp.name)
+        self.registry = self.root / "registry.json"
+        self.registry.write_text(json.dumps(sample_registry()))
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def render(self, width=100, color=False):
-        data = json.loads(self.registry.read_text())
-        return board.render(data, width, color, str(self.registry), "12:34:56")
+    def render(self, width=100, enabled=False, data=None, now=1000, titles=None):
+        return board.render(data or json.loads(self.registry.read_text()), width, enabled,
+                            str(self.registry), "2026-10-19 12:34:56", now=now, pane_titles=titles)
 
-    def start_pty(self, width):
+    def board_cli_env(self, **overrides):
+        calls = self.root / "orch-board-herdr-calls.jsonl"
+        return os.environ.copy() | {
+            "PATH": str(FAKE_HERDR) + os.pathsep + os.environ.get("PATH", ""),
+            "ORCH_BOARD_HERDR_CALLS": str(calls),
+            "ORCH_BOARD_AGENT_STATUS": "missing",
+            "NO_COLOR": "1",
+            "HERDR_ENV": "",
+        } | overrides
+
+    def calls(self, env):
+        path = Path(env["ORCH_BOARD_HERDR_CALLS"])
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def run_orch(self, *args, env=None):
+        return subprocess.run([sys.executable, str(ROOT / "plugin" / "orch"), *args],
+                              text=True, capture_output=True, env=env or self.board_cli_env())
+
+    def test_header_columns_projects_orch_sections_and_plain_agent_names(self):
+        rendered = self.render(titles={"p1": "Fictional task title"})
+        lines = rendered.splitlines()
+        plain = [line.strip() for line in lines]
+        self.assertEqual(plain[:3], [
+            "orch board v0.1.0", "refresh: 1s · last: 12:34:56",
+            "Status: All · 2 orchs · 3 agents",
+        ])
+        self.assertEqual(plain[4], "Name  Status  Project  Title")
+        self.assertTrue(plain[5].startswith("─"))
+        self.assertIn("orch-skill · 2 queued", plain)
+        first_orch = next(i for i, line in enumerate(lines) if "▾ orch-claude" in line)
+        second_orch = next(i for i, line in enumerate(lines) if "▾ orch-codex" in line)
+        self.assertLess(plain.index("orch-skill · 2 queued"), first_orch)
+        orch_row = lines[first_orch][2:-2]
+        self.assertEqual((orch_row[:30].strip(), orch_row[32:44].strip(), orch_row[46:62].strip(), orch_row[64:].strip()),
+                         ("▾ orch-claude", "idle  Q:2", "orch-skill", "Fictional task title"))
+        self.assertEqual([line.strip().split()[0:2] for line in lines[first_orch + 1:first_orch + 3]],
+                         [["├", "closedrows"], ["└", "rel-reviewer"]])
+        self.assertIn("PAUSED 1", lines[second_orch])
+        self.assertLess(second_orch, next(i for i, line in enumerate(lines) if "other-session-worker" in line))
+        self.assertIn("orphans", plain)
+        self.assertIn("* orphan-worker", "\n".join(plain))
+        self.assertEqual(plain[-2:], ["", "q quit"])
+        self.assertNotIn("refreshed", "\n".join(plain))
+
+    def test_each_project_has_heading_even_without_queue_and_gone_queues_remain(self):
+        data = {"version": 1, "orchs": {
+            "s/live": {"project": "/fictional/quiet-garden", "name": "quiet-orch", "status": "idle", "queue": []},
+            "s/gone": {"project": "/fictional/queued-harbor", "name": "gone-orch", "gone": True, "queue": ["a", "b", "c"]},
+        }, "agents": {}}
+        lines = [line.strip() for line in self.render(data=data).splitlines()]
+        self.assertIn("quiet-garden", lines)
+        self.assertIn("queued-harbor · 3 queued", lines)
+        self.assertNotIn("gone-orch", "\n".join(lines))
+
+    def test_closed_rows_expire_at_ten_minutes_and_closed_agents_are_not_counted(self):
+        data = sample_registry()
+        data["agents"]["session-a/rel-reviewer"]["closed_at"] = 399
+        lines = self.render(data=data, now=1000).splitlines()
+        self.assertIn("Status: All · 2 orchs · 3 agents", "\n".join(lines))
+        self.assertNotIn("rel-reviewer", "\n".join(lines))
+        data["agents"]["session-a/rel-reviewer"]["closed_at"] = 400
+        lines = self.render(data=data, now=1000).splitlines()
+        self.assertIn("rel-reviewer", "\n".join(lines))
+
+    def test_orch_queue_and_pause_are_rendered_in_status_column(self):
+        plain = [line.strip() for line in self.render().splitlines()]
+        orch = next(line for line in plain if line.startswith("▾ orch-claude"))
+        paused = next(line for line in plain if line.startswith("▾ orch-codex"))
+        self.assertIn("idle  Q:2", orch)
+        self.assertIn("PAUSED 1", paused)
+
+    def test_count_labels_use_singular_and_plural_forms(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/one-garden", "name": "one-orch", "status": "idle", "queue": [],
+        }}, "agents": {"s/a": {
+            "project": "/fictional/one-garden", "name": "one-agent", "orch": "s/p", "status": "done",
+        }}}
+        lines = [line.strip() for line in self.render(data=data).splitlines()]
+        self.assertIn("Status: All · 1 orch · 1 agent", lines)
+        data["agents"].clear()
+        lines = [line.strip() for line in self.render(data=data).splitlines()]
+        self.assertIn("Status: All · 1 orch · 0 agents", lines)
+        data["orchs"].clear()
+        lines = [line.strip() for line in self.render(data=data).splitlines()]
+        self.assertIn("Status: All · 0 orchs · 0 agents", lines)
+
+    def test_orphans_keep_status_order_and_session_ownership(self):
+        data = {"version": 1, "orchs": {
+            "s/p": {"project": "/fictional/one-garden", "name": "owner", "status": "idle", "queue": []},
+            "other-session/p": {"project": "/fictional/one-garden", "name": "other-owner", "status": "idle", "queue": []},
+        }, "agents": {
+            "s/worker": {"project": "/fictional/one-garden", "name": "owned-worker", "orch": "s/p", "status": "working"},
+            "other-session/worker": {"project": "/fictional/one-garden", "name": "separate-session-worker", "orch": "other-session/p", "status": "blocked"},
+            "s/orphan-working": {"project": "/fictional/one-garden", "name": "orphan-working", "orch": "s/missing", "status": "working"},
+            "s/orphan-blocked": {"project": "/fictional/one-garden", "name": "orphan-blocked", "orch": "s/missing", "status": "blocked"},
+        }}
+        lines = self.render(data=data).splitlines()
+        self.assertIn("separate-session-worker", "\n".join(lines))
+        self.assertIn("owned-worker", "\n".join(lines))
+        self.assertLess(next(i for i, line in enumerate(lines) if "other-owner" in line),
+                        next(i for i, line in enumerate(lines) if "separate-session-worker" in line))
+        blocked = next(i for i, line in enumerate(lines) if "orphan-blocked" in line)
+        working = next(i for i, line in enumerate(lines) if "orphan-working" in line)
+        self.assertLess(blocked, working)
+
+    def test_rows_fit_55_67_100_and_160_columns_with_two_column_margin(self):
+        for width in (55, 67, 100, 160):
+            with self.subTest(width=width):
+                lines = self.render(width).splitlines()
+                self.assertTrue(all(board.display_width(line) <= width for line in lines))
+                self.assertTrue(all(line.startswith("  ") for line in lines if line))
+                self.assertTrue(all(board.display_width(line) == width for line in lines if line))
+                self.assertIn("orphan-worker", "\n".join(lines))
+
+    def test_color_modes_and_no_color(self):
+        cases = (("16", "\033[1;34m"), ("256", "\033[1;38;5;111m"), ("truecolor", "\033[1;38;2;130;156;255m"))
+        for mode, expected in cases:
+            with self.subTest(mode=mode):
+                self.assertEqual(board.color("orch", "app", True, mode), expected + "orch\033[0m")
+        self.assertEqual(board.color("idle", "dim", False, "truecolor"), "idle")
+        self.assertNotIn("\033[", self.render(enabled=False))
+
+    def test_no_color_environment_disables_styles_on_a_tty(self):
+        class TerminalBuffer(StringIO):
+            def isatty(self):
+                return True
+
+        output = TerminalBuffer()
+        with patch.dict(os.environ, {"NO_COLOR": ""}), patch("plugin.board.sys.stdout", output), patch("plugin.board.read_pane_titles", return_value={}):
+            board.main(["--once", "--width", "60", "--registry", str(self.registry)])
+        self.assertNotIn("\033[", output.getvalue())
+
+    def test_resize_reformats_without_registry_change(self):
+        view = board.Board(self.registry, 100, False)
+        with patch.dict(os.environ, {"HERDR_ENV": ""}):
+            self.assertTrue(view.refresh())
+            original = view.output
+            self.assertTrue(view.set_width(55))
+        self.assertNotEqual(view.output, original)
+        self.assertTrue(all(board.display_width(line) == 55 for line in view.output.splitlines() if line))
+
+    def test_pane_titles_parse_fallback_and_timeout(self):
+        payload = {"result": {"panes": [
+            {"pane_id": "p1", "terminal_title_stripped": "First title"},
+            {"pane_id": "p2", "label": "Label fallback"},
+            {"pane_id": "p3", "terminal_title": "Terminal fallback"},
+        ]}}
+        self.assertEqual(board.pane_titles_from_payload(payload), {
+            "p1": "First title", "p2": "Label fallback", "p3": "Terminal fallback",
+        })
+        with patch("plugin.board.subprocess.run", side_effect=subprocess.TimeoutExpired("herdr", 1)) as run:
+            self.assertEqual(board.read_pane_titles(), {})
+        self.assertEqual(run.call_args.kwargs["timeout"], 1)
+
+    def test_board_refreshes_title_changes_without_registry_change(self):
+        view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
+        with patch("plugin.board.read_pane_titles", side_effect=[{"p1": "First title"}, {"p1": "Updated title"}]) as reader:
+            self.assertTrue(view.refresh())
+            self.assertTrue(view.refresh())
+        self.assertEqual(reader.call_count, 2)
+        self.assertIn("Updated title", view.output)
+
+    def test_no_tty_opens_overlay_and_passes_no_board_options(self):
+        env = self.board_cli_env()
+        result = self.run_orch("board", "--once", "--width", "67", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(env), [["plugin", "action", "invoke", "board-full", "--plugin", "orch"]])
+
+    def test_tty_non_agent_runs_board_in_place_and_passes_options(self):
+        env = self.board_cli_env()
         master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, width, 0, 0))
-        env = os.environ.copy() | {"NO_COLOR": "1"}
-        env["XDG_STATE_HOME"] = str(self.registry.parent)
-        process = subprocess.Popen(
-            ["python3", str(Path(__file__).parents[1] / "plugin" / "board.py"), "--registry", str(self.registry)],
-            stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True,
-        )
-        os.close(slave)
-        return process, master
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board", "--once", "--width", "55"],
+                                       stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+            output = self.read_pty(master, 3)
+            process.wait(timeout=3)
+            error = process.stderr.read()
+            process.stderr.close()
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(process.returncode, 0, error)
+        self.assertIn("orch board v0.1.0", output)
+        self.assertTrue(all(board.display_width(line) == 55 for line in output.splitlines() if line.strip()))
+        self.assertEqual(self.calls(env), [["pane", "current", "--current"], ["agent", "get", "fixture-pane"]])
+
+    def test_tty_agent_pane_opens_overlay(self):
+        env = self.board_cli_env(ORCH_BOARD_AGENT_STATUS="working")
+        master, slave = pty.openpty()
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board", "--once"],
+                                       stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+            process.wait(timeout=3)
+            error = process.stderr.read()
+            process.stderr.close()
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(process.returncode, 0, error)
+        self.assertEqual(self.calls(env), [["pane", "current", "--current"], ["agent", "get", "fixture-pane"],
+                                           ["plugin", "action", "invoke", "board-full", "--plugin", "orch"]])
+
+    def test_tty_unknown_agent_status_still_keeps_agent_pane_safe(self):
+        env = self.board_cli_env(ORCH_BOARD_AGENT_STATUS="unknown")
+        master, slave = pty.openpty()
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board"],
+                                       stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+            process.wait(timeout=3)
+            error = process.stderr.read()
+            process.stderr.close()
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(process.returncode, 0, error)
+        self.assertEqual(self.calls(env), [["pane", "current", "--current"], ["agent", "get", "fixture-pane"],
+                                           ["plugin", "action", "invoke", "board-full", "--plugin", "orch"]])
+
+    def test_overlay_failure_prints_exact_command(self):
+        env = self.board_cli_env(ORCH_BOARD_OVERLAY_FAIL="1")
+        result = self.run_orch("board", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "herdr plugin action invoke board-full --plugin orch")
+
+    def test_q_exits_and_width_30_remains_clipped(self):
+        master, slave = pty.openpty()
+        process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "board.py"), "--registry", str(self.registry)],
+                                   stdin=slave, stdout=slave, stderr=slave, env=os.environ.copy() | {"NO_COLOR": "1"})
+        try:
+            output = self.read_pty(master, 1)
+            self.assertIn("q quit", output)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+            os.close(slave)
+        result = subprocess.run([sys.executable, str(ROOT / "plugin" / "board.py"), "--once", "--width", "30", "--registry", str(self.registry)],
+                               text=True, capture_output=True, env=os.environ.copy() | {"HERDR_ENV": "", "NO_COLOR": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(all(board.display_width(line) <= 30 for line in result.stdout.splitlines()))
 
     def read_pty(self, master, duration):
         output = bytearray()
@@ -89,666 +308,25 @@ class BoardTests(unittest.TestCase):
                 break
         return output.decode(errors="replace")
 
-    def read_pty_until(self, master, expected, timeout=10):
-        output = ""
-        deadline = time.monotonic() + timeout
-        while expected not in output and time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
-            output += self.read_pty(master, min(0.1, remaining))
-        self.assertIn(expected, output)
-        return output
-
-    def test_renderer_has_anchored_orch_sections_and_queue_counts_at_100(self):
-        lines = self.render(100).splitlines()
-        self.assertEqual(lines[0], "ORCH BOARD · 2 projects · 3 orchs · 5 agents")
-        self.assertEqual(lines[1], "-" * 100)
-        self.assertFalse(any(line.startswith("Legend:") for line in lines))
-        self.assertIn("○ IDLE             | copperfield-orch · copperfield | claude · Q:2", lines)
-        self.assertIn("▶ WORKING          | maple-orch · maple-lab | claude · Q:1", lines)
-        self.assertTrue({"kind", "workspace", "tab"}.issubset(next(iter(json.loads(self.registry.read_text())["orchs"].values()))))
-        self.assertIn("! BLOCKED          |   ├─ blocked-spruce-worker", lines)
-        self.assertIn("○ IDLE *           |   └─ orphaned-birch-agent", lines)
-        self.assertLess(next(i for i, line in enumerate(lines) if "! BLOCKED" in line), next(i for i, line in enumerate(lines) if "▶ WORKING" in line and "willow-fixture-reader" in line))
-        self.assertLess(next(i for i, line in enumerate(lines) if "▶ WORKING" in line and "cedar-worker" in line), next(i for i, line in enumerate(lines) if line == "ORPHANS"))
-        self.assertEqual(lines[-1], "refreshed 12:34:56")
-        self.assertTrue(all(board.display_width(line) <= 100 for line in lines))
-
-    def test_cli_renders_cli_generated_cycle2_fixture_with_adopted_closed_and_orphan_rows(self):
-        data = json.loads(CYCLE2_FIXTURE.read_text())
-        data["agents"]["session-a/fictional-closed-worker"]["closed_at"] = time.time()
-        registry = Path(self.temp.name) / "cli-registry.json"
-        registry.write_text(json.dumps(data))
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parents[1] / "plugin" / "board.py"), "--once", "--width", "100", "--registry", str(registry)],
-            text=True, capture_output=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("ORCH BOARD · 1 project · 1 orch · 2 agents", result.stdout)
-        self.assertIn("├─ fictional-adopted-builder", result.stdout)
-        self.assertIn("× CLOSED", result.stdout)
-        self.assertIn("fictional-orphan-worker", result.stdout)
-
-    def test_renderer_uses_singular_count_labels(self):
-        data = {
-            "version": 1,
-            "orchs": {
-                "session-fictional/pane-one": {
-                    "project": "/fictional/single-garden", "name": "fictional-single-orch", "kind": "claude", "gone": False,
-                    "queue": ["fictional notice"], "status": "idle",
-                },
-            },
-            "agents": {
-                "session-fictional/single-worker": {
-                    "project": "/fictional/single-garden", "name": "fictional-single-worker",
-                    "orch": "session-fictional/pane-one", "status": "done",
-                },
-            },
-        }
-        lines = board.render(data, 100, False, "registry.json", "12:34:56").splitlines()
-        self.assertEqual(lines[0], "ORCH BOARD · 1 project · 1 orch · 1 agent")
-        self.assertIn("fictional-single-orch | claude · Q:1", "\n".join(lines))
-
-    def test_renderer_uses_plural_count_labels(self):
-        lines = self.render(100).splitlines()
-        self.assertEqual(lines[0], "ORCH BOARD · 2 projects · 3 orchs · 5 agents")
-        self.assertEqual(sum("copperfield-orch · copperfield | claude · Q:2" in line for line in lines), 1)
-
-    def test_orch_sections_and_agent_rows_fit_at_100_with_color(self):
-        lines = self.render(100, color=True).splitlines()
-        plain = [board.ANSI_RE.sub("", line) for line in lines]
-        rows = [line for line in plain if re.match(r"(?:!|▶|○|✓|×|\?) ", line)]
-        self.assertTrue(rows)
-        self.assertIn("├─ blocked-spruce-worker", "\n".join(plain))
-        self.assertTrue(all(board.display_width(line) <= 100 for line in lines))
-
-    def test_orch_sections_and_agent_rows_fit_at_55_and_67(self):
-        for width in (55, 67):
-            with self.subTest(width=width):
-                lines = self.render(width).splitlines()
-                self.assertIn("willow-fixture-reader", "\n".join(lines))
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-
-    def test_footer_fits_real_timestamp_at_accepted_widths(self):
-        timestamp = "2026-10-19 09:19:05 PKT"
-        for width in (40, 50, 60, 84, 100):
-            with self.subTest(width=width):
-                footer = board.footer("/fictional/state/orch/registry.json", timestamp, width)
-                self.assertLessEqual(board.display_width(footer), width)
-                self.assertEqual(footer, "refreshed 09:19:05")
-
-    def test_closed_agents_and_gone_orchs_are_not_counted_but_closed_rows_are_dim(self):
-        data = json.loads(self.registry.read_text())
-        data["agents"]["session-amber/worker-active"]["status"] = "closed"
-        data["agents"]["session-amber/worker-active"]["closed_at"] = time.time()
-        output = board.render(data, 100, True, "registry.json", "12:34:56")
-        lines = output.splitlines()
-        self.assertEqual(board.ANSI_RE.sub("", lines[0]), "ORCH BOARD · 2 projects · 3 orchs · 4 agents")
-        closed = next(line for line in lines if "× CLOSED" in board.ANSI_RE.sub("", line))
-        self.assertIn("\033[2;37m× CLOSED\033[0m", closed)
-        self.assertIn("willow-fixture-reader", board.ANSI_RE.sub("", closed))
-        self.assertEqual(sum("× CLOSED" in board.ANSI_RE.sub("", line) for line in lines), 1)
-
-    def test_closed_rows_expire_at_600_seconds_with_anchored_rows_at_100_and_55(self):
-        project = "/fictional/retention-garden"
-        now = 10_000.0
-        data = {
-            "version": 1,
-            "orchs": {"session-fixture/pane": {"project": project, "name": "orch", "kind": "claude", "status": "idle", "queue": ["notice"]}},
-            "agents": {},
-        }
-        for name, age in (("age-zero", 0), ("age-599", 599), ("age-601", 601)):
-            data["agents"][f"session-fixture/{name}"] = {
-                "project": project, "name": name, "orch": "session-fixture/pane", "kind": "claude",
-                "status": "closed", "closed_at": now - age,
-            }
-        data["agents"]["session-fixture/legacy"] = {
-            "project": project, "name": "legacy", "orch": "session-fixture/pane", "kind": "claude", "status": "closed",
-        }
-        expected = {
-            100: [
-                "○ IDLE             | orch | claude · Q:1",
-                "× CLOSED           |   ├─ age-599",
-                "× CLOSED           |   └─ age-zero",
-            ],
-            55: [
-                "○ IDLE      | orch | claude · Q:1",
-                "× CLOSED    |   ├─ age-599",
-                "× CLOSED    |   └─ age-zero",
-            ],
-        }
-        for width, wanted in expected.items():
-            with self.subTest(width=width):
-                lines = board.render(data, width, True, "registry.json", "12:34:56", now=now).splitlines()
-                self.assertEqual(board.ANSI_RE.sub("", lines[0]), "ORCH BOARD · 1 project · 1 orch · 0 agents")
-                rows = [board.ANSI_RE.sub("", line) for line in lines if re.match(r"(?:!|▶|○|✓|×|\?) ", board.ANSI_RE.sub("", line))]
-                self.assertEqual(rows, wanted)
-
-    def test_project_queue_total_survives_owner_close_and_closed_row_expiry(self):
-        project = "/fictional/retained-garden"
-        data = {
-            "version": 1,
-            "orchs": {"session-fixture/pane": {
-                "project": project, "name": "orch", "kind": "claude", "pane": "pane",
-                "gone": False, "queue": ["fictional retained notice"], "status": "idle",
-            }},
-            "agents": {"session-fixture/worker": {
-                "project": project, "name": "retained-worker", "orch": "session-fixture/pane",
-                "kind": "claude", "status": "closed", "closed_at": 1000.0,
-            }},
-        }
-        def queue_totals():
-            output = board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0)
-            return [line for line in output.splitlines() if line.endswith("queued notice")]
-
-        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
-        data["orchs"]["session-fixture/pane"]["gone"] = True
-        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
-        data["agents"]["session-fixture/worker"]["closed_at"] = 399.0
-        self.assertEqual(queue_totals(), ["retained-garden · 1 queued notice"])
-        self.assertNotIn("retained-worker", board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0))
-
-    def test_expired_orphan_is_hidden_and_empty_project_and_queue_are_preserved(self):
-        data = {
-            "version": 1, "orchs": {},
-            "agents": {"session-fixture/orphan": {
-                "project": "/fictional/orphan-garden", "name": "orphan", "orch": "session-missing/orch",
-                "kind": "claude", "status": "closed", "closed_at": 399.0,
-            }},
-        }
-        lines = board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0).splitlines()
-        self.assertEqual(lines[0], "ORCH BOARD · 1 project · 0 orchs · 0 agents")
-        self.assertIn("No live orchs or agents.", lines)
-        self.assertFalse(any("ORPHAN" in line for line in lines))
-
-    def test_open_board_redraws_only_when_closed_row_crosses_expiry(self):
-        data = {
-            "version": 1,
-            "orchs": {"session-fixture/pane": {"project": "/fictional/refresh-garden", "name": "orch", "status": "idle", "queue": []}},
-            "agents": {"session-fixture/worker": {
-                "project": "/fictional/refresh-garden", "name": "worker", "orch": "session-fixture/pane",
-                "kind": "claude", "status": "closed", "closed_at": 1000.0,
-            }},
-        }
-        self.registry.write_text(json.dumps(data))
-        view = board.Board(self.registry, 100, False)
-        current = [1599.0]
-        view.now = lambda: current[0]
-        self.assertTrue(view.refresh())
-        self.assertIn("× CLOSED", view.output)
-        current[0] = 1599.5
-        self.assertFalse(view.refresh())
-        current[0] = 1600.1
-        self.assertTrue(view.refresh())
-        self.assertNotIn("× CLOSED", view.output)
-
-    def test_orch_sections_have_exact_rows_at_55_67_100_and_160_columns(self):
-        data = json.loads(CROWDED_FIXTURE.read_text())
-        expected = {
-            55: [
-                "○ IDLE      | amber-lead-orch · fiction… | claude · Q:1",
-                "▶ WORKING   |   └─ fictional-amber-worker",
-                "○ IDLE      | amber-review-orch · ficti… | claude · Q:0",
-                "○ IDLE      |   └─ fictional-idle-reviewer",
-                "○ IDLE      | blue-lead-orch · fictiona… | claude · Q:0",
-                "! BLOCKED   |   └─ fictional-blocked-builder",
-                "○ IDLE      | fictional-coordinator-wit… | claude · Q:0",
-                "? UNKNOWN   |   └─ fictional-worker-with-an-extraordina",
-                "                   rily-long-name-for-narrow-board-view",
-                "○ IDLE      | copper-lead-orch · fictio… | claude · Q:0",
-                "✓ DONE      |   └─ fictional-completed-worker",
-                "○ IDLE      | copper-review-orch · fict… | claude · Q:0",
-                "▶ WORKING   |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-            67: [
-                "○ IDLE      | amber-lead-orch · fictional-amber-gar… | claude · Q:1",
-                "▶ WORKING   |   └─ fictional-amber-worker",
-                "○ IDLE      | amber-review-orch · fictional-amber-g… | claude · Q:0",
-                "○ IDLE      |   └─ fictional-idle-reviewer",
-                "○ IDLE      | blue-lead-orch · fictional-blue-harbor | claude · Q:0",
-                "! BLOCKED   |   └─ fictional-blocked-builder",
-                "○ IDLE      | fictional-coordinator-with-an-extraor… | claude · Q:0",
-                "? UNKNOWN   |   └─ fictional-worker-with-an-extraordinarily-long-na",
-                "                   me-for-narrow-board-view",
-                "○ IDLE      | copper-lead-orch · fictional-copper-h… | claude · Q:0",
-                "✓ DONE      |   └─ fictional-completed-worker",
-                "○ IDLE      | copper-review-orch · fictional-copper… | claude · Q:0",
-                "▶ WORKING   |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-            100: [
-                "○ IDLE             | amber-lead-orch · fictional-amber-garden | claude · Q:1",
-                "▶ WORKING          |   └─ fictional-amber-worker",
-                "○ IDLE             | amber-review-orch · fictional-amber-garden | claude · Q:0",
-                "○ IDLE             |   └─ fictional-idle-reviewer",
-                "○ IDLE             | blue-lead-orch · fictional-blue-harbor | claude · Q:0",
-                "! BLOCKED          |   └─ fictional-blocked-builder",
-                "○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name · ficti… | claude · Q:0",
-                "? UNKNOWN          |   └─ fictional-worker-with-an-extraordinarily-long-name-for-narrow-board-view",
-                "○ IDLE             | copper-lead-orch · fictional-copper-hill | claude · Q:0",
-                "✓ DONE             |   └─ fictional-completed-worker",
-                "○ IDLE             | copper-review-orch · fictional-copper-hill | claude · Q:0",
-                "▶ WORKING          |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-            160: [
-                "○ IDLE             | amber-lead-orch · fictional-amber-garden | claude · Q:1",
-                "▶ WORKING          |   └─ fictional-amber-worker",
-                "○ IDLE             | amber-review-orch · fictional-amber-garden | claude · Q:0",
-                "○ IDLE             |   └─ fictional-idle-reviewer",
-                "○ IDLE             | blue-lead-orch · fictional-blue-harbor | claude · Q:0",
-                "! BLOCKED          |   └─ fictional-blocked-builder",
-                "○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name · fictional-blue-harbor | claude · Q:0",
-                "? UNKNOWN          |   └─ fictional-worker-with-an-extraordinarily-long-name-for-narrow-board-view",
-                "○ IDLE             | copper-lead-orch · fictional-copper-hill | claude · Q:0",
-                "✓ DONE             |   └─ fictional-completed-worker",
-                "○ IDLE             | copper-review-orch · fictional-copper-hill | claude · Q:0",
-                "▶ WORKING          |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-        }
-        for width, wanted_rows in expected.items():
-            with self.subTest(width=width):
-                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
-                self.assertEqual(board.ANSI_RE.sub("", lines[0]), "ORCH BOARD · 3 projects · 6 orchs · 8 agents")
-                rows = [line for line in lines[2:-1] if line]
-                self.assertEqual(rows, wanted_rows)
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-
-    def test_runtime_column_fits_narrow_width_and_smaller_width_degrades(self):
-        data = cycle2_status_data()
-        for width in (30, 40, 42, 43, 44, 50, 51, 52, 53, 60, 65, 100):
-            with self.subTest(width=width):
-                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-                self.assertFalse(any("HOST / MODEL" in line for line in lines))
-                compact = "".join(lines)
-                self.assertIn("adopted-builder", re.sub(r"\s+", "", compact))
-                self.assertIn("orphan-worker", re.sub(r"\s+", "", compact))
-
-    def test_runtime_reserves_owner_separator_and_worker_leaf_at_50_60_and_67(self):
-        project = "/fictional/amber-garden"
-        data = {
-            "version": 1,
-            "orchs": {"s/p": {"project": project, "name": "orch-owner", "gone": False, "queue": []}},
-            "agents": {},
-        }
-        for name in ("fictional-worker-prefix-alpha-A-tail", "fictional-worker-prefix-bravo-B-tail"):
-            data["agents"]["s/" + name] = {
-                "project": project, "name": name, "orch": "s/p", "status": "working",
-                "kind": "claude", "model": "fictional-extraordinarily-long-model-name",
-            }
-        expected = {
-            50: {
-                "layout": (11, 36, 0), "runtime": False,
-                "rows": [
-                    "▶ WORKING   | orch-… > fictional-wor…-alpha-A-tail",
-                    "▶ WORKING   | orch-… > fictional-wor…-bravo-B-tail",
-                ],
-            },
-            60: {
-                "layout": (11, 29, 14), "runtime": True,
-                "rows": [
-                    "▶ WORKING   | orch-… > fictional-…ha-A-tail | claude fictio…",
-                    "▶ WORKING   | orch-… > fictional-…vo-B-tail | claude fictio…",
-                ],
-            },
-            67: {
-                "layout": (11, 29, 21), "runtime": True,
-                "rows": [
-                    "▶ WORKING   | orch-… > fictional-…ha-A-tail | claude fictional-ext…",
-                    "▶ WORKING   | orch-… > fictional-…vo-B-tail | claude fictional-ext…",
-                ],
-            },
-            57: {
-                "layout": (11, 43, 0), "runtime": False,
-                "rows": [
-                    "▶ WORKING   | orch-… > fictional-worker-…fix-alpha-A-tail",
-                    "▶ WORKING   | orch-… > fictional-worker-…fix-bravo-B-tail",
-                ],
-            },
-        }
-        for width, wanted in expected.items():
-            with self.subTest(width=width):
-                state_width, path_width, runtime_width = board.table_layout(width, 26, 29)
-                self.assertEqual((state_width, path_width, runtime_width), wanted["layout"])
-                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
-                joined = re.sub(r"\s+", "", "".join(lines))
-                self.assertIn("fictional-worker-prefix-alpha-A-tail", joined)
-                self.assertIn("fictional-worker-prefix-bravo-B-tail", joined)
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-
-    def test_orphan_rows_keep_status_order(self):
-        project = "/fictional/amber-garden"
-        data = {
-            "version": 1, "orchs": {},
-            "agents": {
-                "s/closed": {"project": project, "name": "fictional-closed-leaf", "orch": "s/missing", "status": "closed", "closed_at": time.time()},
-                "s/working": {"project": project, "name": "fictional-working-leaf", "orch": "s/missing", "status": "working"},
-                "s/blocked": {"project": project, "name": "fictional-blocked-leaf", "orch": "s/missing", "status": "blocked"},
-            },
-        }
-        rows = [line for line in board.render(data, 100, False, "registry.json", "12:34:56").splitlines() if line.startswith(("! BLOCKED", "▶ WORKING", "× CLOSED"))]
-        self.assertEqual(rows, [
-            "! BLOCKED *        |   ├─ fictional-blocked-leaf",
-            "▶ WORKING *        |   ├─ fictional-working-leaf",
-            "× CLOSED *         |   └─ fictional-closed-leaf",
-        ])
-
-    def test_orch_sections_are_project_then_orch_sorted_with_orphans_last(self):
-        data = {
-            "version": 1,
-            "orchs": {
-                "s/a": {"project": "/fictional/amber-garden", "name": "amber-orch", "gone": False, "queue": []},
-                "s/b": {"project": "/fictional/amber-garden", "name": "birch-orch", "gone": False, "queue": []},
-                "s/c": {"project": "/fictional/blue-harbor", "name": "cobalt-orch", "gone": False, "queue": []},
-            },
-            "agents": {
-                "s/a1": {"project": "/fictional/amber-garden", "name": "amber-worker", "orch": "s/a", "status": "working"},
-                "s/b1": {"project": "/fictional/amber-garden", "name": "birch-worker", "orch": "s/b", "status": "working"},
-                "s/x1": {"project": "/fictional/amber-garden", "name": "orphan-one", "orch": "s/missing", "status": "idle"},
-                "s/x2": {"project": "/fictional/amber-garden", "name": "orphan-two", "orch": "s/missing", "status": "idle"},
-                "s/c1": {"project": "/fictional/blue-harbor", "name": "cobalt-worker", "orch": "s/c", "status": "working"},
-            },
-        }
-        lines = board.render(data, 100, False, "registry.json", "12:34:56").splitlines()
-        anchors = [
-            "amber-orch · amber-garden", "amber-worker", "birch-orch · amber-garden", "birch-worker",
-            "cobalt-orch · blue-harbor", "cobalt-worker", "ORPHANS", "orphan-one", "orphan-two",
-        ]
-        indexes = [next(i for i, line in enumerate(lines) if anchor in line) for anchor in anchors]
-        self.assertEqual(indexes, sorted(indexes))
-        self.assertEqual(sum(line == "ORPHANS" for line in lines), 1)
-        self.assertNotIn("\n\n\n", "\n".join(lines))
-
-    def test_status_glyphs_render_without_legend_or_color_at_60_and_100(self):
-        for width in (60, 100):
-            data = json.loads(self.registry.read_text())
-            data["agents"]["session-slate/worker-active"]["status"] = "unrecognized"
-            output = board.render(data, width, False, "registry.json", "12:34:56")
-            self.assertNotIn("Legend:", output)
-            self.assertIn("○ IDLE", output)
-            self.assertIn("▶ WORKING", output)
-            self.assertIn("✓ DONE", output)
-            self.assertIn("? UNKNOWN", output)
-            self.assertIn("! BLOCKED", output)
-            self.assertNotRegex(output, r"\x1b\[")
-
-    def test_long_parent_components_keep_distinct_worker_names_at_60(self):
-        data = {"version": 1, "orchs": {"s/p": {"project": "/fictional/long-project-component-name-that-needs-truncation", "name": "fictional-coordinator-with-an-extraordinarily-long-name", "gone": False, "queue": []}}, "agents": {}}
-        for name in ("fictional-worker-one", "fictional-worker-two"):
-            data["agents"]["s/" + name] = {"project": data["orchs"]["s/p"]["project"], "name": name, "orch": "s/p", "status": "working"}
-        output = board.render(data, 60, False, "registry.json", "12:34:56")
-        rows = [line for line in output.splitlines() if "▶ WORKING" in line]
-        self.assertEqual(rows, [
-            "▶ WORKING   |   ├─ fictional-worker-one",
-            "▶ WORKING   |   └─ fictional-worker-two",
-        ])
-        self.assertTrue(all(board.display_width(line) <= 60 for line in output.splitlines()))
-
-    def test_crowded_orch_sections_keep_names_at_100_and_60(self):
-        data = json.loads(CROWDED_FIXTURE.read_text())
-        expected = {
-            100: [
-                "○ IDLE             | amber-lead-orch · fictional-amber-garden | claude · Q:1",
-                "▶ WORKING          |   └─ fictional-amber-worker",
-                "○ IDLE             | amber-review-orch · fictional-amber-garden | claude · Q:0",
-                "○ IDLE             |   └─ fictional-idle-reviewer",
-                "○ IDLE             | blue-lead-orch · fictional-blue-harbor | claude · Q:0",
-                "! BLOCKED          |   └─ fictional-blocked-builder",
-                "○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name · ficti… | claude · Q:0",
-                "? UNKNOWN          |   └─ fictional-worker-with-an-extraordinarily-long-name-for-narrow-board-view",
-                "○ IDLE             | copper-lead-orch · fictional-copper-hill | claude · Q:0",
-                "✓ DONE             |   └─ fictional-completed-worker",
-                "○ IDLE             | copper-review-orch · fictional-copper-hill | claude · Q:0",
-                "▶ WORKING          |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *           |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN *        |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-            60: [
-                "○ IDLE      | amber-lead-orch · fictional-am… | claude · Q:1",
-                "▶ WORKING   |   └─ fictional-amber-worker",
-                "○ IDLE      | amber-review-orch · fictional-… | claude · Q:0",
-                "○ IDLE      |   └─ fictional-idle-reviewer",
-                "○ IDLE      | blue-lead-orch · fictional-blu… | claude · Q:0",
-                "! BLOCKED   |   └─ fictional-blocked-builder",
-                "○ IDLE      | fictional-coordinator-with-an-… | claude · Q:0",
-                "? UNKNOWN   |   └─ fictional-worker-with-an-extraordinarily-",
-                "                   long-name-for-narrow-board-view",
-                "○ IDLE      | copper-lead-orch · fictional-c… | claude · Q:0",
-                "✓ DONE      |   └─ fictional-completed-worker",
-                "○ IDLE      | copper-review-orch · fictional… | claude · Q:0",
-                "▶ WORKING   |   └─ fictional-copper-reviewer",
-                "ORPHANS",
-                "○ IDLE *    |   ├─ fictional-orphan-fir-worker",
-                "? UNKNOWN * |   └─ fictional-orphan-ash-worker",
-                "fictional-amber-garden · 1 queued notice",
-            ],
-        }
-        for width, wanted_rows in expected.items():
-            with self.subTest(width=width):
-                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
-                rows = [line for line in lines[2:-1] if line]
-                self.assertEqual(rows, wanted_rows)
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-
-    def test_resize_redraws_at_new_width_without_registry_change(self):
-        process, master = self.start_pty(100)
-        try:
-            initial = self.read_pty_until(master, "-" * 100)
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 60, 0, 0))
-            resized = self.read_pty_until(master, "-" * 60)
-            self.assertNotIn("-" * 100, resized)
-            os.write(master, b"q")
-            process.wait(timeout=2)
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
-            os.close(master)
-
-    def test_cli_registry_uses_project_orch_agent_hierarchy(self):
-        from importlib import import_module
-        phase = import_module("tests.test_phase1").PhaseOne()
-        phase.setUp()
-        try:
-            phase.reg()
-            phase.spawn("fictional-worker")
-            data = phase.state()
-            orch = next(iter(data["orchs"].values()))
-            agent = next(iter(data["agents"].values()))
-            self.assertEqual(orch["name"], "orch")
-            self.assertNotEqual(Path(orch["project"]).name, orch["name"])
-            self.assertTrue({"kind", "workspace", "tab"}.issubset(orch))
-            self.assertTrue({"kind", "model", "effort", "where", "role"}.issubset(agent))
-            projects = board.build_projects(data)
-            rows = [row for project in projects for row in project["rows"]]
-            self.assertIn(["orch"], [row["path"] for row in rows])
-            self.assertIn(["orch", "fictional-worker"], [row["path"] for row in rows])
-            output = board.render(data, 100, False, "registry.json", "12:34:56")
-            self.assertIn("fictional-worker", output)
-            self.assertNotIn("orch > fictional-worker", output)
-            self.assertNotIn("repo > orch", output)
-        finally:
-            phase.tearDown()
-
-    def test_renderer_fits_60_columns_and_has_narrow_rows(self):
-        lines = self.render(60).splitlines()
-        self.assertEqual(lines[1], "-" * 60)
-        self.assertEqual(sum(line == "-" * 60 for line in lines), 1)
-        self.assertTrue(any("! BLOCKED" in line and "blocked-spruce-worker" in line for line in lines))
-        self.assertTrue(any("○ IDLE *" in line and "orphaned-birch-agent" in line for line in lines))
-        self.assertTrue(all(board.display_width(line) <= 60 for line in lines))
-        self.assertEqual(lines[-1], "refreshed 12:34:56")
-
-    def test_long_names_truncate_with_one_ellipsis_without_exceeding_width(self):
-        lines = self.render(60).splitlines()
-        joined = re.sub(r"\s+", "", "".join(lines))
-        self.assertIn("extraordinarily-long-fictional-agent-name-for-truncation-check", joined)
-        self.assertTrue(all(board.display_width(line) <= 60 for line in lines))
-
-    def test_no_color_contains_no_ansi_sequences(self):
-        output = self.render(100, color=False)
-        self.assertNotRegex(output, r"\x1b\[")
-        self.assertTrue(any(line == "" for line in output.splitlines()))
-
-    def test_no_color_environment_disables_terminal_styles(self):
-        class TerminalBuffer(StringIO):
-            def isatty(self):
-                return True
-
-        output = TerminalBuffer()
-        with patch.dict(os.environ, {"NO_COLOR": ""}), patch("plugin.board.sys.stdout", output):
-            board.main(["--once", "--width", "60", "--registry", str(self.registry)])
-        self.assertNotRegex(output.getvalue(), r"\x1b\[")
-
-    def test_blocked_and_orphan_rows_use_distinct_styles_and_markers(self):
-        lines = self.render(100, color=True).splitlines()
-        self.assertTrue(any("\x1b[1;31m! BLOCKED\x1b[0m" in line and "blocked-spruce-worker" in line for line in lines))
-        self.assertIn("ORPHANS", lines)
-        self.assertTrue(any("\x1b[1;35m○ IDLE *\x1b[0m" in line and "orphaned-birch-agent" in line for line in lines))
-        self.assertTrue(any("\x1b[1;34m▶ WORKING\x1b[0m" in line for line in lines))
-        self.assertTrue(any("\x1b[32m✓ DONE\x1b[0m" in line for line in lines))
-
-    def test_q_exits_after_initial_render(self):
-        process, master = self.start_pty(100)
-        try:
-            self.read_pty_until(master, "-" * 100)
-            os.write(master, b"xq")
-            process.wait(timeout=2)
-            self.assertEqual(process.returncode, 0)
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
-            os.close(master)
-
-    def test_empty_registry_has_explicit_state_and_footer(self):
-        output = board.render({"version": 1, "orchs": {}, "agents": {}}, 60, False, "/fictional/registry.json", "12:34:56")
-        lines = output.splitlines()
-        self.assertEqual(lines[0], "ORCH BOARD · 0 projects · 0 orchs · 0 agents")
-        self.assertIn("No projects or agents registered.", lines)
-        self.assertEqual(lines[-1], "refreshed 12:34:56")
-
-    def test_refresh_only_changes_when_registry_mtime_changes(self):
-        view = board.Board(self.registry, width=100, color_enabled=False, clock=lambda: "12:34:56")
-        initial = view.refresh()
-        self.assertTrue(initial)
-        self.assertFalse(view.refresh())
-        data = json.loads(self.registry.read_text())
-        data["agents"]["session-amber/worker-new"] = {
-            "project": "/fictional/copperfield", "name": "fresh-worker", "orch": "session-amber/pane-1", "status": "idle"
-        }
-        self.registry.write_text(json.dumps(data))
-        stamp = self.registry.stat().st_mtime_ns + 2_000_000_000
-        import os
-        os.utime(self.registry, ns=(stamp, stamp))
-        self.assertTrue(view.refresh())
-        self.assertEqual(view.refreshed_at, "12:34:56")
-        self.assertTrue(any("○ IDLE" in line and "fresh-worker" in line for line in view.output.splitlines()))
-        self.assertFalse(view.refresh())
-
-    def test_manifest_declares_board_action_and_pane_commands(self):
-        manifest = tomllib.loads((Path(__file__).parents[1] / "plugin" / "herdr-plugin.toml").read_text())
+    def test_board_plugin_actions_are_stable(self):
+        manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
         self.assertEqual(manifest["actions"], [
             {"id": "board", "title": "Open orch board", "contexts": ["pane"], "command": ["python3", "board.py", "--open"]},
             {"id": "board-full", "title": "Orch board, full screen", "contexts": ["pane"], "command": ["python3", "board.py", "--open", "--placement", "overlay"]},
         ])
-        self.assertEqual(manifest["panes"], [{
-            "id": "board", "title": "Orch board", "placement": "split", "command": ["python3", "board.py"]
-        }])
-
-    def test_open_action_targets_current_pane_without_changing_plugin_cwd(self):
-        responses = [subprocess.CompletedProcess([], 0, '{"result":{"pane":{"pane_id":"fixture-board"}}}', "")]
-        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane"}), patch("plugin.board.subprocess.run", side_effect=responses) as run:
-            board.open_board()
-        self.assertEqual(run.call_args_list[0].args[0], [
-            "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board",
-            "--placement", "split", "--target-pane", "fixture-pane", "--direction", "right",
-        ])
-        manifest = tomllib.loads((Path(__file__).parents[1] / "plugin" / "herdr-plugin.toml").read_text())
-        self.assertEqual(manifest["panes"][0]["command"], ["python3", "board.py"])
-
-    def test_full_board_open_action_uses_overlay_without_split_arguments(self):
-        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", "ORCH_BOARD_DIRECTION": "left"}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane"}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
             board.open_board("overlay")
-        self.assertEqual(run.call_args.args[0], [
-            "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", "overlay",
-        ])
+        self.assertEqual(run.call_args.args[0], ["herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", "overlay"])
 
-    def test_full_board_exact_rows_at_55_67_100_and_160_columns(self):
-        data = json.loads(CYCLE2_FIXTURE.read_text())
-        data["agents"]["session-a/fictional-closed-worker"]["closed_at"] = time.time()
-        expected = {
-            55: [
-                "○ IDLE      | orch | claude · Q:0",
-                "▶ WORKING   |   ├─ fictional-adopted-builder",
-                "× CLOSED    |   └─ fictional-closed-worker",
-                "ORPHANS",
-                "▶ WORKING * |   └─ fictional-orphan-worker",
-            ],
-            67: [
-                "○ IDLE      | orch | claude · Q:0",
-                "▶ WORKING   |   ├─ fictional-adopted-builder",
-                "× CLOSED    |   └─ fictional-closed-worker",
-                "ORPHANS",
-                "▶ WORKING * |   └─ fictional-orphan-worker",
-            ],
-            100: [
-                "○ IDLE             | orch | claude · Q:0",
-                "▶ WORKING          |   ├─ fictional-adopted-builder",
-                "× CLOSED           |   └─ fictional-closed-worker",
-                "ORPHANS",
-                "▶ WORKING *        |   └─ fictional-orphan-worker",
-            ],
-            160: [
-                "○ IDLE             | orch | claude · Q:0",
-                "▶ WORKING          |   ├─ fictional-adopted-builder",
-                "× CLOSED           |   └─ fictional-closed-worker",
-                "ORPHANS",
-                "▶ WORKING *        |   └─ fictional-orphan-worker",
-            ],
-        }
-        for width, wanted_rows in expected.items():
-            with self.subTest(width=width):
-                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
-                self.assertEqual(lines[0], "ORCH BOARD · 1 project · 1 orch · 2 agents")
-                self.assertEqual([line for line in lines[2:-1] if line], wanted_rows)
-                self.assertTrue(all(board.display_width(line) <= width for line in lines))
-
-    def test_open_action_direction_defaults_right_and_accepts_down(self):
-        for environment, direction in (({}, "right"), ({"ORCH_BOARD_DIRECTION": "down"}, "down")):
-            with self.subTest(direction=direction), patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", **environment}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+    def test_split_board_open_keeps_direction_and_target_behavior(self):
+        for direction in ("right", "down"):
+            with self.subTest(direction=direction), patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", "ORCH_BOARD_DIRECTION": direction}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
                 board.open_board()
-            self.assertEqual(run.call_args.args[0][-1], direction)
-
-    def test_open_action_rejects_invalid_direction_before_herdr_call(self):
+            self.assertEqual(run.call_args.args[0], ["herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", "split", "--target-pane", "fixture-pane", "--direction", direction])
         with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", "ORCH_BOARD_DIRECTION": "left"}), patch("plugin.board.subprocess.run") as run:
             with self.assertRaisesRegex(SystemExit, "ORCH_BOARD_DIRECTION must be 'right' or 'down'"):
                 board.open_board()
         run.assert_not_called()
-
-    def test_cli_accepts_width_below_40_and_clips_each_line(self):
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parents[1] / "plugin" / "board.py"), "--once", "--width", "30", "--registry", str(self.registry)],
-            text=True, capture_output=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(all(board.display_width(line) <= 30 for line in result.stdout.splitlines()))
 
 
 if __name__ == "__main__":
