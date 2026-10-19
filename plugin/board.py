@@ -274,10 +274,11 @@ def run(board: Board, dynamic_width: bool = True) -> None:
             if changed:
                 sys.stdout.write("\033[H\033[2J" + board.output + "\n")
                 sys.stdout.flush()
-            readable, _, _ = select.select([sys.stdin], [], [], 1.0)
+            fd = sys.stdin.fileno()
+            readable, _, _ = select.select([fd], [], [], 1.0)
             if readable:
-                key = sys.stdin.read(1)
-                if key.lower() == "q" or key == "":
+                keys = os.read(fd, 4096).decode(errors="ignore")
+                if "q" in keys.lower() or not keys:
                     break
     finally:
         if old_settings is not None:
