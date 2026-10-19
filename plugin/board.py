@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+CONTROL_SEQUENCE_RE = re.compile(r"\033(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\033\\))")
 BOARD_VERSION = "0.1.0"
 REFRESH_SECONDS = 1
 STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
@@ -119,13 +120,21 @@ def pane_titles_from_payload(payload: dict) -> dict[str, str]:
     panes = result.get("panes", []) if isinstance(result, dict) else []
     if not isinstance(panes, list):
         return {}
+    session = os.environ.get("HERDR_SESSION")
+    if not session:
+        return {}
     titles = {}
     for pane in panes:
         if not isinstance(pane, dict) or pane.get("pane_id") is None:
             continue
         title = pane.get("terminal_title_stripped") or pane.get("label") or pane.get("terminal_title") or ""
-        titles[str(pane["pane_id"])] = str(title)
+        titles[f"{session}/{pane['pane_id']}"] = sanitize_title(str(title))
     return titles
+
+
+def sanitize_title(value: str) -> str:
+    value = CONTROL_SEQUENCE_RE.sub("", value)
+    return "".join(char for char in value if not unicodedata.category(char).startswith("C") and char not in "\u2028\u2029")
 
 
 def read_pane_titles() -> dict[str, str]:
@@ -144,6 +153,7 @@ def read_pane_titles() -> dict[str, str]:
 
 def build_projects(data: dict, pane_titles: dict[str, str] | None = None) -> list[dict]:
     pane_titles = pane_titles or {}
+    current_session = os.environ.get("HERDR_SESSION")
     projects: dict[str, dict] = {}
     all_orchs = data.get("orchs", {})
     for key, orch in all_orchs.items():
@@ -152,7 +162,10 @@ def build_projects(data: dict, pane_titles: dict[str, str] | None = None) -> lis
         project["queue_count"] += len(orch.get("queue", []))
         if not orch.get("gone", False):
             name = orch.get("name") or key.split("/", 1)[-1]
-            project["rows"].append({"node": orch, "kind": "ORCH", "path": [name], "orphan": False, "group": key, "group_name": name, "title": pane_titles.get(str(orch.get("pane")), "")})
+            session = key.rpartition("/")[0]
+            title_key = f"{session}/{orch.get('pane')}"
+            title = pane_titles.get(title_key, "") if current_session and session == current_session else ""
+            project["rows"].append({"node": orch, "kind": "ORCH", "path": [name], "orphan": False, "group": key, "group_name": name, "title": title})
 
     for key, agent in data.get("agents", {}).items():
         project_path = str(agent.get("project", ""))
@@ -168,7 +181,10 @@ def build_projects(data: dict, pane_titles: dict[str, str] | None = None) -> lis
             parts = [owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
             group = owner_key
             group_name = owner.get("name") or owner_key.split("/", 1)[-1]
-        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan, "group": group, "group_name": group_name, "title": pane_titles.get(str(agent.get("pane")), "")})
+        session = key.rpartition("/")[0]
+        title_key = f"{session}/{agent.get('pane')}"
+        title = pane_titles.get(title_key, "") if current_session and session == current_session else ""
+        project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan, "group": group, "group_name": group_name, "title": title})
 
     result = list(projects.values())
     for project in result:
@@ -190,7 +206,7 @@ def status_cell(row: dict, enabled: bool) -> str:
     status = str(row["node"].get("status", "unknown")).lower()
     display_status = status if status in STATUS_COLORS else "unknown"
     role = STATUS_COLORS[display_status]
-    return color(status, role, enabled, terminal_color_mode())
+    return color(display_status, role, enabled, terminal_color_mode())
 
 
 def orch_status_text(row: dict) -> str:

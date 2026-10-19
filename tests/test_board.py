@@ -47,8 +47,9 @@ class BoardTests(unittest.TestCase):
         self.temp.cleanup()
 
     def render(self, width=100, enabled=False, data=None, now=1000, titles=None):
-        return board.render(data or json.loads(self.registry.read_text()), width, enabled,
-                            str(self.registry), "2026-10-19 12:34:56", now=now, pane_titles=titles)
+        with patch.dict(os.environ, {"HERDR_SESSION": "session-a"}):
+            return board.render(data or json.loads(self.registry.read_text()), width, enabled,
+                                str(self.registry), "2026-10-19 12:34:56", now=now, pane_titles=titles)
 
     def board_cli_env(self, **overrides):
         calls = self.root / "orch-board-herdr-calls.jsonl"
@@ -69,14 +70,14 @@ class BoardTests(unittest.TestCase):
                               text=True, capture_output=True, env=env or self.board_cli_env())
 
     def test_header_columns_projects_orch_sections_and_plain_agent_names(self):
-        rendered = self.render(titles={"p1": "Fictional task title"})
+        rendered = self.render(titles={"session-a/p1": "Fictional task title"})
         lines = rendered.splitlines()
         plain = [line.strip() for line in lines]
         self.assertEqual(plain[:3], [
             "orch board v0.1.0", "refresh: 1s · last: 12:34:56",
             "Status: All · 2 orchs · 3 agents",
         ])
-        self.assertEqual(plain[4], board.format_row("Name", "Status", "Project", "Title", 100).strip())
+        self.assertEqual(plain[4], "Name                            Status         Project           Title")
         self.assertTrue(plain[5].startswith("─"))
         self.assertIn("orch-skill · 2 queued", plain)
         first_orch = next(i for i, line in enumerate(lines) if "▾ orch-claude" in line)
@@ -95,18 +96,23 @@ class BoardTests(unittest.TestCase):
         self.assertNotIn("refreshed", "\n".join(plain))
 
     def test_header_cells_start_at_data_columns_at_supported_widths(self):
-        titles = {"p1": "Fictional task title"}
+        titles = {"session-a/p1": "Fictional task title"}
+        expected = {
+            160: ((2, 34, 49, 67), (30, 13, 16, 92), "▾ orch-claude", "Fictional task title"),
+            100: ((2, 34, 49, 67), (30, 13, 16, 32), "▾ orch-claude", "Fictional task title"),
+            67: ((2, 26, 41, 59), (22, 13, 16, 6), "▾ orch-claude", "Ficti…"),
+            55: ((2, 16, 31, 43), (12, 13, 10, 10), "▾ orch-clau…", "Fictional…"),
+        }
         for width in (160, 100, 67, 55):
             with self.subTest(width=width):
                 lines = self.render(width=width, titles=titles).splitlines()
                 header = lines[4]
-                name, status, project, title = board.column_widths(width)
-                offsets = (2, 2 + name + 2, 2 + name + status + 4,
-                           2 + name + status + project + 6)
+                offsets, cell_widths, expected_name, expected_title = expected[width]
+                name, status, project, title = cell_widths
                 self.assertEqual(tuple(header.find(cell) for cell in ("Name", "Status", "Project", "Title")), offsets)
                 row = next(line for line in lines if line[offsets[1]:offsets[1] + status].strip() == "idle  Q:2")
                 self.assertEqual(tuple(row[offset:offset + cell_width].strip() for offset, cell_width in zip(offsets, (name, status, project, title))),
-                                 (board.truncate("▾ orch-claude", name), "idle  Q:2", "orch-skill", board.truncate("Fictional task title", title)))
+                                 (expected_name, "idle  Q:2", "orch-skill", expected_title))
 
     def test_narrow_status_column_keeps_status_and_queue_count(self):
         lines = self.render(width=55).splitlines()
@@ -249,12 +255,40 @@ class BoardTests(unittest.TestCase):
             {"pane_id": "p2", "label": "Label fallback"},
             {"pane_id": "p3", "terminal_title": "Terminal fallback"},
         ]}}
-        self.assertEqual(board.pane_titles_from_payload(payload), {
-            "p1": "First title", "p2": "Label fallback", "p3": "Terminal fallback",
-        })
+        with patch.dict(os.environ, {"HERDR_SESSION": "session-a"}):
+            self.assertEqual(board.pane_titles_from_payload(payload), {
+                "session-a/p1": "First title", "session-a/p2": "Label fallback", "session-a/p3": "Terminal fallback",
+            })
         with patch("plugin.board.subprocess.run", side_effect=subprocess.TimeoutExpired("herdr", 1)) as run:
             self.assertEqual(board.read_pane_titles(), {})
         self.assertEqual(run.call_args.kwargs["timeout"], 1)
+
+    def test_pane_titles_are_session_scoped_and_sanitized(self):
+        payload = {"result": {"panes": [
+            {"pane_id": "p1", "terminal_title": "\033[31mFirst\033[0m\nsecond\r\tline"},
+        ]}}
+        with patch.dict(os.environ, {"HERDR_SESSION": "session-a"}):
+            self.assertEqual(board.pane_titles_from_payload(payload), {"session-a/p1": "Firstsecondline"})
+            data = {"version": 1, "orchs": {
+                "session-a/p1": {"project": "/fictional/title-garden", "name": "current-orch", "pane": "p1", "status": "idle", "queue": []},
+                "session-b/p1": {"project": "/fictional/title-garden", "name": "other-orch", "pane": "p1", "status": "idle", "queue": []},
+            }, "agents": {
+                "session-a/w": {"project": "/fictional/title-garden", "name": "current-worker", "pane": "p1", "orch": "session-a/p1", "status": "working"},
+                "session-b/w": {"project": "/fictional/title-garden", "name": "other-worker", "pane": "p1", "orch": "session-b/p1", "status": "working"},
+            }}
+            output = self.render(data=data, titles={"session-a/p1": "Current title", "session-b/p1": "Foreign title"})
+        self.assertIn("Current title", output)
+        self.assertNotIn("Foreign title", output)
+        self.assertEqual(output.count("Current title"), 2)
+
+    def test_unrecognized_status_renders_unknown(self):
+        data = {"version": 1, "orchs": {}, "agents": {"s/a": {
+            "project": "/fictional/unknown-garden", "name": "odd-worker", "status": "unrecognized",
+        }}}
+        lines = self.render(data=data).splitlines()
+        row = next(line for line in lines if "odd-worker" in line)
+        self.assertIn("unknown", row)
+        self.assertNotIn("unrecognized", row)
 
     def test_board_refreshes_title_changes_without_registry_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
