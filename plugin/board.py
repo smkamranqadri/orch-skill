@@ -164,22 +164,34 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
 
 
 def footer(registry: str, refreshed_at: str, width: int) -> str:
-    ending = f" · refreshed {refreshed_at}"
-    prefix = "Registry: "
+    clock = re.search(r"\d{2}:\d{2}:\d{2}", refreshed_at)
+    short_time = clock.group(0) if clock else refreshed_at[-8:]
+    if width >= 75:
+        prefix, ending = "Registry: ", f" · refreshed {refreshed_at}"
+    elif width >= 50:
+        prefix, ending = "Reg: ", f" · {short_time}"
+    else:
+        prefix, ending = "R: ", f" {short_time[-5:]}"
     path_limit = max(1, width - display_width(prefix + ending))
-    if display_width(registry) > path_limit and path_limit > 1:
+    path = registry
+    if display_width(path) > path_limit:
         tail = ""
         used = 0
-        for char in reversed(registry):
+        for char in reversed(path):
             char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
-            if used + char_width > path_limit - 1:
+            if used + char_width > max(0, path_limit - 1):
                 break
             tail = char + tail
             used += char_width
-        registry = "…" + tail
-    else:
-        registry = truncate(registry, path_limit)
-    return prefix + registry + ending
+        path = "…" + tail if path_limit > 1 else "…"
+    result = prefix + path + ending
+    return truncate(result, width)
+
+
+def legend(width: int) -> str:
+    if width >= 60:
+        return "Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan"
+    return "○i ▶w !b ✓d ?u *o"
 
 
 def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None) -> str:
