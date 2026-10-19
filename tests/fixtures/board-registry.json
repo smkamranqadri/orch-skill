@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "orchs": {
+    "session-amber/pane-1": {
+      "project": "/fictional/copperfield",
+      "name": "copperfield-orch",
+      "pane": "pane-1",
+      "gone": false,
+      "queue": [
+        "notice one",
+        "notice two"
+      ],
+      "status": "idle",
+      "kind": "claude",
+      "workspace": "fictional-workspace-pane-1",
+      "tab": "fictional-tab-pane-1"
+    },
+    "session-amber/pane-2": {
+      "project": "/fictional/copperfield",
+      "name": "copperfield-review-orch",
+      "pane": "pane-2",
+      "gone": false,
+      "queue": [],
+      "status": "blocked",
+      "kind": "codex",
+      "workspace": "fictional-workspace-pane-2",
+      "tab": "fictional-tab-pane-2"
+    },
+    "session-slate/pane-3": {
+      "project": "/fictional/maple-lab",
+      "name": "maple-orch",
+      "pane": "pane-3",
+      "gone": false,
+      "queue": [
+        "one pending notice"
+      ],
+      "status": "working",
+      "kind": "claude",
+      "workspace": "fictional-workspace-pane-3",
+      "tab": "fictional-tab-pane-3"
+    },
+    "session-old/pane-4": {
+      "project": "/fictional/maple-lab",
+      "name": "retired-orch",
+      "pane": "pane-4",
+      "gone": true,
+      "queue": [
+        "retained notice"
+      ],
+      "status": "done"
+    }
+  },
+  "agents": {
+    "session-amber/worker-blocked": {
+      "project": "/fictional/copperfield",
+      "name": "blocked-spruce-worker",
+      "orch": "session-amber/pane-1",
+      "status": "blocked",
+      "kind": "codex",
+      "model": "GPT-6-Luna",
+      "where": "pane",
+      "role": "build"
+    },
+    "session-amber/worker-active": {
+      "project": "/fictional/copperfield",
+      "name": "willow-fixture-reader",
+      "orch": "session-amber/pane-1",
+      "status": "working",
+      "kind": "claude",
+      "model": "Sonnet 5.5",
+      "where": "worktree",
+      "role": "review"
+    },
+    "session-slate/worker-orphan": {
+      "project": "/fictional/maple-lab",
+      "name": "orphaned-birch-agent",
+      "orch": "session-old/pane-4",
+      "status": "idle",
+      "kind": "claude",
+      "model": "Haiku 5.5",
+      "where": "pane",
+      "role": "explore"
+    },
+    "session-slate/worker-active": {
+      "project": "/fictional/maple-lab",
+      "name": "cedar-worker",
+      "orch": "session-slate/pane-3",
+      "status": "working",
+      "kind": "codex",
+      "model": "GPT-6.1-Sol",
+      "where": "tab",
+      "role": "build"
+    },
+    "session-slate/worker-long": {
+      "project": "/fictional/maple-lab",
+      "name": "extraordinarily-long-fictional-agent-name-for-truncation-check",
+      "orch": "session-slate/pane-3",
+      "status": "done",
+      "kind": "claude",
+      "model": "Opus 5.5",
+      "where": "worktree",
+      "role": "plan"
+    }
+  }
+}
