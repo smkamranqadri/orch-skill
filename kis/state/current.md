@@ -1,6 +1,6 @@
 # Current
 
-Stamp: main b08d7b9 pending
+Stamp: main e702c3c b9625144bfc7
 
 - Branch: `main`, local only, not pushed (`origin/main` is far behind). Other branches: `board-v2`
   (parked, unmerged) and `phase3-board-design` (throwaway mockups). No worktrees; the build agents
