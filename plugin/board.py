@@ -78,7 +78,7 @@ def build_projects(data: dict) -> list[dict]:
         project = projects.setdefault(project_path, {"path": project_path, "name": Path(project_path).name or "unknown project", "queue_count": 0, "rows": []})
         project["queue_count"] += len(orch.get("queue", []))
         if not orch.get("gone", False):
-            project["rows"].append({"node": orch, "kind": "ORCH", "path": [project["name"], orch.get("name") or key.split("/", 1)[-1]], "orphan": False})
+            project["rows"].append({"node": orch, "kind": "ORCH", "path": [orch.get("name") or key.split("/", 1)[-1]], "orphan": False})
 
     for key, agent in data.get("agents", {}).items():
         project_path = str(agent.get("project", ""))
@@ -87,9 +87,9 @@ def build_projects(data: dict) -> list[dict]:
         owner = all_orchs.get(owner_key, {})
         is_orphan = not owner or owner.get("gone", False) or owner.get("project") != project_path
         if is_orphan:
-            parts = [project["name"], "ORPHAN", agent.get("name") or key.split("/", 1)[-1]]
+            parts = ["ORPHAN", agent.get("name") or key.split("/", 1)[-1]]
         else:
-            parts = [project["name"], owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
+            parts = [owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
         project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan})
 
     result = list(projects.values())
@@ -117,9 +117,19 @@ def status_cell(row: dict, enabled: bool) -> str:
     return color(label, STATUS_COLORS.get(status, STATUS_COLORS["unknown"]), enabled)
 
 
-def table_layout(width: int) -> tuple[int, int, int]:
+def runtime_label(row: dict) -> str:
+    node = row["node"]
+    host = str(node.get("kind", node.get("host", "unknown")))
+    model = str(node.get("model") or "")
+    suffix = f"{host} {model}".strip()
+    if row["kind"] == "ORCH":
+        suffix += f" · Q:{len(node.get('queue', []))}"
+    return suffix
+
+
+def table_layout(width: int, required_runtime_width: int | None = None) -> tuple[int, int, int]:
     state_width = 18
-    runtime_width = min(26, max(18, width // 4 + 1)) if width >= 84 else 0
+    runtime_width = min(26, max(12, required_runtime_width or 12)) if width >= 84 else 0
     path_width = width - state_width - 3 - (3 + runtime_width if runtime_width else 0)
     return state_width, path_width, runtime_width
 
@@ -144,8 +154,8 @@ def fit_path(parts: list[str], width: int) -> str:
     return separator.join(fitted)
 
 
-def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
-    state_width, path_width, runtime_width = table_layout(width)
+def row_line(row: dict, width: int, enabled: bool, with_runtime: bool, runtime_width: int = 0) -> str:
+    state_width, path_width, runtime_width = table_layout(width, runtime_width)
     path = fit_path([str(part) for part in row["path"]], path_width)
     if row["orphan"]:
         path = path.replace("ORPHAN", color("ORPHAN", "1;35", enabled), 1)
@@ -153,13 +163,7 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
     state = truncate(state, state_width)
     line = f"{state}{' ' * max(0, state_width - display_width(state))} | {path}{' ' * max(0, path_width - display_width(path))}"
     if with_runtime:
-        node = row["node"]
-        host = str(node.get("kind", node.get("host", "unknown")))
-        model = str(node.get("model") or "")
-        suffix = f"{host} {model}".strip()
-        if row["kind"] == "ORCH":
-            suffix += f" · Q:{len(node.get('queue', []))}"
-        line += f" | {truncate(suffix, runtime_width)}"
+        line += f" | {truncate(runtime_label(row), runtime_width)}"
     return line
 
 
@@ -205,6 +209,11 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     projects = build_projects(data)
     orch_count = sum(row["kind"] == "ORCH" for project in projects for row in project["rows"])
     agent_count = sum(row["kind"] == "AGENT" for project in projects for row in project["rows"])
+    required_runtime_width = max(
+        (display_width(runtime_label(row)) for project in projects for row in project["rows"]),
+        default=12,
+    )
+    _, _, runtime_width = table_layout(width, required_runtime_width)
     lines = [
         truncate(color(f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", "1;37", enabled), width),
         truncate(legend(width), width),
@@ -217,7 +226,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     else:
         with_runtime = width >= 84
         if with_runtime:
-            state_width, path_width, runtime_width = table_layout(width)
+            state_width, path_width, runtime_width = table_layout(width, required_runtime_width)
             lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}} | {'HOST / MODEL':<{runtime_width}}")
         else:
             state_width, path_width, _ = table_layout(width)
@@ -227,7 +236,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
             if not project["rows"]:
                 lines.append(truncate("  No orchs or agents.", width))
             else:
-                lines.extend(row_line(row, width, enabled, with_runtime) for row in project["rows"])
+                lines.extend(row_line(row, width, enabled, with_runtime, runtime_width) for row in project["rows"])
             lines.append("")
     while lines and lines[-1] == "":
         lines.pop()

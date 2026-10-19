@@ -19,6 +19,7 @@ from plugin import board
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "board-registry.json"
+CROWDED_FIXTURE = Path(__file__).parent / "fixtures" / "board-registry-crowded.json"
 
 
 class BoardTests(unittest.TestCase):
@@ -66,8 +67,8 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(sum(line == "copperfield · 2 queued notices" for line in lines), 1)
         self.assertEqual(sum(line == "maple-lab · 2 queued notices" for line in lines), 1)
         self.assertTrue({"kind", "workspace", "tab"}.issubset(next(iter(json.loads(self.registry.read_text())["orchs"].values()))))
-        self.assertTrue(any("! BLOCKED" in line and "copperfield > copperfield… > blocked-spruce-worker" in line for line in lines))
-        self.assertTrue(any("○ IDLE *" in line and "maple-lab > ORPHAN > orphaned-birch-agent" in line for line in lines))
+        self.assertIn("! BLOCKED          | copperfield-orch > blocked-spruce-worker                    | codex GPT-6-Luna", lines)
+        self.assertIn("○ IDLE *           | ORPHAN > orphaned-birch-agent                               | claude Haiku 5.5", lines)
         self.assertLess(next(i for i, line in enumerate(lines) if "! BLOCKED" in line), next(i for i, line in enumerate(lines) if "▶ WORKING" in line and "willow-fixture-reader" in line))
         self.assertLess(next(i for i, line in enumerate(lines) if "○ IDLE *" in line), next(i for i, line in enumerate(lines) if "▶ WORKING" in line and "cedar-worker" in line))
         self.assertTrue(lines[-1].startswith("Registry: "))
@@ -105,7 +106,7 @@ class BoardTests(unittest.TestCase):
         header = next(line for line in plain if line.startswith("STATE"))
         positions = [index for index, char in enumerate(header) if char == "|"]
         rows = [line for line in plain if re.match(r"(?:!|▶|○|✓|\?) ", line)]
-        self.assertEqual(positions, [19, 72])
+        self.assertEqual(positions, [19, 81])
         self.assertTrue(rows)
         self.assertTrue(all([index for index, char in enumerate(line) if char == "|"] == positions for line in rows))
 
@@ -150,10 +151,37 @@ class BoardTests(unittest.TestCase):
         output = board.render(data, 60, False, "registry.json", "12:34:56")
         rows = [line for line in output.splitlines() if "▶ WORKING" in line]
         self.assertEqual(len(rows), 2)
-        self.assertIn("fictional-worker-one", rows[0])
-        self.assertIn("fictional-worker-two", rows[1])
+        self.assertEqual(rows, [
+            "▶ WORKING          | fictional-coord… > fictional-worker-one",
+            "▶ WORKING          | fictional-coord… > fictional-worker-two",
+        ])
         self.assertNotEqual(rows[0], rows[1])
         self.assertTrue(all(board.display_width(line) <= 60 for line in rows))
+
+    def test_crowded_hierarchy_rows_drop_project_and_keep_names_at_100_and_60(self):
+        data = json.loads(CROWDED_FIXTURE.read_text())
+        expected = {
+            100: [
+                "▶ WORKING          | amber-lead-orch > fictional-amber-worker                         | claude",
+                "○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name          | claude · Q:0",
+                "? UNKNOWN          | fictional-coordinator-with-an-… > fictional-worker-with-an-extr… | claude",
+                "○ IDLE *           | ORPHAN > fictional-orphan-fir-worker                             | claude",
+            ],
+            60: [
+                "▶ WORKING          | amber-lead-or… > fictional-amber-worker",
+                "○ IDLE             | fictional-coordinator-with-an-extraord…",
+                "? UNKNOWN          | fictional-c… > fictional-worker-with-a…",
+                "○ IDLE *           | ORPHAN > fictional-orphan-fir-worker   ",
+            ],
+        }
+        for width, wanted_rows in expected.items():
+            with self.subTest(width=width):
+                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
+                rows = [line for line in lines if re.match(r"(?:!|▶|○|✓|\?) ", line)]
+                for wanted in wanted_rows:
+                    self.assertEqual(rows.count(wanted), 1, wanted)
+                self.assertTrue(all(board.display_width(line) <= width for line in lines))
+                self.assertFalse(any("fictional-amber-garden >" in line or "fictional-blue-harbor >" in line or "fictional-copper-hill >" in line for line in rows))
 
     def test_resize_redraws_at_new_width_without_registry_change(self):
         process, master = self.start_pty(100)
@@ -188,10 +216,11 @@ class BoardTests(unittest.TestCase):
             self.assertTrue({"kind", "model", "effort", "where", "role"}.issubset(agent))
             projects = board.build_projects(data)
             rows = [row for project in projects for row in project["rows"]]
-            self.assertIn(["repo", "orch"], [row["path"] for row in rows])
-            self.assertIn(["repo", "orch", "fictional-worker"], [row["path"] for row in rows])
+            self.assertIn(["orch"], [row["path"] for row in rows])
+            self.assertIn(["orch", "fictional-worker"], [row["path"] for row in rows])
             output = board.render(data, 100, False, "registry.json", "12:34:56")
-            self.assertIn("repo > orch > fictional-worker", output)
+            self.assertIn("orch > fictional-worker", output)
+            self.assertNotIn("repo > orch", output)
         finally:
             phase.tearDown()
 
@@ -209,7 +238,7 @@ class BoardTests(unittest.TestCase):
         lines = self.render(60).splitlines()
         matching = [line for line in lines if "✓ DONE" in line and "extraordinarily-long-fictional-agent-name-for-truncation-check" not in line]
         self.assertEqual(len(matching), 1)
-        self.assertIn("extraordinarily-long-fi…", matching[0])
+        self.assertIn("extraordinarily-long-fict…", matching[0])
         self.assertIn("…", matching[0])
         self.assertLessEqual(board.display_width(matching[0]), 60)
 
@@ -270,7 +299,7 @@ class BoardTests(unittest.TestCase):
         os.utime(self.registry, ns=(stamp, stamp))
         self.assertTrue(view.refresh())
         self.assertEqual(view.refreshed_at, "12:34:56")
-        self.assertTrue(any("○ IDLE" in line and "copperfield > copperfield-orch > fresh-worker" in line for line in view.output.splitlines()))
+        self.assertTrue(any("○ IDLE" in line and "copperfield-orch > fresh-worker" in line for line in view.output.splitlines()))
         self.assertFalse(view.refresh())
 
     def test_manifest_declares_board_action_and_pane_commands(self):
