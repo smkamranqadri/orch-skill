@@ -19,27 +19,27 @@ python3 plugin/board.py --once --width 60 --registry tests/fixtures/board-regist
 ORCH BOARD · 3 projects · 6 orchs · 8 agents
 Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan
 ----------------------------------------------------------------------------------------------------
-STATE              | HIERARCHY PATH                                     | HOST / MODEL
+STATE              | HIERARCHY PATH                                                   | HOST / MODEL
 fictional-amber-garden · 1 queued notice
-○ IDLE *           | fictional… > ORPHAN > fictional-orphan-fir-worker  | claude
-▶ WORKING          | fictional-… > amber-lead… > fictional-amber-worker | claude
-○ IDLE             | fictional-amber-garden > amber-lead-orch           | claude · Q:1
-○ IDLE             | fictional-amber-garden > amber-review-orch         | claude · Q:0
-○ IDLE             | fictional… > amber-revi… > fictional-idle-reviewer | claude
+○ IDLE *           | ORPHAN > fictional-orphan-fir-worker                             | claude
+▶ WORKING          | amber-lead-orch > fictional-amber-worker                         | claude
+○ IDLE             | amber-lead-orch                                                  | claude · Q:1
+○ IDLE             | amber-review-orch                                                | claude · Q:0
+○ IDLE             | amber-review-orch > fictional-idle-reviewer                      | claude
 
 fictional-blue-harbor · 0 queued notices
-! BLOCKED          | fictional… > blue-lead… > fictional-blocked-build… | claude
-○ IDLE             | fictional-blue-harbor > blue-lead-orch             | claude · Q:0
-○ IDLE             | fictional-blue-harbor > fictional-coordinator-wit… | claude · Q:0
-? UNKNOWN          | fictional… > fictional… > fictional-worker-with-a… | claude
+! BLOCKED          | blue-lead-orch > fictional-blocked-builder                       | claude
+○ IDLE             | blue-lead-orch                                                   | claude · Q:0
+○ IDLE             | fictional-coordinator-with-an-extraordinarily-long-name          | claude · Q:0
+? UNKNOWN          | fictional-coordinator-with-an-… > fictional-worker-with-an-extr… | claude
 
 fictional-copper-hill · 0 queued notices
-? UNKNOWN *        | fictional… > ORPHAN > fictional-orphan-ash-worker  | claude
-▶ WORKING          | fictional… > copper-re… > fictional-copper-review… | claude
-○ IDLE             | fictional-copper-hill > copper-lead-orch           | claude · Q:0
-○ IDLE             | fictional-copper-hill > copper-review-orch         | claude · Q:0
-✓ DONE             | fictional… > copper-le… > fictional-completed-wor… | claude
-Registry: tests/fixtures/board-registry-crowded.json · refreshed 2026-10-19 09:54:00 PKT
+? UNKNOWN *        | ORPHAN > fictional-orphan-ash-worker                             | claude
+▶ WORKING          | copper-review-orch > fictional-copper-reviewer                   | claude
+○ IDLE             | copper-lead-orch                                                 | claude · Q:0
+○ IDLE             | copper-review-orch                                               | claude · Q:0
+✓ DONE             | copper-lead-orch > fictional-completed-worker                    | claude
+Registry: tests/fixtures/board-registry-crowded.json · refreshed 2026-10-19 10:05:27 PKT
 ```
 
 ## 60 columns
@@ -50,25 +50,25 @@ Legend: ○ idle ▶ work ! blocked ✓ done ? unknown * orphan
 ------------------------------------------------------------
 STATE              | HIERARCHY PATH
 fictional-amber-garden · 1 queued notice
-○ IDLE *           | fic… > ORPH… > fictional-orphan-fir-wo…
-▶ WORKING          | fict… > amber… > fictional-amber-worker
-○ IDLE             | fictional-amber-gard… > amber-lead-orch
-○ IDLE             | fictional-amber-ga… > amber-review-orch
-○ IDLE             | fict… > ambe… > fictional-idle-reviewer
+○ IDLE *           | ORPHAN > fictional-orphan-fir-worker
+▶ WORKING          | amber-lead-or… > fictional-amber-worker
+○ IDLE             | amber-lead-orch
+○ IDLE             | amber-review-orch
+○ IDLE             | amber-review… > fictional-idle-reviewer
 
 fictional-blue-harbor · 0 queued notices
-! BLOCKED          | fic… > blue… > fictional-blocked-build…
-○ IDLE             | fictional-blue-harbor > blue-lead-orch
-○ IDLE             | fictional-b… > fictional-coordinator-w…
-? UNKNOWN          | fic… > fict… > fictional-worker-with-a…
+! BLOCKED          | blue-lead-o… > fictional-blocked-build…
+○ IDLE             | blue-lead-orch
+○ IDLE             | fictional-coordinator-with-an-extraord…
+? UNKNOWN          | fictional-c… > fictional-worker-with-a…
 
 fictional-copper-hill · 0 queued notices
-? UNKNOWN *        | fic… > ORPH… > fictional-orphan-ash-wo…
-▶ WORKING          | fic… > copp… > fictional-copper-review…
-○ IDLE             | fictional-copper-hi… > copper-lead-orch
-○ IDLE             | fictional-copper-… > copper-review-orch
-✓ DONE             | fic… > copp… > fictional-completed-wor…
-Reg: tests/fixtures/board-registry-crowded.json · 09:54:00
+? UNKNOWN *        | ORPHAN > fictional-orphan-ash-worker
+▶ WORKING          | copper-revi… > fictional-copper-review…
+○ IDLE             | copper-lead-orch
+○ IDLE             | copper-review-orch
+✓ DONE             | copper-lead… > fictional-completed-wor…
+Reg: tests/fixtures/board-registry-crowded.json · 10:05:27
 ```
 
 ## Herdr integration not verified
