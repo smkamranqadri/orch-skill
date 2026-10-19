@@ -117,6 +117,8 @@ elif args[:2] == ["agent", "prompt"]:
     with open(os.environ["PROMPTS"], "a") as stream:
         stream.write(json.dumps(args[2:]) + "\\n")
     print(json.dumps({"result": {"type": "agent_prompted"}}))
+elif args[:3] == ["pane", "current", "--current"]:
+    print(json.dumps({"result": {"type": "pane_info", "pane": {"pane_id": os.environ["HERDR_PANE_ID"], "workspace_id": os.environ["HERDR_WORKSPACE_ID"], "tab_id": os.environ["HERDR_TAB_ID"]}}}))
 elif args[:2] == ["pane", "list"]:
     if os.environ.get("HERDR_PANE_LIST_FAILURE") == "1":
         print("fixture pane listing unavailable", file=sys.stderr)
@@ -700,9 +702,9 @@ else:
 
         fake = self.bin / "herdr"
         source = fake.read_text()
-        pane_list = '[{"pane_id": "w2:p8"}, {"pane_id": "w2:p9"}]'
+        pane_list = """pane_ids = json.loads(os.environ.get("HERDR_TEST_PANES", '["w2:p8", "w2:p9"]'))"""
         self.assertEqual(source.count(pane_list), 1)
-        fake.write_text(source.replace(pane_list, "[]", 1))
+        fake.write_text(source.replace(pane_list, "pane_ids = []", 1))
         successor = f"{SESSION}/w2:p7"
         donors["orchs"][successor] = {
             "project": str(self.repo), "name": "fictional-successor", "kind": "codex",

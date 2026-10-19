@@ -179,6 +179,13 @@ def workspace():
     if not v: fail("HERDR_WORKSPACE_ID is required")
     return v
 
+def current_pane():
+    response=herdr("pane","current","--current",check=False,return_errors=True)
+    pane=result(response,"result","pane").get("pane_id")
+    if not isinstance(pane,str) or not pane:
+        fail("could not resolve current pane; re-run orch register from the orch pane")
+    return pane
+
 def carry_delivery_state(recipient, donors, now=None):
     now = time.time() if now is None else now
     prompt_times = list(recipient.get("prompt_times", []))
@@ -199,7 +206,7 @@ def carry_delivery_state(recipient, donors, now=None):
         }
 
 def register(name=None):
-    require_runtime(); project,_=project_and_tree(); pane=os.environ["HERDR_PANE_ID"]; key=session_key(pane); name=name or "orch"
+    require_runtime(); pane=current_pane(); project,_=project_and_tree(); key=session_key(pane); name=name or "orch"
     direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
     if direction not in ("right","down"): fail("ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     with locked() as d:

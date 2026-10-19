@@ -5,6 +5,7 @@
 Initial public release of orch.
 
 - Closed agent rows remain visible for 10 minutes, then disappear from the board.
+- Board sections track each orch, reconcile closed panes, and register from the resolved current pane.
 
 - Herdr plugin for registering coordinators, spawning workers, routing status notices, and
   displaying the live board.

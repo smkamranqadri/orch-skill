@@ -6,9 +6,9 @@ class PhaseOne(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(); self.root=pathlib.Path(self.tmp.name)
   self.home=self.root/'state'; self.home.mkdir(); self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'; self.resources=self.home/'herdr-resources.json'; self.resources.write_text(json.dumps({'panes':{},'tabs':{}}))
   scrubbed=os.environ.copy()
-  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR'):
+  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR','PANE_CURRENT_ID','PANE_CURRENT_FAILURE'):
    scrubbed.pop(name,None)
-  self.env=scrubbed|{'HOME':str(self.userhome),'GIT_CONFIG_GLOBAL':str(self.userhome/'gitconfig'),'GIT_CONFIG_SYSTEM':os.devnull,'XDG_CONFIG_HOME':str(self.userhome/'config'),'PATH':str(self.bin)+os.pathsep+scrubbed['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1'}
+  self.env=scrubbed|{'HOME':str(self.userhome),'GIT_CONFIG_GLOBAL':str(self.userhome/'gitconfig'),'GIT_CONFIG_SYSTEM':os.devnull,'XDG_CONFIG_HOME':str(self.userhome/'config'),'PATH':str(self.bin)+os.pathsep+scrubbed['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1','PANE_CURRENT_FIXTURE':str(ROOT/'tests'/'fixtures'/'herdr'/'pane-current.json')}
   fake=self.bin/'herdr'
   fake.write_text('''#!/usr/bin/env python3
 import json,os,sys,subprocess,shutil
@@ -24,6 +24,12 @@ if args[:2]==["agent","start"] and os.environ.get("CHECK_RESOURCE"):
  open(os.environ["CHECK_RESOURCE"],"w").write("yes" if ok else "no")
  if not ok: sys.exit(4)
 if os.environ.get("FAIL_START")=="1" and args[:2]==["agent","start"]: print("simulated failure",file=sys.stderr); sys.exit(3)
+if args[:3]==["pane","current","--current"]:
+ if os.environ.get("PANE_CURRENT_FAILURE")=="1": print("current pane unavailable",file=sys.stderr); sys.exit(3)
+ current=json.load(open(os.environ["PANE_CURRENT_FIXTURE"]))
+ current["result"]["pane"]["pane_id"]=os.environ.get("PANE_CURRENT_ID",os.environ["HERDR_PANE_ID"])
+ print(json.dumps(current))
+ sys.exit(0)
 if args[:2] in (["pane","close"],["tab","close"],["workspace","close"]) and os.environ.get("FAIL_CLOSE")==args[-1]: print("simulated close failure",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("MISSING_WORKSPACE")==args[-1]: print("workspace not found",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("PANE_LIST_ERROR")==args[-1]: print("simulated listing error",file=sys.stderr); sys.exit(4)
@@ -98,12 +104,22 @@ else: print(json.dumps({"result":{}}))
   brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
   return self.runcli('spawn',name,'--role','build','--kind',kind,'--where',where,'--brief',str(brief),*extra)
  def test_two_registers_idempotence_adoption_and_sessions(self):
-  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(self.calls()[before:], [['pane','list','--workspace','ws1']])
+  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(self.calls()[before:], [['pane','current','--current'],['pane','list','--workspace','ws1']])
   self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
  def test_register_board_direction_uses_environment(self):
   self.runcli('register'); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls())
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_BOARD_DIRECTION':'down'}); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p2','--direction','down'],self.calls())
-  before=self.calls(); result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'p3','ORCH_BOARD_DIRECTION':'left'}); self.assertEqual(result.stderr.strip(),"orch: ORCH_BOARD_DIRECTION must be 'right' or 'down'"); self.assertEqual(self.calls(),before)
+  before=self.calls(); result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'p3','ORCH_BOARD_DIRECTION':'left'}); self.assertEqual(result.stderr.strip(),"orch: ORCH_BOARD_DIRECTION must be 'right' or 'down'"); self.assertEqual(self.calls(),before+[['pane','current','--current']])
+ def test_register_uses_resolved_current_pane_for_registry_and_board_target(self):
+  env=self.env|{'HERDR_PANE_ID':'stale-pane','PANE_CURRENT_ID':'p2'}; self.runcli('register',env=env)
+  data=self.state(); self.assertEqual(list(data['orchs']),['session-a/p2']); self.assertEqual(data['orchs']['session-a/p2']['pane'],'p2')
+  self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p2','--direction','right'],self.calls())
+ def test_register_current_pane_resolution_failure_does_not_write_registry(self):
+  self.reg(); path=self.home/'orch/registry.json'; original=path.read_bytes()
+  for failure in ({'PANE_CURRENT_FAILURE':'1'},{'PANE_CURRENT_ID':''}):
+   result=self.runcli('register',ok=False,env=self.env|failure)
+   self.assertEqual(result.stderr.strip(),'orch: could not resolve current pane; re-run orch register from the orch pane')
+   self.assertEqual(path.read_bytes(),original)
  def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
   self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle'}; env=self.catalog(agent)
   self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']
@@ -189,7 +205,7 @@ else: print(json.dumps({"result":{}}))
   self.reg(); d=self.state(); d['orchs']['session-a/p9']={'project':str(self.repo),'pane':'p9','workspace':'ws1','gone':True,'queue':['old notice']}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/p9','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertEqual(d['orchs']['session-a/p9']['queue'],[]); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertEqual(d['orchs']['session-a/p2']['queue'][0],'old notice')
   self.runcli('list',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'idle'}); self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p9','ORCH_STATUS':'idle'})
-  prompts=[c for c in self.calls() if c[:2]==['agent','prompt']]; self.assertEqual(len(prompts),1); self.assertEqual(prompts[0][2],'p2'); self.assertIn('old notice',prompts[0][3]); self.assertEqual(self.state()['orchs']['session-a/p9']['queue'],[])
+  prompts=[c for c in self.calls() if c[:2]==['agent','prompt']]; old_notice_prompts=[c for c in prompts if 'old notice' in c[3]]; self.assertEqual(len(old_notice_prompts),1); self.assertEqual(old_notice_prompts[0][2],'p2'); self.assertEqual(self.state()['orchs']['session-a/p9']['queue'],[])
  def test_session_isolates_delivery_reconcile_and_adoption(self):
   self.reg(); d=self.state(); d['orchs']['session-b/p1']={'project':str(self.repo),'pane':'p1','workspace':'wsB','gone':False,'queue':['foreign queue']}; d['agents']['session-b/ghost']={'name':'ghost','orch':'session-b/p1','project':str(self.repo),'pane':'p9','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('register',env=self.env|{'HERDR_SESSION':'session-a','HERDR_PANE_ID':'p2'})
