@@ -1,6 +1,6 @@
 # Current
 
-Stamp: main 5bb839e 884f2ec0dc10
+Stamp: main c6c4ac9 884f2ec0dc10
 
 - Branch: `main` (phases 1, 2 and 4 merged, local only; old build in `archive/`). `main` is far
   ahead of `origin/main` (not pushed). `phase3-board-design` holds throwaway mockups, not merged.
@@ -20,8 +20,14 @@ Stamp: main 5bb839e 884f2ec0dc10
   session scratchpad so it can write its review file (pane w12:p16). Pipeline: builder starts the
   next task while the reviewer reviews the last; fixes are batched back to the builder; only P1
   findings block a merge.
-- Next: (1) owner runs the live steps (`herdr plugin link "$PWD/plugin"`, one orch spawns one
-  worker, check the notice and the board pane; commands in the worktree's untracked
-  `HANDOFF.md`) and reports what differs. (2) Phase 5 (skill) via a builder brief; builder context
-  is 16-54% and can be reused. (3) Fix what the live run shows.
+- Next: (1) finish the live fixes on branch `live-fixes` (builder): board pane dies with
+  `--cwd`, every notice queued twice (done and closed), `orch spawn --where worktree` passes
+  `--workspace` and `--cwd` together (invalid in Herdr 0.9.5); then re-verify live. Delivery to a
+  live idle orch already works (2026-10-19). (2) Next cycle, owner's board list: add a `closed`
+  state and glyph and do not count closed agents/gone orchs in the header; drop the legend; add
+  blank lines between orch groups; drop the registry path from the footer (keep refresh time);
+  show the HOST / MODEL column also in narrow panes if it fits. (3) Next cycle, new command:
+  `orch adopt <agent|pane>` registers an agent not started by orch (builder, reviewer) from
+  `herdr agent get`, owned by the caller, `created` empty so close never removes its pane. (4)
+  Phase 5 (skill).
 - Owner may delete the stale remote branch: `git push origin --delete orch-0.12.2`.
