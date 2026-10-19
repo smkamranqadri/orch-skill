@@ -1,10 +1,13 @@
 import json
+import fcntl
 import os
 import pty
 import select
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 import tomllib
 import unittest
@@ -127,15 +130,14 @@ class BoardTests(unittest.TestCase):
     def test_narrow_status_column_keeps_status_and_queue_count(self):
         lines = self.render(width=55).splitlines()
         row = next(line for line in lines if "▾ orch-codex" in line)
-        name, status, _, _ = board.column_widths(55)
-        status_start = 2 + name + 2
-        self.assertEqual(row[status_start:status_start + status].strip(), "PAUSED 1")
+        status_start, status_width = 16, 13
+        self.assertEqual(row[status_start:status_start + status_width].strip(), "PAUSED 1  Q:0")
 
         data = sample_registry()
         data["orchs"]["session-b/p1"].pop("paused")
         lines = self.render(width=55, data=data).splitlines()
         row = next(line for line in lines if "▾ orch-codex" in line)
-        self.assertEqual(row[status_start:status_start + status].strip(), "working  Q:0")
+        self.assertEqual(row[status_start:status_start + status_width].strip(), "working  Q:0")
 
     def test_status_column_keeps_large_queue_counts_and_paused_counts_at_all_widths(self):
         data = {"version": 1, "orchs": {
@@ -170,6 +172,129 @@ class BoardTests(unittest.TestCase):
         self.assertIn("retained-harbor · 1 queued", lines)
         self.assertNotIn("gone-orch", "\n".join(lines))
         self.assertNotIn("expired-worker", "\n".join(lines))
+
+    def test_empty_registry_and_expired_only_orphan_keep_explicit_states(self):
+        empty = self.render(data={"version": 1, "orchs": {}, "agents": {}}).splitlines()
+        self.assertIn("No projects or agents registered.", [line.strip() for line in empty])
+        expired = self.render(data={"version": 1, "orchs": {}, "agents": {"s/a": {
+            "project": "/fictional/orphan-garden", "name": "expired-orphan", "orch": "gone/p",
+            "status": "closed", "closed_at": 399,
+        }}}, now=1000).splitlines()
+        self.assertIn("No live orchs or agents.", [line.strip() for line in expired])
+        self.assertFalse(any("expired-orphan" in line for line in expired))
+
+    def test_gone_owner_classifies_its_agent_as_orphan(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/gone-garden", "name": "gone-owner", "gone": True, "queue": [],
+        }}, "agents": {"s/a": {
+            "project": "/fictional/gone-garden", "name": "orphan-worker", "orch": "s/p", "status": "blocked",
+        }}}
+        lines = self.render(data=data).splitlines()
+        self.assertIn("orphans", [line.strip() for line in lines])
+        self.assertTrue(any("* orphan-worker" in line for line in lines))
+
+    def test_closed_row_expiry_redraws_on_unchanged_registry_mtime(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/refresh-garden", "name": "refresh-orch", "status": "idle", "queue": [],
+        }}, "agents": {"s/a": {
+            "project": "/fictional/refresh-garden", "name": "closed-worker", "orch": "s/p",
+            "status": "closed", "closed_at": 1000,
+        }}}
+        self.registry.write_text(json.dumps(data))
+        view = board.Board(self.registry, 100, False)
+        now = [1599.5]
+        view.now = lambda: now[0]
+        self.assertTrue(view.refresh())
+        mtime = self.registry.stat().st_mtime_ns
+        self.assertIn("closed-worker", view.output)
+        now[0] = 1600.1
+        self.assertTrue(view.refresh())
+        self.assertNotIn("closed-worker", view.output)
+        self.assertEqual(self.registry.stat().st_mtime_ns, mtime)
+
+    def test_refresh_skips_unchanged_mtime_and_rereads_after_change(self):
+        view = board.Board(self.registry, 100, False, clock=lambda: "12:34:56")
+        data = json.loads(self.registry.read_text())
+        data["agents"]["session-a/fresh"] = {
+            "project": "/fictional/orch-skill", "name": "fresh-worker", "orch": "session-a/p1", "status": "idle",
+        }
+        with patch.object(Path, "read_text", wraps=self.registry.read_text) as read_text:
+            self.assertTrue(view.refresh())
+            self.assertFalse(view.refresh())
+            self.assertEqual(read_text.call_count, 1)
+            original_stamp = view.refreshed_at
+            self.registry.write_text(json.dumps(data))
+            future = self.registry.stat().st_mtime_ns + 2_000_000_000
+            os.utime(self.registry, ns=(future, future))
+            self.assertTrue(view.refresh())
+            self.assertEqual(read_text.call_count, 2)
+            self.assertEqual(view.refreshed_at, original_stamp)
+            self.assertIn("fresh-worker", view.output)
+            self.assertFalse(view.refresh())
+
+    def test_manifest_declares_board_pane_command(self):
+        manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
+        self.assertEqual(manifest["panes"], [{
+            "id": "board", "title": "Orch board", "placement": "split", "command": ["python3", "board.py"],
+        }])
+
+    def test_fixture_full_frame_snapshots_at_55_and_100_columns(self):
+        data = json.loads((ROOT / "tests" / "fixtures" / "board-registry-golden.json").read_text())
+        for width in (55, 100):
+            with self.subTest(width=width):
+                actual = "\n".join(line.rstrip() for line in self.render(width=width, data=data).splitlines())
+                expected = (ROOT / "tests" / "fixtures" / f"board-frame-{width}.txt").read_text().rstrip("\n")
+                self.assertEqual(actual, expected)
+
+    def test_status_colors_are_applied_to_rendered_rows(self):
+        data = {"version": 1, "orchs": {}, "agents": {
+            "s/blocked": {"project": "/fictional/colors", "name": "blocked-agent", "status": "blocked"},
+            "s/working": {"project": "/fictional/colors", "name": "working-agent", "status": "working"},
+            "s/done": {"project": "/fictional/colors", "name": "done-agent", "status": "done"},
+            "s/unknown": {"project": "/fictional/colors", "name": "unknown-agent", "status": "mystery"},
+            "s/closed": {"project": "/fictional/colors", "name": "closed-agent", "status": "closed", "closed_at": 999},
+        }}
+        with patch.dict(os.environ, {"TERM": "xterm", "COLORTERM": ""}):
+            output = self.render(data=data, enabled=True)
+        for fragment in ("\033[1;31mblocked\033[0m", "\033[32mworking\033[0m",
+                         "\033[32mdone\033[0m", "\033[33munknown\033[0m", "\033[2;37mclosed\033[0m"):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, output)
+
+    def test_short_long_worker_names_remain_distinct_at_100_columns(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/names", "name": "name-orch", "status": "idle", "queue": [],
+        }}, "agents": {}}
+        for name in ("fictional-worker-alpha", "fictional-worker-bravo"):
+            data["agents"]["s/" + name] = {"project": "/fictional/names", "name": name, "orch": "s/p", "status": "working"}
+        rows = [line for line in self.render(data=data, width=100).splitlines() if "fictional-worker-" in line]
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0], rows[1])
+        self.assertIn("fictional-worker-alpha", rows[0])
+        self.assertIn("fictional-worker-bravo", rows[1])
+
+    def test_cli_registry_builds_project_orch_agent_hierarchy(self):
+        from importlib import import_module
+        phase = import_module("tests.test_phase1").PhaseOne()
+        phase.setUp()
+        try:
+            phase.reg()
+            phase.spawn("fictional-worker")
+            data = phase.state()
+            orch = data["orchs"]["session-a/p1"]
+            agent = data["agents"]["session-a/fictional-worker"]
+            self.assertEqual(orch["name"], "orch")
+            self.assertNotEqual(Path(orch["project"]).name, orch["name"])
+            self.assertTrue({"kind", "workspace", "tab"}.issubset(orch))
+            self.assertTrue({"kind", "model", "effort", "where", "role"}.issubset(agent))
+            rows = [row for project in board.build_projects(data) for row in project["rows"]]
+            self.assertIn(["orch"], [row["path"] for row in rows])
+            self.assertIn(["orch", "fictional-worker"], [row["path"] for row in rows])
+            output = board.render(data, 100, False, "registry.json", "12:34:56")
+            self.assertIn("fictional-worker", output)
+            self.assertNotIn("orch > fictional-worker", output)
+        finally:
+            phase.tearDown()
 
     def test_closed_rows_expire_at_ten_minutes_and_closed_agents_are_not_counted(self):
         data = sample_registry()
@@ -230,7 +355,7 @@ class BoardTests(unittest.TestCase):
                 self.assertTrue(all(line.startswith("  ") for line in lines if line))
                 self.assertTrue(all(board.display_width(line) == width for line in lines if line))
                 if width == 55:
-                    self.assertIn("* orphan-wor…", "\n".join(lines))
+                    self.assertIn("* orphan-wo…", "\n".join(lines))
 
     def test_color_modes_and_no_color(self):
         cases = (("16", "\033[1;34m"), ("256", "\033[1;38;5;111m"), ("truecolor", "\033[1;38;2;130;156;255m"))
@@ -413,6 +538,24 @@ class BoardTests(unittest.TestCase):
         self.assertIn("herdr", result.stderr.lower())
         self.assertIn("herdr plugin action invoke board-full --plugin orch", result.stdout)
 
+    def test_missing_herdr_during_tty_probe_falls_back_without_traceback(self):
+        env = self.board_cli_env(PATH="/no-such-herdr-path")
+        master, slave = pty.openpty()
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "orch"), "board", "--once"],
+                                       stdin=slave, stdout=slave, stderr=subprocess.PIPE, text=True, env=env)
+            output = self.read_pty_until(master, "herdr plugin action invoke board-full --plugin orch", timeout=4)
+            process.wait(timeout=3)
+            error = process.stderr.read()
+            process.stderr.close()
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(process.returncode, 127)
+        self.assertIn("could not launch herdr", error)
+        self.assertNotIn("Traceback", error)
+        self.assertIn("herdr plugin action invoke board-full --plugin orch", output)
+
     def test_q_exits_and_width_30_remains_clipped(self):
         master, slave = pty.openpty()
         process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "board.py"), "--registry", str(self.registry)],
@@ -446,6 +589,46 @@ class BoardTests(unittest.TestCase):
             except OSError:
                 break
         return output.decode(errors="replace")
+
+    def start_pty(self, width):
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, width, 0, 0))
+        process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "board.py"), "--registry", str(self.registry)],
+                                   stdin=slave, stdout=slave, stderr=slave, env=self.clean_env() | {"NO_COLOR": "1"})
+        os.close(slave)
+        return process, master
+
+    def read_pty_until(self, master, expected, timeout=8):
+        output = bytearray()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if expected.encode() in output:
+                return output.decode(errors="replace")
+            readable, _, _ = select.select([master], [], [], max(0, deadline - time.monotonic()))
+            if not readable:
+                break
+            try:
+                output.extend(os.read(master, 65536))
+            except OSError:
+                break
+        self.fail(f"PTY output did not contain expected marker {expected!r}: {output.decode(errors='replace')!r}")
+
+    def test_resize_redraws_live_board_at_pty_width(self):
+        process, master = self.start_pty(100)
+        try:
+            initial = self.read_pty_until(master, "─" * 96)
+            self.assertIn("orch board v0.1.0", initial)
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 60, 0, 0))
+            resized = self.read_pty_until(master, "─" * 56)
+            self.assertNotIn("─" * 96, resized)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
 
     def test_board_plugin_actions_are_stable(self):
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())

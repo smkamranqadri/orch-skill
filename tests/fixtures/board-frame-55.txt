@@ -1,0 +1,12 @@
+  orch board v0.1.0
+  refresh: 1s · last: 12:34:56
+  Status: All · 1 orch · 1 agent
+
+  Name           Status        Project     Title
+  ───────────────────────────────────────────────────
+
+  golden-garden · 2 queued
+  ▾ golden-orch  idle  Q:2     golden-ga…
+  └ golden-wor…  done
+
+  q quit
