@@ -60,6 +60,7 @@ class PhaseTwo(unittest.TestCase):
             if key.startswith(("FAIL_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) or key in {
                 "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "CALLS", "PROMPTS",
                 "HERDR_TEST_STATE", "HERDR_DELAY_GET", "HERDR_AGENT_GET_FAILURE",
+                "HERDR_PANE_LIST_FAILURE", "HERDR_TEST_PANES",
             }:
                 clean.pop(key, None)
         self.env = clean | {
@@ -117,7 +118,11 @@ elif args[:2] == ["agent", "prompt"]:
         stream.write(json.dumps(args[2:]) + "\\n")
     print(json.dumps({"result": {"type": "agent_prompted"}}))
 elif args[:2] == ["pane", "list"]:
-    print(json.dumps({"result": {"panes": [{"pane_id": "w2:p8"}, {"pane_id": "w2:p9"}]}}))
+    if os.environ.get("HERDR_PANE_LIST_FAILURE") == "1":
+        print("fixture pane listing unavailable", file=sys.stderr)
+        sys.exit(3)
+    pane_ids = json.loads(os.environ.get("HERDR_TEST_PANES", '["w2:p8", "w2:p9"]'))
+    print(json.dumps({"result": {"panes": [{"pane_id": pane_id} for pane_id in pane_ids]}}))
 elif args[:3] == ["plugin", "pane", "open"]:
     print(json.dumps({"result": {"pane": {"pane_id": "w2:board"}}}))
 elif args[:2] == ["worktree", "create"]:
@@ -345,6 +350,34 @@ else:
         self.assertEqual(data["orchs"][ORCH]["queue"], [], self.calls.read_text() if self.calls.exists() else "no Herdr calls recorded")
         self.assertEqual(data["agents"][f"{SESSION}/quartz-builder"]["orch"], adopter)
         self.assertEqual(self.prompt_calls(), [["w2:p7", "old fictional notice\n[orch] quartz-builder done · pane w2:p1 · read: herdr agent read quartz-builder"]])
+
+    def test_list_and_register_reconcile_missing_orchs_without_deleting_history(self):
+        for command in ("list", "register"):
+            with self.subTest(command=command):
+                self.write_registry(queue=["fictional retained notice"])
+                before = self.registry()
+                env = self.env | {"HERDR_TEST_PANES": '["w2:p9"]'}
+                self.run_cli(command, env=env)
+                after = self.registry()
+                self.assertTrue(after["orchs"][OTHER_ORCH]["gone"])
+                self.assertEqual(after["orchs"][OTHER_ORCH]["queue"], before["orchs"][OTHER_ORCH]["queue"])
+                agent = after["agents"][f"{SESSION}/maple-worker"]
+                self.assertEqual((agent["name"], agent["pane"], agent["state"]), ("maple-worker", "w2:p2", "live"))
+                if command == "list":
+                    self.assertEqual(agent["orch"], OTHER_ORCH)
+                else:
+                    self.assertEqual(agent["orch"], ORCH)
+                    self.assertIn("[orch] maple-worker working", "\n".join(after["orchs"][ORCH]["queue"]))
+                self.assertIn(OTHER_ORCH, after["orchs"])
+
+    def test_pane_listing_failure_leaves_registry_records_unchanged(self):
+        before = self.registry()
+        for command in ("list", "register"):
+            with self.subTest(command=command):
+                self.registry_path.write_text(json.dumps(before))
+                result = self.run_cli(command, env=self.env | {"HERDR_PANE_LIST_FAILURE": "1"})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.registry(), before)
 
     def test_events_after_close_are_ignored(self):
         close = {"event": "pane.closed", "data": {"pane_id": "w2:p1", "type": "pane_closed", "workspace_id": "w2"}}

@@ -27,7 +27,9 @@ if os.environ.get("FAIL_START")=="1" and args[:2]==["agent","start"]: print("sim
 if args[:2] in (["pane","close"],["tab","close"],["workspace","close"]) and os.environ.get("FAIL_CLOSE")==args[-1]: print("simulated close failure",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("MISSING_WORKSPACE")==args[-1]: print("workspace not found",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("PANE_LIST_ERROR")==args[-1]: print("simulated listing error",file=sys.stderr); sys.exit(4)
-if args[:2]==["pane","list"]: print(json.dumps({"result":{"panes":[{"pane_id":"p1"}]}}))
+if args[:2]==["pane","list"]:
+ panes=json.loads(os.environ.get("PANE_LIST",json.dumps([{"pane_id":"p1"},{"pane_id":os.environ.get("HERDR_PANE_ID","p1")}])))
+ print(json.dumps({"result":{"panes":panes}}))
 elif args[:2]==["pane","layout"]: print(json.dumps({"result":{"pane":{"width":120,"height":40}}}))
 elif args[:2]==["pane","split"]:
  if os.environ.get("CHECK_RESERVATION"):
@@ -96,7 +98,7 @@ else: print(json.dumps({"result":{}}))
   brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
   return self.runcli('spawn',name,'--role','build','--kind',kind,'--where',where,'--brief',str(brief),*extra)
  def test_two_registers_idempotence_adoption_and_sessions(self):
-  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(len(self.calls()),before)
+  self.reg(); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls()); before=len(self.calls()); self.reg(); self.assertEqual(self.calls()[before:], [['pane','list','--workspace','ws1']])
   self.reg('p2'); self.reg('p3','session-b'); d=self.state(); self.assertEqual(len(d['orchs']),3); self.assertIn('session-a/p1',d['orchs']); self.assertIn('session-a/p2',d['orchs']); self.assertIn('session-b/p3',d['orchs'])
  def test_register_board_direction_uses_environment(self):
   self.runcli('register'); self.assertIn(['plugin','pane','open','--plugin','orch','--entrypoint','board','--placement','split','--target-pane','p1','--direction','right'],self.calls())
@@ -169,13 +171,13 @@ else: print(json.dumps({"result":{}}))
  def test_liveness_reconcile_marks_missing_orch_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/missing']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.reg('p2'); self.assertTrue(self.state()['orchs']['session-a/missing']['gone'])
- def test_missing_workspace_marks_owner_gone_and_adopts(self):
+ def test_missing_workspace_listing_does_not_mark_owner_gone(self):
   self.reg(); d=self.state(); d['orchs']['session-a/old']={'project':str(self.repo),'pane':'p9','workspace':'missing-ws','gone':False,'queue':['old queue']}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/old','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','MISSING_WORKSPACE':'missing-ws','ORCH_STATUS':'working'})
-  d=self.state(); self.assertTrue(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertIn('session-a/p2',d['orchs'])
+  d=self.state(); self.assertFalse(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/old'); self.assertIn('session-a/p2',d['orchs'])
  def test_other_workspace_listing_error_does_not_complete_registration(self):
   self.reg(); d=self.state(); d['orchs']['session-a/old']={'project':str(self.repo),'pane':'p9','workspace':'ws-old','gone':False,'queue':[]}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/old','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
-  p=self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','PANE_LIST_ERROR':'ws-old'},ok=False); self.assertIn('simulated listing error',p.stderr); self.assertNotIn('session-a/p2',self.state()['orchs'])
+  self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','PANE_LIST_ERROR':'ws-old'}); d=self.state(); self.assertIn('session-a/p2',d['orchs']); self.assertFalse(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/old')
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertTrue(d['orchs']['session-a/old']['gone']); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2')
  def test_linked_worktree_project_resolution(self):
   wt=self.root/'linked'; subprocess.run(['git','-C',str(self.repo),'worktree','add','-qb','linked',str(wt)],check=True,env=self.env)
@@ -184,7 +186,6 @@ else: print(json.dumps({"result":{}}))
   self.reg(); d=self.state(); d['orchs']['session-a/p1']['gone']=True; d['orchs']['session-a/p1']['queue']=['old queued item']; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/p1','project':str(self.repo),'pane':'p9','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertEqual(d['orchs']['session-a/p2']['queue'][0],'old queued item'); self.assertEqual(d['orchs']['session-a/p2']['queue'][1],'[orch] ghost done · pane p9 · read: herdr agent read ghost')
  def test_adoption_moves_queue_and_reactivation_does_not_redeliver(self):
-  fake=self.bin/'herdr'; text=fake.read_text(); self.assertEqual(text.count('[{"pane_id":"p1"}]'),1); fake.write_text(text.replace('[{"pane_id":"p1"}]','[{"pane_id":"p1"},{"pane_id":"p2"},{"pane_id":"p9"}]'))
   self.reg(); d=self.state(); d['orchs']['session-a/p9']={'project':str(self.repo),'pane':'p9','workspace':'ws1','gone':True,'queue':['old notice']}; d['agents']['session-a/ghost']={'name':'ghost','orch':'session-a/p9','project':str(self.repo),'pane':'p7','status':'done'}; (self.home/'orch/registry.json').write_text(json.dumps(d))
   self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'working'}); d=self.state(); self.assertEqual(d['orchs']['session-a/p9']['queue'],[]); self.assertEqual(d['agents']['session-a/ghost']['orch'],'session-a/p2'); self.assertEqual(d['orchs']['session-a/p2']['queue'][0],'old notice')
   self.runcli('list',env=self.env|{'HERDR_PANE_ID':'p2','ORCH_STATUS':'idle'}); self.runcli('register',env=self.env|{'HERDR_PANE_ID':'p9','ORCH_STATUS':'idle'})

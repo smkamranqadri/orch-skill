@@ -103,6 +103,10 @@ def process_event(event, payload):
         if not agent and not orch:
             return
 
+        if event == "pane.closed" and orch:
+            orch["gone"] = True
+            return
+
         status = None if event == "pane.closed" else live_status(pane)
         if status is None:
             if agent:

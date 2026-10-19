@@ -155,6 +155,25 @@ def pane_ids(value):
         elif isinstance(node,list):
             for child in node: visit(child)
     visit(value); return found
+def reconcile_orchs(data):
+    prefix=os.environ["HERDR_SESSION"] + "/"
+    entries=[(key,entry) for key,entry in data["orchs"].items() if key.startswith(prefix) and not entry.get("gone")]
+    workspaces={}
+    for key,entry in entries:
+        workspace_id=entry.get("workspace")
+        if not workspace_id: return False
+        workspaces.setdefault(workspace_id,[]).append((key,entry))
+    gone=[]
+    for workspace_id,workspace_entries in workspaces.items():
+        listing=herdr("pane","list","--workspace",workspace_id,check=False,return_errors=True)
+        result_data=result(listing,"result")
+        panes=result_data.get("panes")
+        if not isinstance(panes,list) or any(not isinstance(pane,dict) or not isinstance(pane.get("pane_id"),str) for pane in panes): return False
+        live_ids={pane["pane_id"] for pane in panes}
+        gone.extend(entry for _,entry in workspace_entries if entry.get("pane") not in live_ids)
+    for entry in gone:
+        entry["gone"]=True
+    return True
 def workspace():
     v=os.environ.get("HERDR_WORKSPACE_ID")
     if not v: fail("HERDR_WORKSPACE_ID is required")
@@ -184,16 +203,15 @@ def register(name=None):
     direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
     if direction not in ("right","down"): fail("ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     with locked() as d:
-        if key in d["orchs"] and not d["orchs"][key].get("gone"):
-            deliver(d); return
+        reconcile_orchs(d)
+        already_registered=key in d["orchs"] and not d["orchs"][key].get("gone")
         session=os.environ["HERDR_SESSION"] + "/"
-        for old_key,entry in d["orchs"].items():
-            if not old_key.startswith(session) or entry.get("project")!=project or entry.get("gone"): continue
-            listing=herdr("pane","list","--workspace",entry["workspace"],missing_workspace_ok=True)
-            if listing.get("missing_workspace") or entry.get("pane") not in pane_ids(listing): entry["gone"]=True
-        if key in d["orchs"]:
+        orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
+        if already_registered and not orphaned:
+            deliver(d); return
+        if key in d["orchs"] and not already_registered:
             d["orchs"][key].update({"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False})
-        else:
+        elif key not in d["orchs"]:
             d["orchs"][key]={"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False,"queue":[]}
         orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
         old_owners=sorted({a.get("orch") for a in orphaned})
@@ -206,8 +224,9 @@ def register(name=None):
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
         carry_delivery_state(d["orchs"][key], donors)
-        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
-        if opened is None: fail("failed step: open board pane")
+        if not already_registered:
+            opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
+            if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):
     require_runtime(); project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
@@ -306,6 +325,7 @@ def adopt(a):
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
+        reconcile_orchs(d)
         require_registered(d)
         current = d["orchs"][who]
         if current.get("paused"):
