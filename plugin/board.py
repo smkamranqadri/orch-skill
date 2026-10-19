@@ -377,8 +377,6 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         lines.append(padded_line(color(f"Registry read failed: {error}", "blocked", enabled, terminal_color_mode()), width))
     elif not projects:
         lines.append(padded_line("No projects or agents registered.", width))
-    elif not orch_rows and not agent_rows:
-        lines.append(padded_line("No live orchs or agents.", width))
     else:
         for project in projects:
             queue_label = f" · {project['queue_count']} queued" if project["queue_count"] else ""
@@ -387,6 +385,8 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
             rows = visible_rows([project], now)
             orchs = [row for row in rows if row["kind"] == "ORCH"]
             agents = [row for row in rows if row["kind"] == "AGENT"]
+            if not orchs and not agents:
+                lines.append(padded_line("No live orchs or agents.", width))
             for orch in sorted(orchs, key=row_sort_key):
                 children = sorted((agent for agent in agents if agent["group"] == orch["group"] and not agent["orphan"]), key=row_sort_key)
                 lines.extend(orch_section(orch, children, project["name"], False, width, enabled))

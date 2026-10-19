@@ -131,6 +131,19 @@ class BoardTests(unittest.TestCase):
         self.assertIn("queued-harbor · 3 queued", lines)
         self.assertNotIn("gone-orch", "\n".join(lines))
 
+    def test_all_gone_project_keeps_queue_after_last_closed_child_expires(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/retained-harbor", "name": "gone-orch", "gone": True,
+            "queue": ["notice"],
+        }}, "agents": {"s/a": {
+            "project": "/fictional/retained-harbor", "name": "expired-worker",
+            "orch": "s/p", "status": "closed", "closed_at": 399,
+        }}}
+        lines = [line.strip() for line in self.render(data=data, now=1000).splitlines()]
+        self.assertIn("retained-harbor · 1 queued", lines)
+        self.assertNotIn("gone-orch", "\n".join(lines))
+        self.assertNotIn("expired-worker", "\n".join(lines))
+
     def test_closed_rows_expire_at_ten_minutes_and_closed_agents_are_not_counted(self):
         data = sample_registry()
         data["agents"]["session-a/rel-reviewer"]["closed_at"] = 399
