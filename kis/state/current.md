@@ -24,6 +24,15 @@ Stamp: main 03e73ac b9625144bfc7
   spawn after the flag fix, the GitHub release install path, GitHub Actions, macOS and Bash 3.2.
   Duplicate notices are coalesced by a guard; the root cause is unknown (needs the raw event
   payloads of one worker run).
+- Pending, owner decision: history rewrite before the push. Rehearsed 2026-10-19 in a scratchpad
+  clone (`git filter-repo --path docs/research --path archive --invert-paths --replace-text
+  <file>` with `/home/fictional-user`, `/Users/fictional-user` and `example-app` replaced by fictional names):
+  175 commits, same final tree as `main`, suite passes, rescan clean. Swapping it in changes every
+  hash and needs a force-push over `origin/main`; the scratchpad clone is temporary, so redo it
+  from the command above. Review file: `review-outgoing.md` (scratchpad). Not applied.
+- Known gap: closed agents stay in `registry.json` and show as `× CLOSED` rows on the board
+  forever (nothing deletes them; `orchlib.py` close and `hook.py` only set status). Chosen fix for
+  later: retain closed rows briefly (about 10 minutes, needs a close timestamp), then drop them.
 - Next: (1) owner live checks above. (2) Before any push: review every outgoing commit and the
   full diff (123+ commits; authors `T <t@example.invalid>` and the owner's address). The owner
   pushes and tags; the stale remote branch goes with `git push origin --delete orch-0.12.2`.
