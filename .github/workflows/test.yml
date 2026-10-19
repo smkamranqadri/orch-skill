@@ -5,10 +5,18 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Verified actions/checkout v4.2.2: 11bd71901bbe5b1630ceea73d27597364c9af683.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      # Verified actions/setup-python v5.6.0: a26af69be951a213d495a4c3e4e4022e16d87065.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
       - name: Run every suite
         run: ./tests/run.sh
