@@ -238,6 +238,16 @@ class Board:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
+        self.data = {"version": 1, "orchs": {}, "agents": {}}
+        self.error = None
+
+    def set_width(self, width: int) -> bool:
+        if width == self.width:
+            return False
+        self.width = width
+        if self.loaded:
+            self.output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error)
+        return True
                 error = str(exc)
         self.mtime_ns = mtime_ns
         self.loaded = True
@@ -246,7 +256,7 @@ class Board:
         return True
 
 
-def run(board: Board) -> None:
+def run(board: Board, dynamic_width: bool = True) -> None:
     import termios
     import tty
 
@@ -255,6 +265,8 @@ def run(board: Board) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setcbreak(sys.stdin.fileno())
     try:
+        self.data = data
+        self.error = error
         sys.stdout.write("\033[H\033[2J" + board.output + "\n")
         sys.stdout.flush()
         while True:
@@ -273,6 +285,8 @@ def run(board: Board) -> None:
 
 
 def open_board() -> None:
+            if dynamic_width:
+                changed = board.set_width(shutil.get_terminal_size((100, 24)).columns) or changed
     pane = os.environ.get("HERDR_PANE_ID")
     if not os.environ.get("HERDR_ENV") or not pane:
         raise SystemExit("orch board: --open must run inside a Herdr pane")
@@ -294,7 +308,8 @@ def main(argv=None) -> None:
     parser.add_argument("--width", type=int, help="override the pane width")
     parser.add_argument("--registry", type=Path, help="registry path (defaults to the orch state registry)")
     args = parser.parse_args(argv)
-    width = args.width or shutil.get_terminal_size((100, 24)).columns
+    dynamic_width = args.width is None
+    width = args.width if args.width is not None else shutil.get_terminal_size((100, 24)).columns
     if width < 40:
         parser.error("--width must be at least 40 columns")
     if args.open:
@@ -307,7 +322,7 @@ def main(argv=None) -> None:
     if args.once:
         print(view.output)
     else:
-        run(view)
+        run(view, dynamic_width=dynamic_width)
 
 
 if __name__ == "__main__":
