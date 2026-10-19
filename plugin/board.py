@@ -522,9 +522,18 @@ def open_board(placement: str = "split") -> None:
         if direction not in ("right", "down"):
             raise SystemExit("orch board: ORCH_BOARD_DIRECTION must be 'right' or 'down'")
         command.extend(["--target-pane", pane, "--direction", direction])
-    opened = subprocess.run(command, text=True, capture_output=True)
+    try:
+        opened = subprocess.run(command, text=True, capture_output=True)
+    except FileNotFoundError as exc:
+        print(f"orch board: could not launch herdr: {exc}", file=sys.stderr)
+        print(" ".join(command))
+        raise SystemExit(127)
     if opened.returncode:
-        raise SystemExit(f"orch board: failed to open board pane: {(opened.stderr or opened.stdout).strip()}")
+        diagnostic = (opened.stderr or opened.stdout).strip()
+        if diagnostic:
+            print(f"orch board: failed to open board pane: {diagnostic}", file=sys.stderr)
+        print(" ".join(command))
+        raise SystemExit(opened.returncode)
 
 
 def main(argv=None) -> None:

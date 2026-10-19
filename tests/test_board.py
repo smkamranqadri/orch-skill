@@ -640,6 +640,19 @@ class BoardTests(unittest.TestCase):
             board.open_board("overlay")
         self.assertEqual(run.call_args.args[0], ["herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", "overlay"])
 
+    def test_open_board_missing_herdr_reports_command_and_returns_nonzero(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        stdout, stderr = StringIO(), StringIO()
+        command = "herdr plugin pane open --plugin orch --entrypoint board --placement overlay"
+        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane"}), \
+             patch("plugin.board.subprocess.run", side_effect=FileNotFoundError("herdr missing")), \
+             redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                board.open_board("overlay")
+        self.assertEqual(raised.exception.code, 127)
+        self.assertIn("herdr missing", stderr.getvalue())
+        self.assertEqual(stdout.getvalue().strip(), command)
+
     def test_split_board_open_keeps_direction_and_target_behavior(self):
         for direction in ("right", "down"):
             with self.subTest(direction=direction), patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", "ORCH_BOARD_DIRECTION": direction}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
