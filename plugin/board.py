@@ -150,8 +150,8 @@ def row_line(row: dict, width: int, enabled: bool, with_runtime: bool) -> str:
     if row["orphan"]:
         path = path.replace("ORPHAN", color("ORPHAN", "1;35", enabled), 1)
     state = status_cell(row, enabled)
-    state_plain_width = display_width(state)
-    line = f"{state}{' ' * max(1, state_width - state_plain_width)} | {truncate(path, path_width)}"
+    state = truncate(state, state_width)
+    line = f"{state}{' ' * max(0, state_width - display_width(state))} | {path}{' ' * max(0, path_width - display_width(path))}"
     if with_runtime:
         node = row["node"]
         host = str(node.get("kind", node.get("host", "unknown")))
@@ -200,7 +200,8 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         if with_runtime:
             lines.append(truncate(f"{'STATE':<18} | {'HIERARCHY PATH':<{width - 18 - 32}} | HOST / MODEL", width))
         else:
-            lines.append(truncate(f"{'STATE':<18} | HIERARCHY PATH", width))
+            state_width, path_width, _ = table_layout(width)
+            lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}")
         for project in projects:
             lines.append(truncate(color(f"{project['name']} · {project['queue_count']} queued notices", "1;36", enabled), width))
             if not project["rows"]:
