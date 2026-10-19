@@ -596,6 +596,219 @@ else:
         self.assertNotIn("paused", self.registry()["orchs"][ORCH])
         self.assertEqual(self.prompt_calls(), [["w2:p9", held], ["w2:p9", f"{held}\n{blocked}\n{idle}"]])
 
+    def test_paused_orch_stays_paused_after_history_expires_while_idle(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text("[cap]\nprompts_per_hour = 1\n")
+        self.write_registry(queue=["held while paused"], orch_status="idle")
+        data = self.registry()
+        data["orchs"][ORCH].update(
+            paused={"count": 1, "time": 1234},
+            prompt_times=[orchlib.time.time() - 3601],
+        )
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p9": {"agent": "claude", "agent_status": "idle"}})
+
+        listed = self.run_cli("list")
+
+        self.assertEqual(listed.stdout.splitlines()[0], "PAUSED: 1 notice(s) held since 1234")
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], ["held while paused"])
+        self.assertEqual(self.registry()["orchs"][ORCH]["paused"], {"count": 1, "time": 1234})
+        self.assertEqual(self.prompt_calls(), [])
+
+    def test_takeover_carries_pause_even_when_donor_history_expired(self):
+        now = 10000
+        recipient = {"queue": ["held notice"], "prompt_times": [now - 3601]}
+        donor = {"queue": [], "prompt_times": [now - 3601], "paused": {"count": 1, "time": 1234}}
+
+        orchlib.carry_delivery_state(recipient, [donor], now=now)
+
+        self.assertEqual(recipient["prompt_times"], [])
+        self.assertEqual(recipient["paused"], {"count": 1, "time": 1234})
+
+    def test_takeover_carries_multiple_paused_donors_and_recipient_history(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text("[cap]\nprompts_per_hour = 1\n")
+        self.write_registry(orch_status="idle")
+        self.write_herdr_state(**{
+            "w2:p1": {"agent": "claude", "agent_status": "working"},
+            "w2:p2": {"agent": "codex", "agent_status": "working"},
+            "w2:p8": {"agent": "codex", "agent_status": "idle"},
+            "w2:p9": {"agent": "claude", "agent_status": "idle"},
+        })
+        now = orchlib.time.time()
+        data = self.registry()
+        data["orchs"][ORCH]["queue"] = ["p9 initial notice"]
+        data["orchs"][OTHER_ORCH]["queue"] = ["p8 initial notice"]
+        self.registry_path.write_text(json.dumps(data))
+
+        self.run_cli("list", env=self.env | {"HERDR_PANE_ID": "w2:p9"})
+        self.run_cli("list", env=self.env | {"HERDR_PANE_ID": "w2:p8"})
+        self.write_herdr_state(**{
+            "w2:p1": {"agent": "claude", "agent_status": "done"},
+            "w2:p2": {"agent": "codex", "agent_status": "blocked"},
+        })
+        self.run_hook(event_for("claude", "done"))
+        self.run_hook({"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p2", "agent_status": "blocked"}})
+        donors = self.registry()
+        self.assertTrue(donors["orchs"][ORCH].get("paused"))
+        self.assertTrue(donors["orchs"][OTHER_ORCH].get("paused"))
+        self.assertEqual(len(donors["orchs"][ORCH]["prompt_times"]), 1)
+        self.assertEqual(len(donors["orchs"][OTHER_ORCH]["prompt_times"]), 1)
+
+        fake = self.bin / "herdr"
+        source = fake.read_text()
+        pane_list = '[{"pane_id": "w2:p8"}, {"pane_id": "w2:p9"}]'
+        self.assertEqual(source.count(pane_list), 1)
+        fake.write_text(source.replace(pane_list, "[]", 1))
+        successor = f"{SESSION}/w2:p7"
+        donors["orchs"][successor] = {
+            "project": str(self.repo), "name": "fictional-successor", "kind": "codex",
+            "pane": "w2:p7", "workspace": "w2", "tab": "w2:t1", "status": "idle",
+            "gone": True, "queue": ["recipient held notice"], "prompt_times": [now],
+        }
+        self.registry_path.write_text(json.dumps(donors))
+        self.write_herdr_state(**{"w2:p7": {"agent": "codex", "agent_status": "idle"}})
+
+        self.run_cli("register", "--name", "fictional-successor", env=self.env | {"HERDR_PANE_ID": "w2:p7"})
+
+        after = self.registry()
+        inherited = after["orchs"][successor]
+        self.assertEqual(len(self.prompt_calls()), 2)
+        self.assertTrue(inherited.get("paused"))
+        self.assertEqual(inherited["paused"]["count"], len(inherited["queue"]))
+        self.assertEqual(len(inherited["prompt_times"]), 3)
+        self.assertIn("recipient held notice", inherited["queue"])
+        self.assertIn(notice("quartz-builder", "done", "w2:p1"), inherited["queue"])
+        self.assertIn(notice("maple-worker", "blocked", "w2:p2"), inherited["queue"])
+        self.assertEqual(after["orchs"][ORCH]["queue"], [])
+        self.assertEqual(after["orchs"][OTHER_ORCH]["queue"], [])
+
+        self.run_cli("resume", "--name", "w2:p7", env=self.env | {"HERDR_PANE_ID": "w2:p7"})
+        self.assertEqual(len(self.prompt_calls()), 3)
+        self.assertNotIn("paused", self.registry()["orchs"][successor])
+
+    def test_resume_rejects_duplicate_names_without_changing_records(self):
+        data = self.registry()
+        for pane, entry in data["orchs"].items():
+            entry.update(name="orch", queue=[f"held {entry['pane']}"], paused={"count": 1, "time": 10}, prompt_times=[11, 12])
+        self.registry_path.write_text(json.dumps(data))
+        before = self.registry()
+
+        result = self.run_cli("resume", "--name", "orch", ok=False)
+
+        self.assertEqual(result.stderr.strip(), "orch: ambiguous orch target: orch")
+        self.assertEqual(self.registry(), before)
+        self.assertEqual(self.prompt_calls(), [])
+
+    def test_resume_rejects_name_pane_collision_without_changing_records(self):
+        data = self.registry()
+        data["orchs"][ORCH].update(name="w2:p8", queue=["held p9"], paused={"count": 1, "time": 10}, prompt_times=[11])
+        data["orchs"][OTHER_ORCH].update(name="other", queue=["held p8"], paused={"count": 1, "time": 20}, prompt_times=[21])
+        self.registry_path.write_text(json.dumps(data))
+        before = self.registry()
+
+        result = self.run_cli("resume", "--name", "w2:p8", ok=False)
+
+        self.assertEqual(result.stderr.strip(), "orch: ambiguous orch target: w2:p8")
+        self.assertEqual(self.registry(), before)
+        self.assertEqual(self.prompt_calls(), [])
+
+    def test_resume_pane_id_only_changes_selected_orch(self):
+        data = self.registry()
+        data["orchs"][ORCH].update(name="first", queue=["unrelated pending"], prompt_times=[11, 12])
+        data["orchs"][OTHER_ORCH].update(name="second", queue=["held p8"], paused={"count": 1, "time": 20}, prompt_times=[21, 22])
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p8": {"agent": "codex", "agent_status": "idle"}, "w2:p9": {"agent": "claude", "agent_status": "idle"}})
+
+        self.run_cli("resume", "--name", "w2:p8")
+
+        after = self.registry()["orchs"]
+        self.assertEqual(after[OTHER_ORCH]["queue"], [])
+        self.assertNotIn("paused", after[OTHER_ORCH])
+        self.assertEqual(len(after[OTHER_ORCH]["prompt_times"]), 1)
+        self.assertEqual(after[ORCH]["queue"], ["unrelated pending"])
+        self.assertNotIn("paused", after[ORCH])
+        self.assertEqual(after[ORCH]["prompt_times"], [11, 12])
+        self.assertEqual(self.prompt_calls(), [["w2:p8", "held p8"]])
+
+    def test_resume_named_target_isolated_from_same_name_in_other_session(self):
+        data = self.registry()
+        data["orchs"][ORCH].update(name="shared", queue=["held current"], paused={"count": 1, "time": 10}, prompt_times=[11, 12])
+        data["orchs"][OTHER_ORCH].update(name="other", queue=["held unrelated"], paused={"count": 1, "time": 20}, prompt_times=[21, 22])
+        foreign = "session-b/w2:p7"
+        data["orchs"][foreign] = {
+            "project": str(self.repo), "name": "shared", "kind": "codex", "pane": "w2:p7",
+            "workspace": "w2", "status": "idle", "gone": False, "queue": ["foreign held"],
+            "paused": {"count": 1, "time": 30}, "prompt_times": [31, 32],
+        }
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p9": {"agent": "claude", "agent_status": "idle"}})
+
+        self.run_cli("resume", "--name", "shared")
+
+        after = self.registry()["orchs"]
+        self.assertNotIn("paused", after[ORCH])
+        self.assertEqual(after[ORCH]["queue"], [])
+        self.assertEqual(len(after[ORCH]["prompt_times"]), 1)
+        self.assertGreater(after[ORCH]["prompt_times"][0], orchlib.time.time() - 5)
+        self.assertEqual(after[OTHER_ORCH]["paused"], {"count": 1, "time": 20})
+        self.assertEqual(after[OTHER_ORCH]["prompt_times"], [21, 22])
+        self.assertEqual(after[foreign]["paused"], {"count": 1, "time": 30})
+        self.assertEqual(after[foreign]["prompt_times"], [31, 32])
+        self.assertEqual(self.prompt_calls(), [["w2:p9", "held current"]])
+
+    def test_resume_ignores_gone_current_session_orch_with_same_name(self):
+        data = self.registry()
+        data["orchs"][ORCH].update(name="shared", queue=["held current"], paused={"count": 1, "time": 10}, prompt_times=[11])
+        data["orchs"][OTHER_ORCH].update(name="shared", gone=True, queue=["held gone"], paused={"count": 1, "time": 20}, prompt_times=[21])
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p9": {"agent": "claude", "agent_status": "idle"}})
+
+        self.run_cli("resume", "--name", "shared")
+
+        after = self.registry()["orchs"]
+        self.assertNotIn("paused", after[ORCH])
+        self.assertEqual(after[ORCH]["queue"], [])
+        self.assertEqual(after[OTHER_ORCH]["paused"], {"count": 1, "time": 20})
+        self.assertEqual(after[OTHER_ORCH]["queue"], ["held gone"])
+        self.assertEqual(self.prompt_calls(), [["w2:p9", "held current"]])
+
+    def test_non_utf8_config_falls_back_to_six_for_cli_delivery(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_bytes(b"\xff\xfe[\x00c\x00a\x00p\x00]")
+        self.write_registry(queue=["cli held notice"], orch_status="idle")
+        data = self.registry()
+        data["orchs"][ORCH]["prompt_times"] = [orchlib.time.time()] * 5
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p9": {"agent": "claude", "agent_status": "idle"}})
+
+        self.run_cli("list")
+
+        self.assertEqual(len(self.prompt_calls()), 1)
+        self.assertEqual(len(self.registry()["orchs"][ORCH]["prompt_times"]), 6)
+
+    def test_non_utf8_config_falls_back_to_six_for_hook_delivery(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_bytes(b"\xff\xfe[\x00c\x00a\x00p\x00]")
+        self.write_registry(queue=["hook held notice"], orch_status="idle", worker_status="working")
+        data = self.registry()
+        data["orchs"][ORCH]["prompt_times"] = [orchlib.time.time()] * 5
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{
+            "w2:p1": {"agent": "claude", "agent_status": "done"},
+            "w2:p9": {"agent": "claude", "agent_status": "idle"},
+        })
+
+        result = self.run_hook(event_for("claude", "done"))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.prompt_calls()), 1)
+        self.assertEqual(len(self.registry()["orchs"][ORCH]["prompt_times"]), 6)
+
     def test_board_displays_paused_orch_and_held_count(self):
         sys.path.insert(0, str(ROOT / "plugin"))
         import board

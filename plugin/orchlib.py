@@ -75,15 +75,16 @@ def prompts_per_hour():
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             return DEFAULT_PROMPTS_PER_HOUR
         return value
-    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, AttributeError):
         return DEFAULT_PROMPTS_PER_HOUR
 
-def deliver(data, now=None):
+def deliver(data, now=None, only=None):
     session=os.environ["HERDR_SESSION"] + "/"
     now = time.time() if now is None else now
     limit = prompts_per_hour()
     for key,orch in data["orchs"].items():
         if not key.startswith(session): continue
+        if only is not None and key != only: continue
         orch["queue"] = unique_messages(orch.get("queue", []))
         if orch.get("gone") or not orch.get("queue"): continue
         if orch.get("paused"):
@@ -108,17 +109,24 @@ def resume(name=None):
     who = session_key(os.environ["HERDR_PANE_ID"])
     with locked() as data:
         require_registered(data)
-        candidates = [(key, orch) for key, orch in data["orchs"].items()
-                      if key.startswith(os.environ["HERDR_SESSION"] + "/")
-                      and (name is None or orch.get("name") == name or orch.get("pane") == name)]
         if name is None:
-            candidates = [(who, data["orchs"][who])]
-        if not candidates:
-            fail(f"unknown orch: {name}")
-        for _, orch in candidates:
-            orch.pop("paused", None)
-            orch["prompt_times"] = []
-        deliver(data)
+            target = who
+        else:
+            prefix = os.environ["HERDR_SESSION"] + "/"
+            candidates = [(key, orch) for key, orch in data["orchs"].items()
+                          if key.startswith(prefix) and not orch.get("gone")
+                          and (orch.get("name") == name or orch.get("pane") == name)]
+            if len(candidates) > 1:
+                fail(f"ambiguous orch target: {name}")
+            if not candidates:
+                fail(f"unknown orch: {name}")
+            target = candidates[0][0]
+        if target not in data["orchs"] or data["orchs"][target].get("gone"):
+            fail(f"unknown orch: {name or os.environ['HERDR_PANE_ID']}")
+        selected = data["orchs"][target]
+        selected.pop("paused", None)
+        selected["prompt_times"] = []
+        deliver(data, only=target)
 def unique_messages(messages):
     return list(dict.fromkeys(messages))
 def require_registered(data=None):
@@ -151,6 +159,26 @@ def workspace():
     v=os.environ.get("HERDR_WORKSPACE_ID")
     if not v: fail("HERDR_WORKSPACE_ID is required")
     return v
+
+def carry_delivery_state(recipient, donors, now=None):
+    now = time.time() if now is None else now
+    prompt_times = list(recipient.get("prompt_times", []))
+    paused_records = []
+    if recipient.get("paused"):
+        paused_records.append(recipient["paused"])
+    for donor in donors:
+        prompt_times.extend(donor.get("prompt_times", []))
+        if donor.get("paused"):
+            paused_records.append(donor["paused"])
+    recipient["prompt_times"] = [stamp for stamp in prompt_times if now - stamp < PROMPT_WINDOW_SECONDS]
+    if paused_records:
+        pause_times = [record.get("time") for record in paused_records
+                       if isinstance(record, dict) and isinstance(record.get("time"), (int, float))]
+        recipient["paused"] = {
+            "count": len(unique_messages(recipient.get("queue", []))),
+            "time": min(pause_times, default=now),
+        }
+
 def register(name=None):
     require_runtime(); project,_=project_and_tree(); pane=os.environ["HERDR_PANE_ID"]; key=session_key(pane); name=name or "orch"
     direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
@@ -168,13 +196,16 @@ def register(name=None):
         else:
             d["orchs"][key]={"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False,"queue":[]}
         orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
-        old_owners={a.get("orch") for a in orphaned}
+        old_owners=sorted({a.get("orch") for a in orphaned})
+        donors=[d["orchs"][old_key] for old_key in old_owners if old_key in d["orchs"]]
         for old_key in old_owners:
-            d["orchs"][key]["queue"].extend(d["orchs"][old_key].get("queue",[]))
-            d["orchs"][old_key]["queue"].clear()
+            if old_key in d["orchs"]:
+                d["orchs"][key]["queue"].extend(d["orchs"][old_key].get("queue",[]))
+                d["orchs"][old_key]["queue"].clear()
         for agent in orphaned:
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
+        carry_delivery_state(d["orchs"][key], donors)
         opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
         if opened is None: fail("failed step: open board pane")
         deliver(d)
