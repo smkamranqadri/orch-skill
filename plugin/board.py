@@ -77,7 +77,7 @@ def build_projects(data: dict) -> list[dict]:
         project = projects.setdefault(project_path, {"path": project_path, "name": Path(project_path).name or "unknown project", "queue_count": 0, "rows": []})
         project["queue_count"] += len(orch.get("queue", []))
         if not orch.get("gone", False):
-            project["rows"].append({"node": orch, "kind": "ORCH", "path": [orch.get("name") or key.split("/", 1)[-1]], "orphan": False})
+            project["rows"].append({"node": orch, "kind": "ORCH", "path": [project["name"], orch.get("name") or key.split("/", 1)[-1]], "orphan": False})
 
     for key, agent in data.get("agents", {}).items():
         project_path = str(agent.get("project", ""))
@@ -86,9 +86,9 @@ def build_projects(data: dict) -> list[dict]:
         owner = all_orchs.get(owner_key, {})
         is_orphan = not owner or owner.get("gone", False) or owner.get("project") != project_path
         if is_orphan:
-            parts = ["ORPHAN", agent.get("name") or key.split("/", 1)[-1]]
+            parts = [project["name"], "ORPHAN", agent.get("name") or key.split("/", 1)[-1]]
         else:
-            parts = [owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
+            parts = [project["name"], owner.get("name") or owner_key.split("/", 1)[-1], agent.get("name") or key.split("/", 1)[-1]]
         project["rows"].append({"node": agent, "kind": "AGENT", "path": parts, "orphan": is_orphan})
 
     result = list(projects.values())
