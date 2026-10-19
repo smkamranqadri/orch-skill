@@ -68,6 +68,7 @@ def deliver(data):
     session=os.environ["HERDR_SESSION"] + "/"
     for key,orch in data["orchs"].items():
         if not key.startswith(session): continue
+        orch["queue"] = unique_messages(orch.get("queue", []))
         if orch.get("gone") or not orch.get("queue"): continue
         live=herdr("agent","get",orch["pane"],check=False) or {}
         live_agent=result(live,"result","agent")
@@ -76,6 +77,8 @@ def deliver(data):
         message="\n".join(orch["queue"])
         if herdr("agent","prompt",orch["pane"],message,check=False) is not None:
             orch["queue"].clear(); orch["status"]="working"
+def unique_messages(messages):
+    return list(dict.fromkeys(messages))
 def require_registered(data=None):
     key=session_key(os.environ.get("HERDR_PANE_ID", ""))
     if data is not None:
@@ -128,7 +131,7 @@ def register(name=None):
         for agent in orphaned:
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
-        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction","right","--cwd",project,check=False)
+        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction","right",check=False)
         if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):
@@ -155,7 +158,7 @@ def spawn(a):
                 if tab: created.append(f"tab:{tab}")
                 created.append(f"pane:{pane}"); save_registry(registry_path(),d)
             else:
-                out=herdr("worktree","create","--workspace",workspace(),"--cwd",project,"--branch",f"orch/{a.name}","--base",a.base or "HEAD","--path",f"../{Path(project).name}.wt/{a.name}","--label",a.name,"--no-focus"); pane=result(out,"result","root_pane").get("pane_id"); ws=result(out,"result","workspace").get("workspace_id"); wt=result(out,"result","worktree").get("path") or f"../{Path(project).name}.wt/{a.name}"
+                out=herdr("worktree","create","--cwd",project,"--branch",f"orch/{a.name}","--base",a.base or "HEAD","--path",f"../{Path(project).name}.wt/{a.name}","--label",a.name,"--no-focus"); pane=result(out,"result","root_pane").get("pane_id"); ws=result(out,"result","workspace").get("workspace_id"); wt=result(out,"result","worktree").get("path") or f"../{Path(project).name}.wt/{a.name}"
                 if not pane or not ws: fail("failed step: create worktree (missing pane or workspace id)")
                 created.extend([f"workspace:{ws}",f"worktree:{ws}",f"branch:orch/{a.name}"]); d["agents"][key].update(worktree=str((Path(project)/wt).resolve()),tree=str((Path(project)/wt).resolve())); save_registry(registry_path(),d)
             d["agents"][key]["pane"]=pane
@@ -173,7 +176,7 @@ def spawn(a):
                 kind,ident=item.split(":",1)
                 ok=True
                 if kind=="worktree": ok=herdr("worktree","remove","--workspace",ident,check=False) is not None
-                elif kind in ("pane","tab","workspace"): ok=herdr(kind,"close","--"+kind,ident,check=False) is not None
+                elif kind in ("pane","tab","workspace"): ok=herdr(kind,"close",ident,check=False) is not None
                 elif kind=="branch":
                     p=subprocess.run(["git","branch","-d",ident],cwd=project,text=True,capture_output=True); ok=p.returncode==0
                 if not ok: break
@@ -212,7 +215,7 @@ def close_agent(a):
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
             if kind not in ("pane","tab","workspace"): continue
-            if herdr(kind,"close","--"+kind,ident,check=False) is None: fail(f"failed step: close {kind} {ident}")
+            if herdr(kind,"close",ident,check=False) is None: fail(f"failed step: close {kind} {ident}")
             agent["created"].remove(item); save_registry(registry_path(),d)
         if any(item.startswith(("pane:","tab:","workspace:")) for item in agent.get("created",[])):
             fail(f"failed step: cleanup remains for {a.name}: {', '.join(agent['created'])}")

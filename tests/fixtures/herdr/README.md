@@ -11,6 +11,10 @@ prompt each using installed Claude Code 2.1.300 (Sonnet 5.5, low) and Codex CLI 
 response shape and captured idle records. The fixture paths, host name, and provider session
 IDs were replaced with fictional values; other volatile Herdr identifiers remain as captured.
 
+`duplicate-pending-notices.json` is a fictionalized queue snapshot of the duplicate `done` and
+`closed` messages reported in the first live run. It records the observed queued shape, not the
+event sequence that produced it; Herdr's plugin log list did not expose the event payloads.
+
 The stream includes startup/unknown, working, done, idle, and close events from the real
 provider panes. Herdr did not classify the Codex clarification response as blocked. To supply
 that status shape, the stream also includes a blocked-to-unknown lifecycle reported through

@@ -311,18 +311,16 @@ class BoardTests(unittest.TestCase):
             "id": "board", "title": "Orch board", "placement": "split", "command": ["python3", "board.py"]
         }])
 
-    def test_open_action_targets_the_current_pane_and_project(self):
-        responses = [
-            subprocess.CompletedProcess([], 0, "/fictional/copperfield\n", ""),
-            subprocess.CompletedProcess([], 0, '{"result":{"pane":{"pane_id":"fixture-board"}}}', ""),
-        ]
+    def test_open_action_targets_current_pane_without_changing_plugin_cwd(self):
+        responses = [subprocess.CompletedProcess([], 0, '{"result":{"pane":{"pane_id":"fixture-board"}}}', "")]
         with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane"}), patch("plugin.board.subprocess.run", side_effect=responses) as run:
             board.open_board()
-        self.assertEqual(run.call_args_list[0].args[0], ["git", "rev-parse", "--show-toplevel"])
-        self.assertEqual(run.call_args_list[1].args[0], [
+        self.assertEqual(run.call_args_list[0].args[0], [
             "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board",
-            "--placement", "split", "--target-pane", "fixture-pane", "--direction", "right", "--cwd", "/fictional/copperfield",
+            "--placement", "split", "--target-pane", "fixture-pane", "--direction", "right",
         ])
+        manifest = tomllib.loads((Path(__file__).parents[1] / "plugin" / "herdr-plugin.toml").read_text())
+        self.assertEqual(manifest["panes"][0]["command"], ["python3", "board.py"])
 
 
 if __name__ == "__main__":
