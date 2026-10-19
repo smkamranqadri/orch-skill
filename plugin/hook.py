@@ -54,6 +54,21 @@ def queue_notice(registry, orch_key, message):
         registry["orchs"][orch_key].setdefault("queue", []).append(message)
 
 
+def close_agent(registry, agent, pane, *, pane_closed):
+    already_closed = agent.get("agent_closed", False)
+    agent["status"] = "closed"
+    agent["state"] = "cleanup"
+    agent["agent_closed"] = True
+    if pane_closed:
+        agent["pane_closed"] = True
+        pane_resource = f"pane:{pane}"
+        if pane_resource in agent.get("created", []):
+            agent["created"].remove(pane_resource)
+    if not already_closed:
+        queue_notice(registry, agent.get("orch"), notification(agent["name"], "closed", pane))
+    orchlib.deliver(registry)
+
+
 def process_event(event, payload):
     session = os.environ.get("HERDR_SESSION")
     if not session:
@@ -73,6 +88,9 @@ def process_event(event, payload):
         agent = registry["agents"].get(agent_key) if agent_key else None
         orch = registry["orchs"].get(orch_key)
 
+        if agent and agent.get("agent_closed"):
+            if event != "pane.closed" or agent.get("pane_closed"):
+                return
         if agent and agent.get("state") == "closed":
             return
         if orch and orch.get("gone"):
@@ -83,9 +101,7 @@ def process_event(event, payload):
         status = None if event == "pane.closed" else live_status(pane)
         if status is None:
             if agent:
-                agent["status"] = "closed"
-                agent["state"] = "closed"
-                queue_notice(registry, agent.get("orch"), notification(agent["name"], "closed", pane))
+                close_agent(registry, agent, pane, pane_closed=event == "pane.closed")
             elif orch:
                 orch["gone"] = True
             return

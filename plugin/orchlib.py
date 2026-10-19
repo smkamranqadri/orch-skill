@@ -140,7 +140,7 @@ def spawn(a):
         if a.name in agent_names(live): fail(f"agent already exists in Herdr: {a.name}")
         destination=tree if a.where!="worktree" else str((Path(project)/f"../{Path(project).name}.wt/{a.name}").resolve())
         if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
-        d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False}
+        d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False}
         save_registry(registry_path(),d)
         try:
             if a.where=="pane":
@@ -195,8 +195,10 @@ def close_agent(a):
         require_registered(d)
         key=session_key(a.name); agent=d["agents"].get(key)
         if not agent: fail(f"unknown agent: {a.name}")
-        if agent.get("state")=="closed":
+        if agent.get("state")=="closed" and not agent.get("created"):
             deliver(d); return
+        if agent.get("state")=="closed":
+            agent["state"]="cleanup"; agent["agent_closed"]=True
         wt=agent.get("worktree")
         if wt and Path(wt).exists() and not a.discard:
             base=subprocess.run(["git","merge-base","--is-ancestor",agent["branch"],"HEAD"],cwd=os.getcwd(),capture_output=True)
@@ -205,7 +207,7 @@ def close_agent(a):
                 log=subprocess.run(["git","log","--oneline",f"HEAD..{agent['branch']}"],text=True,capture_output=True).stdout.strip()
                 fail(f"close refused; unmerged commits: {log or '(none)'}; dirty paths: {status.stdout.strip() or '(none)'}")
         agent["state"]="closing"; save_registry(registry_path(),d)
-        if agent.get("started") and not agent.get("stopped"):
+        if agent.get("started") and not agent.get("stopped") and not agent.get("agent_closed"):
             herdr("agent","send-keys",a.name,"ctrl+c"); agent["stopped"]=True; save_registry(registry_path(),d)
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
