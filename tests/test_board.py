@@ -41,7 +41,7 @@ def cycle2_status_data():
             },
             "session-main/closed-worker": {
                 "project": project, "name": "closed-worker", "pane": "pane-closed", "orch": "session-main/pane-main",
-                "kind": "claude", "status": "closed", "role": "build",
+                "kind": "claude", "status": "closed", "closed_at": time.time(), "role": "build",
             },
             "session-main/orphan-worker": {
                 "project": project, "name": "orphan-worker", "pane": "pane-orphan", "orch": "session-missing/gone-orch",
@@ -105,8 +105,12 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(all(board.display_width(line) <= 100 for line in lines))
 
     def test_cli_renders_cli_generated_cycle2_fixture_with_adopted_closed_and_orphan_rows(self):
+        data = json.loads(CYCLE2_FIXTURE.read_text())
+        data["agents"]["session-a/fictional-closed-worker"]["closed_at"] = time.time()
+        registry = Path(self.temp.name) / "cli-registry.json"
+        registry.write_text(json.dumps(data))
         result = subprocess.run(
-            [sys.executable, str(Path(__file__).parents[1] / "plugin" / "board.py"), "--once", "--width", "100", "--registry", str(CYCLE2_FIXTURE)],
+            [sys.executable, str(Path(__file__).parents[1] / "plugin" / "board.py"), "--once", "--width", "100", "--registry", str(registry)],
             text=True, capture_output=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -169,6 +173,7 @@ class BoardTests(unittest.TestCase):
     def test_closed_agents_and_gone_orchs_are_not_counted_but_closed_rows_are_dim(self):
         data = json.loads(self.registry.read_text())
         data["agents"]["session-amber/worker-active"]["status"] = "closed"
+        data["agents"]["session-amber/worker-active"]["closed_at"] = time.time()
         output = board.render(data, 100, True, "registry.json", "12:34:56")
         lines = output.splitlines()
         self.assertEqual(board.ANSI_RE.sub("", lines[0]), "ORCH BOARD · 2 projects · 3 orchs · 4 agents")
@@ -176,6 +181,76 @@ class BoardTests(unittest.TestCase):
         self.assertIn("\033[2;37m× CLOSED\033[0m", closed)
         self.assertIn("copperfield-orch > willow-fixture-reader", board.ANSI_RE.sub("", closed))
         self.assertEqual(sum("× CLOSED" in board.ANSI_RE.sub("", line) for line in lines), 1)
+
+    def test_closed_rows_expire_at_600_seconds_with_anchored_rows_at_100_and_55(self):
+        project = "/fictional/retention-garden"
+        now = 10_000.0
+        data = {
+            "version": 1,
+            "orchs": {"session-fixture/pane": {"project": project, "name": "orch", "status": "idle", "queue": ["notice"]}},
+            "agents": {},
+        }
+        for name, age in (("age-zero", 0), ("age-599", 599), ("age-601", 601)):
+            data["agents"][f"session-fixture/{name}"] = {
+                "project": project, "name": name, "orch": "session-fixture/pane", "kind": "claude",
+                "status": "closed", "closed_at": now - age,
+            }
+        data["agents"]["session-fixture/legacy"] = {
+            "project": project, "name": "legacy", "orch": "session-fixture/pane", "kind": "claude", "status": "closed",
+        }
+        expected = {
+            100: [
+                "○ IDLE             | orch                                                            | unknown · Q:1",
+                "× CLOSED           | orch > age-599                                                  | claude",
+                "× CLOSED           | orch > age-zero                                                 | claude",
+            ],
+            55: [
+                "○ IDLE      | orch                      | unknown · Q:1",
+                "× CLOSED    | orch > age-599            | claude",
+                "× CLOSED    | orch > age-zero           | claude",
+            ],
+        }
+        for width, wanted in expected.items():
+            with self.subTest(width=width):
+                lines = board.render(data, width, True, "registry.json", "12:34:56", now=now).splitlines()
+                self.assertEqual(board.ANSI_RE.sub("", lines[0]), "ORCH BOARD · 1 project · 1 orch · 0 agents")
+                rows = [board.ANSI_RE.sub("", line) for line in lines if re.match(r"(?:!|▶|○|✓|×|\?) ", board.ANSI_RE.sub("", line))]
+                self.assertEqual(rows, wanted)
+
+    def test_expired_orphan_is_hidden_and_empty_project_and_queue_are_preserved(self):
+        data = {
+            "version": 1, "orchs": {},
+            "agents": {"session-fixture/orphan": {
+                "project": "/fictional/orphan-garden", "name": "orphan", "orch": "session-missing/orch",
+                "kind": "claude", "status": "closed", "closed_at": 399.0,
+            }},
+        }
+        lines = board.render(data, 100, False, "registry.json", "12:34:56", now=1000.0).splitlines()
+        self.assertEqual(lines[0], "ORCH BOARD · 1 project · 0 orchs · 0 agents")
+        self.assertIn("orphan-garden · 0 queued notices", lines)
+        self.assertIn("  No orchs or agents.", lines)
+        self.assertFalse(any("ORPHAN" in line for line in lines))
+
+    def test_open_board_redraws_only_when_closed_row_crosses_expiry(self):
+        data = {
+            "version": 1,
+            "orchs": {"session-fixture/pane": {"project": "/fictional/refresh-garden", "name": "orch", "status": "idle", "queue": []}},
+            "agents": {"session-fixture/worker": {
+                "project": "/fictional/refresh-garden", "name": "worker", "orch": "session-fixture/pane",
+                "kind": "claude", "status": "closed", "closed_at": 1000.0,
+            }},
+        }
+        self.registry.write_text(json.dumps(data))
+        view = board.Board(self.registry, 100, False)
+        current = [1599.0]
+        view.now = lambda: current[0]
+        self.assertTrue(view.refresh())
+        self.assertIn("× CLOSED", view.output)
+        current[0] = 1599.5
+        self.assertFalse(view.refresh())
+        current[0] = 1600.1
+        self.assertTrue(view.refresh())
+        self.assertNotIn("× CLOSED", view.output)
 
     def test_narrow_board_exact_rows_at_40_60_and_100_columns(self):
         data = cycle2_status_data()
@@ -296,7 +371,7 @@ class BoardTests(unittest.TestCase):
         data = {
             "version": 1, "orchs": {},
             "agents": {
-                "s/closed": {"project": project, "name": "fictional-closed-leaf", "orch": "s/missing", "status": "closed"},
+                "s/closed": {"project": project, "name": "fictional-closed-leaf", "orch": "s/missing", "status": "closed", "closed_at": time.time()},
                 "s/working": {"project": project, "name": "fictional-working-leaf", "orch": "s/missing", "status": "working"},
                 "s/blocked": {"project": project, "name": "fictional-blocked-leaf", "orch": "s/missing", "status": "blocked"},
             },
@@ -538,6 +613,7 @@ class BoardTests(unittest.TestCase):
 
     def test_full_board_exact_rows_at_160_and_100_columns(self):
         data = json.loads(CYCLE2_FIXTURE.read_text())
+        data["agents"]["session-a/fictional-closed-worker"]["closed_at"] = time.time()
         expected = {
             160: [
                 "○ IDLE             | orch                                                                                                                | claude · Q:0",

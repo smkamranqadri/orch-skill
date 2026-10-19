@@ -357,9 +357,12 @@ else:
         agent = data["agents"][f"{SESSION}/quartz-builder"]
         self.assertEqual(agent["state"], "cleanup")
         self.assertTrue(agent["agent_closed"])
+        first_closed_at = agent["closed_at"]
+        self.assertIsInstance(first_closed_at, float)
         self.assertTrue(agent["pane_closed"])
         self.assertEqual(agent["created"], [])
         self.assertEqual(data["orchs"][ORCH]["queue"], [notice("quartz-builder", "closed", "w2:p1")])
+        self.assertEqual(data["agents"][f"{SESSION}/quartz-builder"]["closed_at"], first_closed_at)
 
     def test_closed_worker_notice_delivers_to_idle_owner(self):
         close = {"event": "pane.closed", "data": {"pane_id": "w2:p1", "type": "pane_closed", "workspace_id": "w2"}}
@@ -388,6 +391,7 @@ else:
         self.assertEqual(agent["state"], "cleanup")
         self.assertEqual(agent["status"], "closed")
         self.assertTrue(agent["agent_closed"])
+        first_closed_at = agent["closed_at"]
         self.assertFalse(agent.get("pane_closed", False))
         self.assertEqual(agent["created"], ["pane:w2:p1"])
         self.assertEqual(data["orchs"][ORCH]["queue"], [notice("quartz-builder", "closed", "w2:p1")])
@@ -396,6 +400,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         agent = self.registry()["agents"][f"{SESSION}/quartz-builder"]
         self.assertTrue(agent["pane_closed"])
+        self.assertEqual(agent["closed_at"], first_closed_at)
         self.assertEqual(agent["created"], [])
         self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "closed", "w2:p1")])
 
@@ -415,12 +420,15 @@ else:
         pending = self.registry()["agents"][f"{SESSION}/closed-writer"]
         self.assertEqual(pending["state"], "cleanup")
         self.assertTrue(pending["agent_closed"])
+        first_closed_at = pending["closed_at"]
         self.assertEqual(pending["created"], ["workspace:wtws", "worktree:wtws", f"branch:{branch}"])
         self.assertFalse(any(call[:2] == ["agent", "send-keys"] for call in self.herdr_calls()))
 
         self.run_cli("close", "closed-writer")
         finished = self.registry()["agents"][f"{SESSION}/closed-writer"]
         self.assertEqual(finished["state"], "closed")
+        self.assertIsInstance(finished["closed_at"], float)
+        self.assertEqual(finished["closed_at"], first_closed_at)
         self.assertEqual(finished["created"], [])
         self.assertFalse(checkout.exists())
         self.assertNotEqual(subprocess.run(["git", "-C", str(self.repo), "show-ref", "--verify", f"refs/heads/{branch}"], env=self.env, capture_output=True).returncode, 0)

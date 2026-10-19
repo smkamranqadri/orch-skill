@@ -122,7 +122,7 @@ else: print(json.dumps({"result":{}}))
  def test_adopted_close_only_deregisters_even_with_discard(self):
   self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8','--role','review',env=env)
   d=self.state(); d['agents']['session-a/fictional-reviewer']['created']=['pane:p8','tab:tab8']; d['agents']['session-a/fictional-reviewer']['started']=True; (self.home/'orch/registry.json').write_text(json.dumps(d)); before=self.calls()
-  self.runcli('close','fictional-reviewer','--discard'); self.assertEqual(self.calls(),before); row=self.state()['agents']['session-a/fictional-reviewer']; self.assertEqual((row['state'],row['status'],row['created']),('closed','closed',['pane:p8','tab:tab8']))
+  self.runcli('close','fictional-reviewer','--discard'); self.assertEqual(self.calls(),before); row=self.state()['agents']['session-a/fictional-reviewer']; self.assertEqual((row['state'],row['status'],row['created']),('closed','closed',['pane:p8','tab:tab8'])); self.assertIsInstance(row['closed_at'],float)
  def test_closed_adopted_pane_can_be_adopted_by_another_owner(self):
   self.reg(); env=self.catalog({'name':'fictional-reviewer','pane_id':'p8','workspace_id':'ws1','agent':'claude','agent_status':'working'}); self.runcli('adopt','p8',env=env); self.runcli('close','fictional-reviewer')
   self.reg('p2'); self.runcli('adopt','p8','--name','new-reviewer',env=env|{'HERDR_PANE_ID':'p2'})
@@ -346,7 +346,7 @@ else: print(json.dumps({"result":{}}))
     else: (wt/'seed.txt').write_text('modified fictional seed')
     self.runcli('close','dirty-'+kind,'--discard'); self.assertFalse(wt.exists()); self.assertNotIn('--force',[arg for call in self.calls() for arg in call])
  def test_close_only_created_and_discard_override(self):
-  self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber','--keep-checkout'); c=self.calls(); self.assertIn(['agent','send-keys','tabber','ctrl+c'],c); self.assertIn(['pane','close','tabpane'],c); self.assertIn(['tab','close','newtab'],c)
+  self.reg(); self.spawn('tabber','tab'); self.runcli('close','tabber','--keep-checkout'); c=self.calls(); self.assertIn(['agent','send-keys','tabber','ctrl+c'],c); self.assertIn(['pane','close','tabpane'],c); self.assertIn(['tab','close','newtab'],c); self.assertIsInstance(self.state()['agents']['session-a/tabber']['closed_at'],float)
  def test_python_version_guard(self):
   import sys
   sys.path.insert(0,str(ROOT/'plugin'))

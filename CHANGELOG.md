@@ -4,6 +4,8 @@
 
 Initial public release of orch.
 
+- Closed agent rows remain visible for 10 minutes, then disappear from the board.
+
 - Herdr plugin for registering coordinators, spawning workers, routing status notices, and
   displaying the live board.
 - Shared skill and commands for Claude Code and Codex.
