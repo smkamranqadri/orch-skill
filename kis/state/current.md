@@ -1,6 +1,6 @@
 # Current
 
-Stamp: main 93ee731 b9625144bfc7
+Stamp: main 4ba60da b9625144bfc7
 
 - Branch: `main`, local only, not pushed (`origin/main` is far behind). Branches `board-v2`
   (`7dcbfee`) and `phase3-board-design` (`d944922`) deleted 2026-10-19 (recover from the reflog or
