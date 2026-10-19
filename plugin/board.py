@@ -210,7 +210,8 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     else:
         with_runtime = width >= 84
         if with_runtime:
-            lines.append(truncate(f"{'STATE':<18} | {'HIERARCHY PATH':<{width - 18 - 32}} | HOST / MODEL", width))
+            state_width, path_width, runtime_width = table_layout(width)
+            lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}} | {'HOST / MODEL':<{runtime_width}}")
         else:
             state_width, path_width, _ = table_layout(width)
             lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}")
@@ -237,6 +238,16 @@ class Board:
         self.loaded = False
         self.refreshed_at = "never"
         self.output = ""
+        self.data = {"version": 1, "orchs": {}, "agents": {}}
+        self.error = None
+
+    def set_width(self, width: int) -> bool:
+        if width == self.width:
+            return False
+        self.width = width
+        if self.loaded:
+            self.output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error)
+        return True
 
     def refresh(self) -> bool:
         try:
@@ -251,19 +262,11 @@ class Board:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-        self.data = {"version": 1, "orchs": {}, "agents": {}}
-        self.error = None
-
-    def set_width(self, width: int) -> bool:
-        if width == self.width:
-            return False
-        self.width = width
-        if self.loaded:
-            self.output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error)
-        return True
                 error = str(exc)
         self.mtime_ns = mtime_ns
         self.loaded = True
+        self.data = data
+        self.error = error
         self.refreshed_at = self.clock()
         self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error)
         return True
@@ -278,12 +281,12 @@ def run(board: Board, dynamic_width: bool = True) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setcbreak(sys.stdin.fileno())
     try:
-        self.data = data
-        self.error = error
         sys.stdout.write("\033[H\033[2J" + board.output + "\n")
         sys.stdout.flush()
         while True:
             changed = board.refresh()
+            if dynamic_width:
+                changed = board.set_width(shutil.get_terminal_size((100, 24)).columns) or changed
             if changed:
                 sys.stdout.write("\033[H\033[2J" + board.output + "\n")
                 sys.stdout.flush()
@@ -299,8 +302,6 @@ def run(board: Board, dynamic_width: bool = True) -> None:
 
 
 def open_board() -> None:
-            if dynamic_width:
-                changed = board.set_width(shutil.get_terminal_size((100, 24)).columns) or changed
     pane = os.environ.get("HERDR_PANE_ID")
     if not os.environ.get("HERDR_ENV") or not pane:
         raise SystemExit("orch board: --open must run inside a Herdr pane")
