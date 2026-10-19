@@ -34,7 +34,8 @@ orch resume [--name ORCH]
 `orch close` preflights worktrees and refuses to remove unmerged or dirty work unless `--discard`
 is explicit. Close removes only resources created by orch. `orch deregister` marks this orch gone
 and leaves its queue available for adoption. `orch resume` clears the caller's pause and prompt
-window; `--name` targets a named orch in this Herdr session.
+window; `--name` selects exactly one current-session orch by name or pane ID and errors on an
+ambiguous match.
 
 ## Placement and proposals
 
