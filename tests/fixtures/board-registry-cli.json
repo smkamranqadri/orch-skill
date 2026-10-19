@@ -1,0 +1,43 @@
+{
+  "agents": {
+    "session-a/fictional-worker": {
+      "agent_closed": false,
+      "branch": null,
+      "created": [
+        "pane:newpane"
+      ],
+      "effort": null,
+      "kind": "claude",
+      "model": null,
+      "name": "fictional-worker",
+      "orch": "session-a/p1",
+      "pane": "newpane",
+      "pane_closed": false,
+      "project": "/tmp/tmpadlbqhsg/repo",
+      "role": "build",
+      "since": 1792384627,
+      "started": true,
+      "state": "live",
+      "status": "working",
+      "stopped": false,
+      "tree": "/tmp/tmpadlbqhsg/repo",
+      "where": "pane",
+      "worktree": null,
+      "writes": false
+    }
+  },
+  "orchs": {
+    "session-a/p1": {
+      "gone": false,
+      "kind": "claude",
+      "name": "orch",
+      "pane": "p1",
+      "project": "/tmp/tmpadlbqhsg/repo",
+      "queue": [],
+      "status": "idle",
+      "tab": "tab1",
+      "workspace": "ws1"
+    }
+  },
+  "version": 1
+}
