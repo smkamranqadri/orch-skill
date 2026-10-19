@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+with open(os.environ["ORCH_TEST_CALLS"], "a", encoding="utf-8") as out:
+    out.write(json.dumps(args) + "\n")
+
+if args[:3] == ["plugin", "list", "--plugin"]:
+    if "--json" not in args:
+        raise SystemExit(2)
+    linked = os.environ["ORCH_TEST_LINKED_FILE"]
+    path = (
+        open(linked, encoding="utf-8").read()
+        if os.path.exists(linked)
+        else os.environ["ORCH_TEST_PLUGIN_ROOT"]
+    )
+    print(json.dumps([{"id": os.environ.get("ORCH_TEST_PLUGIN_ID", "orch"), "path": path}]))
+elif args[:2] in (["plugin", "link"], ["plugin", "install"], ["plugin", "update"]):
+    if args[:2] == ["plugin", "link"]:
+        with open(os.environ["ORCH_TEST_LINKED_FILE"], "w", encoding="utf-8") as out:
+            out.write(args[2])
+    if args[:2] == ["plugin", "update"] and os.environ.get("ORCH_TEST_UPDATE_FAIL") == "1":
+        print("plugin is not installed", file=sys.stderr)
+        raise SystemExit(1)
+    print("ok")
+else:
+    print("unexpected fake Herdr command", file=sys.stderr)
+    raise SystemExit(2)
