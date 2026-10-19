@@ -194,12 +194,19 @@ def legend(width: int) -> str:
     return "○i ▶w !b ✓d ?u *o"
 
 
+def count_label(count: int, singular: str, plural: str) -> str:
+    noun = singular
+    if count != 1:
+        noun = plural
+    return f"{count} {noun}"
+
+
 def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None) -> str:
     projects = build_projects(data)
     orch_count = sum(row["kind"] == "ORCH" for project in projects for row in project["rows"])
     agent_count = sum(row["kind"] == "AGENT" for project in projects for row in project["rows"])
     lines = [
-        truncate(color(f"ORCH BOARD · {len(projects)} projects · {orch_count} orchs · {agent_count} agents", "1;37", enabled), width),
+        truncate(color(f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", "1;37", enabled), width),
         truncate(legend(width), width),
         "-" * width,
     ]
@@ -216,7 +223,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
             state_width, path_width, _ = table_layout(width)
             lines.append(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}")
         for project in projects:
-            lines.append(truncate(color(f"{project['name']} · {project['queue_count']} queued notices", "1;36", enabled), width))
+            lines.append(truncate(color(f"{project['name']} · {count_label(project['queue_count'], 'queued notice', 'queued notices')}", "1;36", enabled), width))
             if not project["rows"]:
                 lines.append(truncate("  No orchs or agents.", width))
             else:

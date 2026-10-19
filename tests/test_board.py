@@ -74,6 +74,31 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(lines[-1].endswith("refreshed 12:34:56"))
         self.assertTrue(all(board.display_width(line) <= 100 for line in lines))
 
+    def test_renderer_uses_singular_count_labels(self):
+        data = {
+            "version": 1,
+            "orchs": {
+                "session-fictional/pane-one": {
+                    "project": "/fictional/single-garden", "name": "fictional-single-orch", "gone": False,
+                    "queue": ["fictional notice"], "status": "idle",
+                },
+            },
+            "agents": {
+                "session-fictional/single-worker": {
+                    "project": "/fictional/single-garden", "name": "fictional-single-worker",
+                    "orch": "session-fictional/pane-one", "status": "done",
+                },
+            },
+        }
+        lines = board.render(data, 100, False, "registry.json", "12:34:56").splitlines()
+        self.assertEqual(lines[0], "ORCH BOARD · 1 project · 1 orch · 1 agent")
+        self.assertEqual(sum(line == "single-garden · 1 queued notice" for line in lines), 1)
+
+    def test_renderer_uses_plural_count_labels(self):
+        lines = self.render(100).splitlines()
+        self.assertEqual(lines[0], "ORCH BOARD · 2 projects · 3 orchs · 5 agents")
+        self.assertEqual(sum(line == "copperfield · 2 queued notices" for line in lines), 1)
+
     def test_header_and_rows_share_separator_columns_at_100_with_color(self):
         lines = self.render(100, color=True).splitlines()
         plain = [board.ANSI_RE.sub("", line) for line in lines]
