@@ -214,7 +214,7 @@ class BoardTests(unittest.TestCase):
         process, master = self.start_pty(100)
         try:
             self.read_pty(master, 0.3)
-            os.write(master, b"qx")
+            os.write(master, b"xq")
             process.wait(timeout=2)
             self.assertEqual(process.returncode, 0)
         finally:
