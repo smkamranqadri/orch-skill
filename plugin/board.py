@@ -350,17 +350,19 @@ def run(board: Board, dynamic_width: bool = True) -> None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
 
-def open_board() -> None:
+def open_board(placement: str = "split") -> None:
     pane = os.environ.get("HERDR_PANE_ID")
     if not os.environ.get("HERDR_ENV") or not pane:
         raise SystemExit("orch board: --open must run inside a Herdr pane")
-    direction = os.environ.get("ORCH_BOARD_DIRECTION", "right")
-    if direction not in ("right", "down"):
-        raise SystemExit("orch board: ORCH_BOARD_DIRECTION must be 'right' or 'down'")
-    opened = subprocess.run([
-        "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board",
-        "--placement", "split", "--target-pane", pane, "--direction", direction,
-    ], text=True, capture_output=True)
+    if placement not in ("split", "overlay"):
+        raise SystemExit("orch board: placement must be 'split' or 'overlay'")
+    command = ["herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", placement]
+    if placement == "split":
+        direction = os.environ.get("ORCH_BOARD_DIRECTION", "right")
+        if direction not in ("right", "down"):
+            raise SystemExit("orch board: ORCH_BOARD_DIRECTION must be 'right' or 'down'")
+        command.extend(["--target-pane", pane, "--direction", direction])
+    opened = subprocess.run(command, text=True, capture_output=True)
     if opened.returncode:
         raise SystemExit(f"orch board: failed to open board pane: {(opened.stderr or opened.stdout).strip()}")
 
@@ -369,6 +371,7 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="render once and exit")
     parser.add_argument("--open", action="store_true", help="open the board as a Herdr plugin pane")
+    parser.add_argument("--placement", choices=("split", "overlay"), default="split", help="placement for --open")
     parser.add_argument("--width", type=int, help="override the pane width")
     parser.add_argument("--registry", type=Path, help="registry path (defaults to the orch state registry)")
     args = parser.parse_args(argv)
@@ -377,7 +380,7 @@ def main(argv=None) -> None:
     if width < 1:
         parser.error("--width must be a positive number of columns")
     if args.open:
-        open_board()
+        open_board(args.placement)
         return
     path = args.registry or registry_path()
     enabled = sys.stdout.isatty() and "NO_COLOR" not in os.environ

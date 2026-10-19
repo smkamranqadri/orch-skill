@@ -510,9 +510,10 @@ class BoardTests(unittest.TestCase):
 
     def test_manifest_declares_board_action_and_pane_commands(self):
         manifest = tomllib.loads((Path(__file__).parents[1] / "plugin" / "herdr-plugin.toml").read_text())
-        self.assertEqual(manifest["actions"], [{
-            "id": "board", "title": "Open orch board", "contexts": ["pane"], "command": ["python3", "board.py", "--open"]
-        }])
+        self.assertEqual(manifest["actions"], [
+            {"id": "board", "title": "Open orch board", "contexts": ["pane"], "command": ["python3", "board.py", "--open"]},
+            {"id": "board-full", "title": "Orch board, full screen", "contexts": ["pane"], "command": ["python3", "board.py", "--open", "--placement", "overlay"]},
+        ])
         self.assertEqual(manifest["panes"], [{
             "id": "board", "title": "Orch board", "placement": "split", "command": ["python3", "board.py"]
         }])
@@ -527,6 +528,36 @@ class BoardTests(unittest.TestCase):
         ])
         manifest = tomllib.loads((Path(__file__).parents[1] / "plugin" / "herdr-plugin.toml").read_text())
         self.assertEqual(manifest["panes"][0]["command"], ["python3", "board.py"])
+
+    def test_full_board_open_action_uses_overlay_without_split_arguments(self):
+        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_PANE_ID": "fixture-pane", "ORCH_BOARD_DIRECTION": "left"}), patch("plugin.board.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+            board.open_board("overlay")
+        self.assertEqual(run.call_args.args[0], [
+            "herdr", "plugin", "pane", "open", "--plugin", "orch", "--entrypoint", "board", "--placement", "overlay",
+        ])
+
+    def test_full_board_exact_rows_at_160_and_100_columns(self):
+        data = json.loads(CYCLE2_FIXTURE.read_text())
+        expected = {
+            160: [
+                "○ IDLE             | orch                                                                                                                | claude · Q:0",
+                "▶ WORKING          | orch > fictional-adopted-builder                                                                                    | codex fictional-model",
+                "× CLOSED           | orch > fictional-closed-worker                                                                                      | claude",
+                "▶ WORKING *        | ORPHAN > fictional-orphan-worker                                                                                    | claude",
+            ],
+            100: [
+                "○ IDLE             | orch                                                    | claude · Q:0",
+                "▶ WORKING          | orch > fictional-adopted-builder                        | codex fictional-model",
+                "× CLOSED           | orch > fictional-closed-worker                          | claude",
+                "▶ WORKING *        | ORPHAN > fictional-orphan-worker                        | claude",
+            ],
+        }
+        for width, wanted_rows in expected.items():
+            with self.subTest(width=width):
+                lines = board.render(data, width, False, "registry.json", "12:34:56").splitlines()
+                rows = [line for line in lines if re.match(r"(?:!|▶|○|✓|×|\?) ", line)]
+                self.assertEqual(rows, wanted_rows)
+                self.assertTrue(all(board.display_width(line) <= width for line in lines))
 
     def test_open_action_direction_defaults_right_and_accepts_down(self):
         for environment, direction in (({}, "right"), ({"ORCH_BOARD_DIRECTION": "down"}, "down")):

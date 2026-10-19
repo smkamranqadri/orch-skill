@@ -235,3 +235,67 @@ refreshed 11:20:40
 - Herdr may omit the model field; adoption stores an empty model in that case. No implementation question remains.
 - Live behavior remains unverified because this brief prohibits changing owner panes. No real agent was adopted.
 - Owner check in the live Herdr session: run `herdr agent get <agent-name-or-pane>`, adopt an existing agent with `orch adopt <agent-name-or-pane> --role review`, and verify `orch list` plus its board row. Then run `orch close <name> --discard` and confirm the external pane remains open. Also confirm that a target from another Herdr session cannot be resolved for adoption.
+
+## Full-screen board overlay action
+
+Branch: `cycle2`
+Date: 2026-10-19
+History: commit `890e254` was not rewritten.
+Push: not performed.
+KIS: unchanged, as this brief instructed.
+Live Herdr panes: not opened, closed, or moved. Plugin link state and Herdr config were not changed.
+
+### Action and overlay behavior
+
+Added the `board-full` pane action titled `Orch board, full screen`. It calls the existing `board.py --open` path with `--placement overlay`. The original `board` action still uses the split placement and `ORCH_BOARD_DIRECTION` remains limited to that split.
+
+Checked `herdr 0.9.5`, `herdr plugin pane open --help`, `herdr plugin --help`, and `herdr plugin pane --help` on 2026-10-19. Local help lists `overlay` as an accepted placement but does not describe size, focus, or process-exit behavior. Herdr's [plugin CLI docs](https://herdr.dev/docs/cli-reference/) describe overlay as a temporary zoomed overlay over the active pane; the [socket API docs](https://herdr.dev/docs/socket-api/) say overlay panes behave as normal Herdr panes and can be focused or closed through plugin pane APIs. The docs do not guarantee that a plugin overlay closes when its command exits. They explicitly describe command-exit closure for `popup`, which is a different placement. The board's `q` exits its process, but automatic overlay closure on that exit remains unverified. No cleanup workaround was added; the owner must verify this behavior in the live check.
+
+### Exact-row captures
+
+Captured from `tests/fixtures/board-registry-cycle2.json` with `NO_COLOR=1`, timestamp fixed at `12:34:56`. The renderer emits 10 lines total at both widths, so it fits within 43 rows and 30 rows. Rows below are exact; the wider capture gives the hierarchy path 110 columns while retaining the 26-column runtime field.
+
+160×43:
+
+```text
+○ IDLE             | orch                                                                                                                | claude · Q:0
+▶ WORKING          | orch > fictional-adopted-builder                                                                                    | codex fictional-model
+× CLOSED           | orch > fictional-closed-worker                                                                                      | claude
+▶ WORKING *        | ORPHAN > fictional-orphan-worker                                                                                    | claude
+```
+
+100×30:
+
+```text
+○ IDLE             | orch                                                    | claude · Q:0
+▶ WORKING          | orch > fictional-adopted-builder                        | codex fictional-model
+× CLOSED           | orch > fictional-closed-worker                          | claude
+▶ WORKING *        | ORPHAN > fictional-orphan-worker                        | claude
+```
+
+Reproduce with:
+
+```sh
+NO_COLOR=1 python3 plugin/board.py --once --width 160 --registry tests/fixtures/board-registry-cycle2.json
+NO_COLOR=1 python3 plugin/board.py --once --width 100 --registry tests/fixtures/board-registry-cycle2.json
+```
+
+### Tests and mutations
+
+- `test_manifest_declares_board_action_and_pane_commands` asserts the exact `board-full` manifest entry and keeps the split entry unchanged.
+- `test_full_board_open_action_uses_overlay_without_split_arguments` asserts exact Herdr argv including `--plugin orch`, `--entrypoint board`, and `--placement overlay`; it also proves an invalid split direction does not affect the overlay action.
+- `test_full_board_exact_rows_at_160_and_100_columns` pins each fixture row and enforces the requested width limit.
+- Focused tests passed: manifest, split argv, overlay argv, and 160/100 exact rows (4 tests).
+- Mutation check: changed the `board-full` manifest command from `overlay` to `split`; `test_manifest_declares_board_action_and_pane_commands` failed. Restored the manifest and verified it byte-identical with `cmp`.
+- Mutation check: changed the overlay argv construction from the requested placement to `split`; `test_full_board_open_action_uses_overlay_without_split_arguments` failed. Restored `board.py` and verified it byte-identical with `cmp`.
+- `./tests/run.sh` passed: 109 tests in 37.673s.
+
+### Owner live check
+
+From Herdr after the updated plugin is available, invoke the action:
+
+```sh
+herdr plugin action invoke board-full --plugin orch
+```
+
+Confirm the board fills the active pane as an overlay, press `q`, and confirm whether the overlay closes and focus/zoom return. Then bind `prefix+b` in the owner's `config.toml` to action `orch.board-full` and verify that binding. The default `prefix+b` binding may need to be replaced by the owner.
