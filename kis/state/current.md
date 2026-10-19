@@ -1,44 +1,33 @@
 # Current
 
-Stamp: main 4ba60da b9625144bfc7
+Stamp: main 378185f 5a26d70c0274
 
-- Branch: `main`, local only, not pushed (`origin/main` is far behind). Branches `board-v2`
-  (`7dcbfee`) and `phase3-board-design` (`d944922`) deleted 2026-10-19 (recover from the reflog or
-  those SHAs while unpruned). No other branches or worktrees; the build agents
-  are closed. The old 0.12.2 build is gone from the tree (history `613aa67`); ideas worth keeping
-  are in `kis/intent/ideas-from-0.12.2.md`.
-- Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-6 built and merged.
-  Phase 5 (skill plus the notice cap) was reviewed once; its 1 P1 + 2 P2 were fixed and not
-  re-reviewed. Phase 6 (installer, README, CI) was reviewed once; its 2 P1 + 6 P2 were fixed and
-  not re-reviewed, then a live installer `check` bug (Herdr's real `plugin_root` field) was fixed.
+- Branch: `main` at `378185f`, pushed to `origin/main` 2026-10-19 (force-push of the rewritten
+  history, 189 commits). No other branches or worktrees; all build and review agents are closed.
+  `backup/pre-rewrite` is deleted. The remote branch `orch-0.12.2` still exists: the owner runs
+  `git push origin --delete orch-0.12.2`. The old 0.12.2 build is gone from the tree (history
+  `613aa67`); ideas worth keeping are in `kis/intent/ideas-from-0.12.2.md`.
+- Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-6 built, reviewed and
+  merged, plus closed-row expiry (10 minutes), one board section per orch, ghost-orch reconcile,
+  register with the live pane, and the pre-release review fixes (failed pane commands no longer
+  mark orchs gone, re-adoption clears `closed_at`, queue totals of gone orchs stay visible, PTY
+  board tests wait for output). The pre-release fixes were not re-reviewed.
 - Blocker: none.
-- Command: `./tests/run.sh` (169 tests, passing on `main`, 2026-10-19).
-- Proof: suites re-run by the orchestrator on `main` after every merge. Live (2026-10-19): hook,
-  worker spawn and notice delivery to an idle orch; `orch adopt`; real install from the checkout
-  (`./bootstrap.sh install --source .`) and `check` pass, skill copy at `~/.agents/skills/orch`
-  with Claude Code and Codex links, `orch` on PATH, plugin linked to this checkout (not a GitHub
-  install, nothing pushed). Reviewers: Codex gpt-6.1-sol medium; builder GPT-6-Luna.
-- Not verified live: `orch:*` commands in a fresh Claude Code and Codex session (repo with KIS and
-  scratch repo without, planner spawn, close asking before removing a worktree), the cap on a real
+- Command: `./tests/run.sh` (180 tests, passing on `main`, 2026-10-19; about 300 s).
+- Proof: suites re-run by the orchestrator after every merge. Live (2026-10-19): hook, worker
+  spawn and notice delivery; `orch adopt`; `./bootstrap.sh update --repo <github url>` refreshed
+  the skill copy and `check` passes. The plugin and the `orch` CLI link still point at this
+  checkout: `update` refuses to replace a local plugin link with a GitHub install. Reviewers:
+  Codex gpt-6.1-sol medium; builder GPT-6-Luna.
+- Not verified live: `orch:*` commands in a fresh Claude Code and Codex session, the cap on a real
   clock (`orch resume`, `[cap] prompts_per_hour`), `prefix+b` overlay closing on `q`, a worktree
-  spawn after the flag fix, the GitHub release install path, GitHub Actions, macOS and Bash 3.2.
-  Duplicate notices are coalesced by a guard; the root cause is unknown (needs the raw event
-  payloads of one worker run).
-- History rewrite applied locally 2026-10-19 (`git filter-repo --path docs/research --path archive
-  --invert-paths --replace-text <file>`: the owner's home paths and the private project name
-  replaced by fictional ones). 177 commits, every hash changed, final tree unchanged, suite
-  passes, rescan of all blobs and messages clean. `origin/main` is no longer an ancestor, so the
-  push is a force-push the owner runs: `git push --force-with-lease origin main`. Local branch
-  `backup/pre-rewrite` holds the old history (it still has the leaks): never push it, delete it
-  after the push is verified (`git branch -D backup/pre-rewrite`). Review file:
-  `review-outgoing.md` (scratchpad).
-- Known gap: closed agents stay in `registry.json` and show as `× CLOSED` rows on the board
-  forever (nothing deletes them; `orchlib.py` close and `hook.py` only set status). Chosen fix for
-  later: retain closed rows briefly (about 10 minutes, needs a close timestamp), then drop them.
-- Next: (1) owner live checks above. (2) Before any push: review every outgoing commit and the
-  full diff (123+ commits; authors `T <t@example.invalid>` and the owner's address). The owner
-  pushes and tags; the stale remote branch goes with `git push origin --delete orch-0.12.2`.
-  (3) Parked: the herdrctx-style board (dropped with `board-v2`; its review found a missing title
-  lookup timeout, a fixed 8-column Project, titles ignoring the session prefix, flat agent rows),
-  row select-and-enter, the idea list.
-  Owner decision 2026-10-19: no more builder/reviewer loops for now.
+  spawn after the flag fix, a GitHub plugin install (needs `herdr plugin unlink orch` first),
+  GitHub Actions, macOS and Bash 3.2. Duplicate notices are coalesced by a guard; the root cause
+  is unknown (needs the raw event payloads of one worker run). The school-next failed start was
+  traced only to the stale pane ID (fixed).
+- Cosmetic: history shows two author identities (`T <t@example.invalid>` and the owner). The
+  pre-rewrite commits were already public; GitHub Support can purge cached views.
+- Next: (1) owner live checks above. (2) Owner tags a release and deletes `orch-0.12.2`. (3)
+  Parked: the herdrctx-style board (its review found a missing title lookup timeout, a fixed
+  8-column Project, titles ignoring the session prefix, flat agent rows), row select-and-enter,
+  the idea list. Owner decision 2026-10-19: no more builder/reviewer loops for now.
