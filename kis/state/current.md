@@ -24,12 +24,14 @@ Stamp: main 93ee731 b9625144bfc7
   spawn after the flag fix, the GitHub release install path, GitHub Actions, macOS and Bash 3.2.
   Duplicate notices are coalesced by a guard; the root cause is unknown (needs the raw event
   payloads of one worker run).
-- Pending, owner decision: history rewrite before the push. Rehearsed 2026-10-19 in a scratchpad
-  clone (`git filter-repo --path docs/research --path archive --invert-paths --replace-text
-  <file>` with `/home/fictional-user`, `/Users/fictional-user` and `example-app` replaced by fictional names):
-  175 commits, same final tree as `main`, suite passes, rescan clean. Swapping it in changes every
-  hash and needs a force-push over `origin/main`; the scratchpad clone is temporary, so redo it
-  from the command above. Review file: `review-outgoing.md` (scratchpad). Not applied.
+- History rewrite applied locally 2026-10-19 (`git filter-repo --path docs/research --path archive
+  --invert-paths --replace-text <file>`: the owner's home paths and the private project name
+  replaced by fictional ones). 177 commits, every hash changed, final tree unchanged, suite
+  passes, rescan of all blobs and messages clean. `origin/main` is no longer an ancestor, so the
+  push is a force-push the owner runs: `git push --force-with-lease origin main`. Local branch
+  `backup/pre-rewrite` holds the old history (it still has the leaks): never push it, delete it
+  after the push is verified (`git branch -D backup/pre-rewrite`). Review file:
+  `review-outgoing.md` (scratchpad).
 - Known gap: closed agents stay in `registry.json` and show as `× CLOSED` rows on the board
   forever (nothing deletes them; `orchlib.py` close and `hook.py` only set status). Chosen fix for
   later: retain closed rows briefly (about 10 minutes, needs a close timestamp), then drop them.
