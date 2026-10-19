@@ -6,7 +6,7 @@ class PhaseOne(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(); self.root=pathlib.Path(self.tmp.name)
   self.home=self.root/'state'; self.home.mkdir(); self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'; self.resources=self.home/'herdr-resources.json'; self.resources.write_text(json.dumps({'panes':{},'tabs':{}}))
   scrubbed=os.environ.copy()
-  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR','PANE_CURRENT_ID','PANE_CURRENT_FAILURE'):
+  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR','PANE_CURRENT_ID','PANE_CURRENT_FAILURE','PANE_CURRENT_EXIT_FAILURE'):
    scrubbed.pop(name,None)
   self.env=scrubbed|{'HOME':str(self.userhome),'GIT_CONFIG_GLOBAL':str(self.userhome/'gitconfig'),'GIT_CONFIG_SYSTEM':os.devnull,'XDG_CONFIG_HOME':str(self.userhome/'config'),'PATH':str(self.bin)+os.pathsep+scrubbed['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1','PANE_CURRENT_FIXTURE':str(ROOT/'tests'/'fixtures'/'herdr'/'pane-current.json')}
   fake=self.bin/'herdr'
@@ -29,7 +29,7 @@ if args[:3]==["pane","current","--current"]:
  current=json.load(open(os.environ["PANE_CURRENT_FIXTURE"]))
  current["result"]["pane"]["pane_id"]=os.environ.get("PANE_CURRENT_ID",os.environ["HERDR_PANE_ID"])
  print(json.dumps(current))
- sys.exit(0)
+ sys.exit(3 if os.environ.get("PANE_CURRENT_EXIT_FAILURE")=="1" else 0)
 if args[:2] in (["pane","close"],["tab","close"],["workspace","close"]) and os.environ.get("FAIL_CLOSE")==args[-1]: print("simulated close failure",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("MISSING_WORKSPACE")==args[-1]: print("workspace not found",file=sys.stderr); sys.exit(3)
 if args[:2]==["pane","list"] and os.environ.get("PANE_LIST_ERROR")==args[-1]: print("simulated listing error",file=sys.stderr); sys.exit(4)
@@ -120,6 +120,11 @@ else: print(json.dumps({"result":{}}))
    result=self.runcli('register',ok=False,env=self.env|failure)
    self.assertEqual(result.stderr.strip(),'orch: could not resolve current pane; re-run orch register from the orch pane')
    self.assertEqual(path.read_bytes(),original)
+ def test_register_rejects_current_pane_result_from_failed_command_without_writing(self):
+  self.reg(); path=self.home/'orch/registry.json'; original=path.read_bytes()
+  result=self.runcli('register',ok=False,env=self.env|{'HERDR_PANE_ID':'stale-pane','PANE_CURRENT_ID':'p2','PANE_CURRENT_EXIT_FAILURE':'1'})
+  self.assertEqual(result.stderr.strip(),'orch: could not resolve current pane; re-run orch register from the orch pane')
+  self.assertEqual(path.read_bytes(),original)
  def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
   self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle'}; env=self.catalog(agent)
   self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']

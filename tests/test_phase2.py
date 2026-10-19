@@ -60,7 +60,7 @@ class PhaseTwo(unittest.TestCase):
             if key.startswith(("FAIL_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) or key in {
                 "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "CALLS", "PROMPTS",
                 "HERDR_TEST_STATE", "HERDR_DELAY_GET", "HERDR_AGENT_GET_FAILURE",
-                "HERDR_PANE_LIST_FAILURE", "HERDR_TEST_PANES",
+                "HERDR_PANE_LIST_FAILURE", "HERDR_PANE_LIST_EXIT_FAILURE", "HERDR_TEST_PANES",
             }:
                 clean.pop(key, None)
         self.env = clean | {
@@ -124,7 +124,11 @@ elif args[:2] == ["pane", "list"]:
         print("fixture pane listing unavailable", file=sys.stderr)
         sys.exit(3)
     pane_ids = json.loads(os.environ.get("HERDR_TEST_PANES", '["w2:p8", "w2:p9"]'))
-    print(json.dumps({"result": {"panes": [{"pane_id": pane_id} for pane_id in pane_ids]}}))
+    panes = [pane if isinstance(pane, dict) else {"pane_id": pane} for pane in pane_ids]
+    result = {"result": {"panes": panes}}
+    print(json.dumps(result))
+    if os.environ.get("HERDR_PANE_LIST_EXIT_FAILURE") == "1":
+        sys.exit(3)
 elif args[:3] == ["plugin", "pane", "open"]:
     print(json.dumps({"result": {"pane": {"pane_id": "w2:board"}}}))
 elif args[:2] == ["worktree", "create"]:
@@ -378,6 +382,24 @@ else:
             with self.subTest(command=command):
                 self.registry_path.write_text(json.dumps(before))
                 result = self.run_cli(command, env=self.env | {"HERDR_PANE_LIST_FAILURE": "1"})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.registry(), before)
+
+    def test_reconcile_rejects_failed_or_empty_pane_ids_across_workspaces_atomically(self):
+        data = self.registry()
+        data["orchs"][f"{SESSION}/w3:p4"] = {
+            "project": str(self.repo), "name": "orch-third", "kind": "codex",
+            "workspace": "w3", "pane": "w3:p4", "status": "idle", "gone": False, "queue": [],
+        }
+        self.registry_path.write_text(json.dumps(data))
+        before = self.registry()
+        for env in (
+            {"HERDR_PANE_LIST_EXIT_FAILURE": "1"},
+            {"HERDR_TEST_PANES": '[""]'},
+        ):
+            with self.subTest(env=env):
+                self.registry_path.write_text(json.dumps(before))
+                result = self.run_cli("list", env=self.env | env)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.registry(), before)
 

@@ -38,12 +38,20 @@ def save_registry(path,data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False):
+def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False,return_status=False):
     p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
         fail(f"herdr {' '.join(map(str,args))} failed: {error}")
+    if return_status:
+        output=(p.stdout or p.stderr).strip()
+        if not output:
+            decoded={}
+        else:
+            try: decoded=json.loads(output)
+            except json.JSONDecodeError: decoded={"raw":output}
+        return p.returncode==0,decoded
     if p.returncode:
         if not return_errors: return None
         output=(p.stdout or p.stderr).strip()
@@ -165,10 +173,11 @@ def reconcile_orchs(data):
         workspaces.setdefault(workspace_id,[]).append((key,entry))
     gone=[]
     for workspace_id,workspace_entries in workspaces.items():
-        listing=herdr("pane","list","--workspace",workspace_id,check=False,return_errors=True)
+        succeeded,listing=herdr("pane","list","--workspace",workspace_id,check=False,return_status=True)
+        if not succeeded: return False
         result_data=result(listing,"result")
         panes=result_data.get("panes")
-        if not isinstance(panes,list) or any(not isinstance(pane,dict) or not isinstance(pane.get("pane_id"),str) for pane in panes): return False
+        if not isinstance(panes,list) or any(not isinstance(pane,dict) or not isinstance(pane.get("pane_id"),str) or not pane["pane_id"] for pane in panes): return False
         live_ids={pane["pane_id"] for pane in panes}
         gone.extend(entry for _,entry in workspace_entries if entry.get("pane") not in live_ids)
     for entry in gone:
@@ -180,8 +189,8 @@ def workspace():
     return v
 
 def current_pane():
-    response=herdr("pane","current","--current",check=False,return_errors=True)
-    pane=result(response,"result","pane").get("pane_id")
+    succeeded,response=herdr("pane","current","--current",check=False,return_status=True)
+    pane=result(response,"result","pane").get("pane_id") if succeeded else None
     if not isinstance(pane,str) or not pane:
         fail("could not resolve current pane; re-run orch register from the orch pane")
     return pane
