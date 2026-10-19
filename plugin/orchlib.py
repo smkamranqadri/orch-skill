@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core orch registry and Herdr helpers (Python 3.11+)."""
 from __future__ import annotations
-import fcntl, json, os, subprocess, sys, tempfile, time
+import fcntl, json, os, subprocess, sys, tempfile, time, tomllib
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -64,19 +64,61 @@ def project_and_tree(cwd=None):
     tree=str(Path(t.stdout.strip()).resolve()); common=Path(c.stdout.strip()).resolve()
     project=str((common.parent if common.name==".git" else common).resolve())
     return project,tree
-def deliver(data):
+DEFAULT_PROMPTS_PER_HOUR = 6
+PROMPT_WINDOW_SECONDS = 3600
+
+def prompts_per_hour():
+    path = Path.home() / ".config/orch/config.toml"
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+        value = config.get("cap", {}).get("prompts_per_hour", DEFAULT_PROMPTS_PER_HOUR)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            return DEFAULT_PROMPTS_PER_HOUR
+        return value
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return DEFAULT_PROMPTS_PER_HOUR
+
+def deliver(data, now=None):
     session=os.environ["HERDR_SESSION"] + "/"
+    now = time.time() if now is None else now
+    limit = prompts_per_hour()
     for key,orch in data["orchs"].items():
         if not key.startswith(session): continue
         orch["queue"] = unique_messages(orch.get("queue", []))
         if orch.get("gone") or not orch.get("queue"): continue
+        if orch.get("paused"):
+            orch["paused"]["count"] = len(orch["queue"])
+            continue
+        times = [stamp for stamp in orch.get("prompt_times", []) if now - stamp < PROMPT_WINDOW_SECONDS]
+        orch["prompt_times"] = times
+        if len(times) >= limit:
+            orch["paused"] = {"count": len(orch["queue"]), "time": now}
+            continue
         live=herdr("agent","get",orch["pane"],check=False) or {}
         live_agent=result(live,"result","agent")
         status=live_agent.get("agent_status") or live_agent.get("status") or result(live,"result").get("agent_status") or result(live,"result").get("status") or "unknown"
         if status not in ("idle","done"): continue
         message="\n".join(orch["queue"])
         if herdr("agent","prompt",orch["pane"],message,check=False) is not None:
-            orch["queue"].clear(); orch["status"]="working"
+            orch["queue"].clear(); orch["status"]="working"; times.append(now)
+            orch["prompt_times"] = times
+
+def resume(name=None):
+    require_runtime()
+    who = session_key(os.environ["HERDR_PANE_ID"])
+    with locked() as data:
+        require_registered(data)
+        candidates = [(key, orch) for key, orch in data["orchs"].items()
+                      if key.startswith(os.environ["HERDR_SESSION"] + "/")
+                      and (name is None or orch.get("name") == name or orch.get("pane") == name)]
+        if name is None:
+            candidates = [(who, data["orchs"][who])]
+        if not candidates:
+            fail(f"unknown orch: {name}")
+        for _, orch in candidates:
+            orch.pop("paused", None)
+            orch["prompt_times"] = []
+        deliver(data)
 def unique_messages(messages):
     return list(dict.fromkeys(messages))
 def require_registered(data=None):
@@ -234,6 +276,10 @@ def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
         require_registered(d)
+        current = d["orchs"][who]
+        if current.get("paused"):
+            current["paused"]["count"] = len(unique_messages(current.get("queue", [])))
+            print(f"PAUSED: {current['paused'].get('count', 0)} notice(s) held since {current['paused'].get('time')}")
         rows=[x for x in d["agents"].values() if (a.all or x.get("orch")==who) and (not a.idle or x.get("status")=="idle") and (not a.role or x.get("role")==a.role)]
         for x in sorted(rows,key=lambda x:(x.get("role",""),x.get("name",""))): print(f"{x.get('role','?')}\t{x.get('name','?')}\t{x.get('status','unknown')}\t{x.get('where','?')}")
         deliver(d)
@@ -289,7 +335,7 @@ def parser():
     ad=sub.add_parser("adopt"); ad.add_argument("target"); ad.add_argument("--role",choices=["plan","build","review","explore"]); ad.add_argument("--name")
     l=sub.add_parser("list"); l.add_argument("--all",action="store_true"); l.add_argument("--idle",action="store_true"); l.add_argument("--role",choices=["plan","build","review","explore"])
     c=sub.add_parser("close"); c.add_argument("name"); c.add_argument("--keep-checkout",action="store_true"); c.add_argument("--discard",action="store_true")
-    sub.add_parser("deregister"); return p
+    sub.add_parser("deregister"); rs=sub.add_parser("resume"); rs.add_argument("--name"); return p
 def main(argv=None):
     a=parser().parse_args(argv)
     if a.command=="register": register(a.name)
@@ -298,4 +344,5 @@ def main(argv=None):
     elif a.command=="list": list_agents(a)
     elif a.command=="close": close_agent(a)
     elif a.command=="deregister": deregister()
+    elif a.command=="resume": resume(a.name)
 if __name__=="__main__": main()
