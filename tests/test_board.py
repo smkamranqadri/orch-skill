@@ -53,13 +53,23 @@ class BoardTests(unittest.TestCase):
 
     def board_cli_env(self, **overrides):
         calls = self.root / "orch-board-herdr-calls.jsonl"
-        return os.environ.copy() | {
-            "PATH": str(FAKE_HERDR) + os.pathsep + os.environ.get("PATH", ""),
+        return self.clean_env() | {
+            "PATH": str(FAKE_HERDR) + os.pathsep + self.clean_env().get("PATH", ""),
             "ORCH_BOARD_HERDR_CALLS": str(calls),
             "ORCH_BOARD_AGENT_STATUS": "missing",
             "NO_COLOR": "1",
             "HERDR_ENV": "",
         } | overrides
+
+    def clean_env(self):
+        env = os.environ.copy()
+        for name in list(env):
+            if name.startswith("HERDR_") or name == "XDG_STATE_HOME":
+                env.pop(name, None)
+        home = self.root / "home"
+        home.mkdir(exist_ok=True)
+        env["HOME"] = str(home)
+        return env
 
     def calls(self, env):
         path = Path(env["ORCH_BOARD_HERDR_CALLS"])
@@ -292,7 +302,9 @@ class BoardTests(unittest.TestCase):
 
     def test_board_refreshes_title_changes_without_registry_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
-        with patch("plugin.board.read_pane_titles", side_effect=[{"p1": "First title"}, {"p1": "Updated title"}]) as reader:
+        with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_SESSION": "session-a"}), patch(
+            "plugin.board.read_pane_titles", side_effect=[{"session-a/p1": "First title"}, {"session-a/p1": "Updated title"}]
+        ) as reader:
             self.assertTrue(view.refresh())
             self.assertTrue(view.refresh())
         self.assertEqual(reader.call_count, 2)
@@ -404,7 +416,7 @@ class BoardTests(unittest.TestCase):
     def test_q_exits_and_width_30_remains_clipped(self):
         master, slave = pty.openpty()
         process = subprocess.Popen([sys.executable, str(ROOT / "plugin" / "board.py"), "--registry", str(self.registry)],
-                                   stdin=slave, stdout=slave, stderr=slave, env=os.environ.copy() | {"NO_COLOR": "1"})
+                                   stdin=slave, stdout=slave, stderr=slave, env=self.clean_env() | {"NO_COLOR": "1"})
         try:
             output = self.read_pty(master, 1)
             self.assertIn("q quit", output)
@@ -418,7 +430,7 @@ class BoardTests(unittest.TestCase):
             os.close(master)
             os.close(slave)
         result = subprocess.run([sys.executable, str(ROOT / "plugin" / "board.py"), "--once", "--width", "30", "--registry", str(self.registry)],
-                               text=True, capture_output=True, env=os.environ.copy() | {"HERDR_ENV": "", "NO_COLOR": "1"})
+                               text=True, capture_output=True, env=self.clean_env() | {"NO_COLOR": "1"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(all(board.display_width(line) <= 30 for line in result.stdout.splitlines()))
 
