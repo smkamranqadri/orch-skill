@@ -41,7 +41,7 @@ SECURITY, LICENSE, GitHub Actions test workflow. Read that repo when building an
 
 ## History
 
-`archive/` holds orch 0.12.2 and its old KIS memory, frozen at `613aa67`. Reuse code from it only when chosen. The 0.12.2 install and its test home
+The old orch 0.12.2 build was removed from the tree on 2026-10-19 (still in git history at `613aa67`). Reuse code from it only when chosen. The 0.12.2 install and its test home
 were removed from this machine on 2026-10-18.
 
 ## Agents for this repo (owner, 2026-10-18)

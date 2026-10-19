@@ -2,13 +2,13 @@
 
 Stamp: main aec5d8a f0de9afe3d61
 
-- Branch: `main` (phases 1, 2, 4, the live fixes and cycle 2 merged, local only; old build in
-  `archive/`). `main` is far ahead of `origin/main` (not pushed). `phase3-board-design` holds
+- Branch: `main` (phases 1, 2, 4, the live fixes and cycle 2 merged, local only; old build removed
+  from the tree, still in history). `main` is far ahead of `origin/main` (not pushed). `phase3-board-design` holds
   throwaway mockups, not merged.
 - Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-6 built and merged (phase 6: installer, README, CI, 144 tests, not reviewed; owner pushes) (phase 5: skill plus the notice cap; reviewed once, 1 P1 + 2 P2 fixed in 73f8080,
   merged, 123 tests; the fixes were not re-reviewed).
   Cycle 2 (owner's board polish, `orch adopt`, `board-full` overlay action) merged. Next: the
-  owner's live checks, decide on `archive/` before the public push, review of every outgoing commit.
+  owner's live checks, `archive/` deleted and LICENSE holder set; review of every outgoing commit.
 - Blocker: none.
 - Command: `./tests/run.sh` (144 tests on `main`).
 - Proof: phases 1, 2, 4 and cycle 2 reviewed in rounds (Codex gpt-6.1-sol medium reviewer; builder
