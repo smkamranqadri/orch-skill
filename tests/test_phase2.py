@@ -7,6 +7,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = ROOT / "plugin" / "hook.py"
@@ -14,6 +15,7 @@ CLI = ROOT / "plugin" / "orch"
 FIXTURES = ROOT / "tests" / "fixtures" / "herdr"
 sys.path.insert(0, str(ROOT / "plugin"))
 import hook
+import orchlib
 SESSION = "orch-phase2-test"
 ORCH = f"{SESSION}/w2:p9"
 OTHER_ORCH = f"{SESSION}/w2:p8"
@@ -505,6 +507,102 @@ else:
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
         self.assertEqual([event["on"] for event in manifest["events"]], ["pane.agent_status_changed", "pane.closed"])
         self.assertTrue(all(event["command"] == ["python3", "hook.py"] for event in manifest["events"]))
+
+    def test_cap_config_defaults_accepts_positive_integer_and_rejects_invalid_values(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            self.assertEqual(orchlib.prompts_per_hour(), 6)
+            for contents, expected in (
+                ("[cap]\nprompts_per_hour = 3\n", 3),
+                ("[cap]\nprompts_per_hour = 0\n", 6),
+                ("[cap]\nprompts_per_hour = -2\n", 6),
+                ("[cap]\nprompts_per_hour = true\n", 6),
+                ("[cap]\nprompts_per_hour = 'many'\n", 6),
+                ("[cap\n", 6),
+            ):
+                with self.subTest(contents=contents):
+                    config.write_text(contents)
+                    self.assertEqual(orchlib.prompts_per_hour(), expected)
+
+    def test_cap_counts_delivered_prompts_and_expires_at_rolling_hour_boundary(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text("[cap]\nprompts_per_hour = 6\n")
+        data = {"orchs": {ORCH: {"pane": "w2:p9", "queue": ["notice 0"]}}}
+        calls = []
+
+        def fake_herdr(*args, **kwargs):
+            calls.append(args)
+            if args[:2] == ("agent", "get"):
+                return {"result": {"agent": {"status": "idle"}}}
+            return {}
+
+        with mock.patch.dict(os.environ, {"HERDR_SESSION": SESSION, "HOME": str(self.home)}), mock.patch.object(orchlib, "herdr", side_effect=fake_herdr):
+            for second in range(6):
+                orchlib.deliver(data, now=second)
+                data["orchs"][ORCH]["queue"] = [f"notice {second + 1}"]
+            orchlib.deliver(data, now=3600)
+
+        entry = data["orchs"][ORCH]
+        delivered = [call for call in calls if call[:2] == ("agent", "prompt")]
+        self.assertEqual(len(delivered), 7)
+        self.assertEqual(entry["prompt_times"], [1, 2, 3, 4, 5, 3600])
+        self.assertNotIn("paused", entry)
+
+    def test_cap_holds_and_coalesces_queue_then_resume_delivers_once(self):
+        config = self.home / ".config" / "orch" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text("[cap]\nprompts_per_hour = 1\n")
+        self.write_registry(orch_status="idle")
+        self.write_herdr_state(**{
+            "w2:p1": {"agent": "claude", "agent_status": "done"},
+            "w2:p9": {"agent": "claude", "agent_status": "idle"},
+        })
+        self.run_hook(event_for("claude", "done"))
+        held = notice("quartz-builder", "done", "w2:p1")
+        data = self.registry()
+        self.assertEqual(self.prompt_calls(), [["w2:p9", held]])
+        data["orchs"][ORCH]["queue"] = [held]
+        data["orchs"][ORCH]["prompt_times"] = [orchlib.time.time()]
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p3": {"agent": "sample-worker", "agent_status": "blocked"}})
+        blocked = notice("sample-worker", "blocked", "w2:p3")
+        self.run_hook(event_for("sample-worker", "blocked"))
+        self.run_hook(event_for("sample-worker", "blocked"))
+        self.write_herdr_state(**{"w2:p3": {"agent": "sample-worker", "agent_status": "idle"}})
+        idle = notice("sample-worker", "idle", "w2:p3")
+        idle_event = {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p3", "agent_status": "idle"}}
+        self.run_hook(idle_event)
+        self.run_hook(idle_event)
+        data = self.registry()
+        self.assertEqual(data["orchs"][ORCH]["queue"], [held, blocked, idle])
+        self.assertEqual(data["orchs"][ORCH]["paused"]["count"], 3)
+        data["orchs"][ORCH]["prompt_times"] = [orchlib.time.time() - 3601]
+        self.registry_path.write_text(json.dumps(data))
+
+        self.run_cli("register")
+        data = self.registry()
+        data["orchs"][ORCH]["paused"]["count"] = 0
+        self.registry_path.write_text(json.dumps(data))
+        listed = self.run_cli("list")
+        self.assertIn("PAUSED: 3 notice(s) held since", listed.stdout)
+        self.assertTrue(self.registry()["orchs"][ORCH].get("paused"))
+
+        self.write_herdr_state(**{"w2:p9": {"agent": "claude", "agent_status": "idle"}})
+        self.run_cli("resume")
+        self.run_cli("list")
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+        self.assertNotIn("paused", self.registry()["orchs"][ORCH])
+        self.assertEqual(self.prompt_calls(), [["w2:p9", held], ["w2:p9", f"{held}\n{blocked}\n{idle}"]])
+
+    def test_board_displays_paused_orch_and_held_count(self):
+        sys.path.insert(0, str(ROOT / "plugin"))
+        import board
+        data = self.registry()
+        data["orchs"][ORCH]["paused"] = {"count": 4, "time": 1760000000}
+        rendered = board.render(data, 100, False, "registry", "2026-10-19 12:00:00")
+        self.assertIn("PAUSED 4", rendered)
 
 
 if __name__ == "__main__":

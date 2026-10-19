@@ -118,6 +118,9 @@ def row_sort_key(row: dict) -> tuple:
 
 
 def status_cell(row: dict, enabled: bool) -> str:
+    if row["kind"] == "ORCH" and row["node"].get("paused"):
+        held = int(row["node"]["paused"].get("count", 0))
+        return color(f"PAUSED {held}", "1;33", enabled)
     status = str(row["node"].get("status", "unknown")).lower()
     display_status = status if status in STATUS_GLYPHS else "unknown"
     glyph = STATUS_GLYPHS[display_status]
