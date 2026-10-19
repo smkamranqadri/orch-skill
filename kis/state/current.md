@@ -1,14 +1,14 @@
 # Current
 
-Stamp: main 9c7d833 3b13b9288f59
+Stamp: main 6f7df41 3b13b9288f59
 
 - Branch: `main` (phases 1, 2, 4, the live fixes and cycle 2 merged, local only; old build in
   `archive/`). `main` is far ahead of `origin/main` (not pushed). `phase3-board-design` holds
   throwaway mockups, not merged.
 - Task: plan `kis/intent/plan-2026-10-18-orch-v1.md`, Mode Phase. Phases 1-5 built and merged (phase 5: skill plus the notice cap, not reviewed by the reviewer,
   orchestrator read the skill and the cap code).
-  Cycle 2 (owner's board polish, `orch adopt`, `board-full` overlay action) merged. Next: owner's
-  live check of cycle 2, then Phase 5 (skill).
+  Cycle 2 (owner's board polish, `orch adopt`, `board-full` overlay action) merged. Next: the
+  owner's live checks, then Phase 6 (release).
 - Blocker: none.
 - Command: `./tests/run.sh` (113 tests on `main`).
 - Proof: phases 1, 2, 4 and cycle 2 reviewed in rounds (Codex gpt-6.1-sol medium reviewer; builder
