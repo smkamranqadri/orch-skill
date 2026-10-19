@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 import orchlib
 
@@ -59,6 +60,7 @@ def queue_notice(registry, orch_key, message):
 
 def close_agent(registry, agent, pane, *, pane_closed):
     already_closed = agent.get("agent_closed", False)
+    agent.setdefault("closed_at", time.time())
     agent["status"] = "closed"
     agent["state"] = "cleanup"
     agent["agent_closed"] = True

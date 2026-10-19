@@ -10,6 +10,7 @@ import select
 import shutil
 import subprocess
 import sys
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ MIN_WORKER_WIDTH = 20
 MIN_WORKER_PATH_WIDTH = MIN_OWNER_WIDTH + 3 + MIN_WORKER_WIDTH
 MIN_RUNTIME_WIDTH = len("HOST / MODEL")
 MAX_RUNTIME_WIDTH = 26
+CLOSED_ROW_SECONDS = 600
 
 
 def color(value: str, code: str, enabled: bool) -> str:
@@ -235,8 +237,17 @@ def count_label(count: int, singular: str, plural: str) -> str:
     return f"{count} {noun}"
 
 
-def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None) -> str:
+def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None, now: float | None = None) -> str:
+    if now is None:
+        now = time.time()
     projects = build_projects(data)
+    for project in projects:
+        project["rows"] = [
+            row for row in project["rows"]
+            if row["kind"] != "AGENT"
+            or str(row["node"].get("status", "unknown")).lower() != "closed"
+            or (row["node"].get("closed_at") is not None and now - row["node"]["closed_at"] <= CLOSED_ROW_SECONDS)
+        ]
     orch_count = sum(row["kind"] == "ORCH" for project in projects for row in project["rows"])
     agent_count = sum(row["kind"] == "AGENT" and str(row["node"].get("status", "unknown")).lower() != "closed" for project in projects for row in project["rows"])
     required_runtime_width = max(
@@ -292,6 +303,7 @@ class Board:
         self.output = ""
         self.data = {"version": 1, "orchs": {}, "agents": {}}
         self.error = None
+        self.now = time.time
 
     def set_width(self, width: int) -> bool:
         if width == self.width:
@@ -307,7 +319,10 @@ class Board:
         except OSError:
             mtime_ns = None
         if self.loaded and mtime_ns == self.mtime_ns:
-            return False
+            output = render(self.data, self.width, self.color_enabled, str(self.path), self.refreshed_at, self.error, now=self.now())
+            changed = output != self.output
+            self.output = output
+            return changed
         data = {"version": 1, "orchs": {}, "agents": {}}
         error = None
         if mtime_ns is not None:
@@ -320,7 +335,7 @@ class Board:
         self.data = data
         self.error = error
         self.refreshed_at = self.clock()
-        self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error)
+        self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error, now=self.now())
         return True
 
 

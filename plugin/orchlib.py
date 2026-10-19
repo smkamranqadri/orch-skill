@@ -322,7 +322,7 @@ def close_agent(a):
         if not agent: fail(f"unknown agent: {a.name}")
         if agent.get("adopted"):
             if agent.get("orch")!=session_key(os.environ["HERDR_PANE_ID"]): fail("agent is not owned by this orch")
-            agent.update(state="closed",status="closed"); deliver(d); return
+            agent.setdefault("closed_at", time.time()); agent.update(state="closed",status="closed"); deliver(d); return
         if agent.get("state")=="closed" and not agent.get("created"):
             deliver(d); return
         if agent.get("state")=="closed":
@@ -352,7 +352,7 @@ def close_agent(a):
                 p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=os.getcwd(),text=True,capture_output=True)
                 if p.returncode: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")
                 agent["created"].remove(f"branch:{agent['branch']}"); save_registry(registry_path(),d)
-        agent.update(state="closed",status="closed"); deliver(d)
+        agent.setdefault("closed_at", time.time()); agent.update(state="closed",status="closed"); deliver(d)
 def deregister():
     require_runtime(); key=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
