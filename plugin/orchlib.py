@@ -220,6 +220,8 @@ def adopt(a):
                 fail(f"agent already exists in registry: {entry.get('name',name)}")
             tombstones.append(old_key)
         if idempotent:
+            for old_key in tombstones:
+                d["agents"].pop(old_key,None)
             entry=idempotent[1]
             entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False)
             deliver(d)

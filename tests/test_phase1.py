@@ -141,6 +141,12 @@ else: print(json.dumps({"result":{}}))
   before=self.state()['agents'].copy(); failed=self.runcli('adopt','p8','--name','a-owned',env=env1,ok=False)
   self.assertEqual(failed.stderr.strip(),'orch: agent name already in use in this session: a-owned'); self.assertEqual(self.state()['agents'],before)
   self.assertEqual(self.state()['agents']['session-a/z-owned']['orch'],'session-a/p2')
+ def test_idempotent_adoption_removes_stale_pane_tombstones(self):
+  self.reg(); env=self.catalog({'name':'fictional-worker','pane_id':'p8','agent':'claude','agent_status':'idle'}); self.runcli('adopt','p8','--name','active',env=env)
+  d=self.state(); d['orchs']['session-a/p9']={'project':str(self.repo),'pane':'p9','gone':True,'queue':[]}; d['agents']['session-a/stale']={'name':'stale','pane':'p8','orch':'session-a/p9','created':[],'state':'live','adopted':True}; self.save_state(d)
+  self.runcli('adopt','p8','--name','active',env=env)
+  rows=[key for key,agent in self.state()['agents'].items() if key.startswith('session-a/') and agent.get('pane')=='p8']
+  self.assertEqual(rows,['session-a/active'])
  def save_state(self,data): (self.home/'orch/registry.json').write_text(json.dumps(data))
  def test_foreign_session_pane_collision_does_not_block_adoption(self):
   self.reg(); d=self.state(); d['agents']['session-b/foreign']={'name':'foreign','pane':'p8','orch':'session-b/p2','created':[],'state':'live','adopted':True}; self.save_state(d)
