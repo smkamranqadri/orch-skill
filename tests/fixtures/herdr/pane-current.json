@@ -1,0 +1,10 @@
+{
+  "result": {
+    "type": "pane_info",
+    "pane": {
+      "pane_id": "fixture-pane",
+      "workspace_id": "ws1",
+      "tab_id": "tab1"
+    }
+  }
+}

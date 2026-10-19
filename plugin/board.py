@@ -237,25 +237,65 @@ def count_label(count: int, singular: str, plural: str) -> str:
     return f"{count} {noun}"
 
 
+def visible_rows(projects: list[dict], now: float) -> list[dict]:
+    rows = [row for project in projects for row in project["rows"]]
+    return [
+        row for row in rows
+        if row["kind"] != "AGENT"
+        or str(row["node"].get("status", "unknown")).lower() != "closed"
+        or (row["node"].get("closed_at") is not None and now - row["node"]["closed_at"] <= CLOSED_ROW_SECONDS)
+    ]
+
+
+def agent_lines(row: dict, width: int, enabled: bool, last: bool) -> list[str]:
+    state_width = 11 if width < 84 else STATE_WIDTH
+    state = truncate(status_cell(row, enabled), state_width)
+    connector = "└─" if last else "├─"
+    name = str(row["node"].get("name") or row["path"][-1])
+    prefix = f"{state}{' ' * max(0, state_width - display_width(state))} |   {connector} "
+    continuation = " " * display_width(prefix)
+    available = max(1, width - display_width(prefix))
+    chunks = []
+    current = ""
+    for char in name:
+        if current and display_width(current + char) > available:
+            chunks.append(current)
+            current = ""
+        current += char
+    if current or not chunks:
+        chunks.append(current)
+    return [truncate((prefix if index == 0 else continuation) + chunk, width) for index, chunk in enumerate(chunks)]
+
+
+def orch_section(row: dict, agents: list[dict], project_name: str, multiple_projects: bool, width: int, enabled: bool) -> list[str]:
+    node = row["node"]
+    status = status_cell(row, enabled)
+    name = str(node.get("name") or row["group_name"])
+    if multiple_projects:
+        name = f"{name} · {project_name}"
+    runtime = runtime_label(row)
+    state_width = 11 if width < 84 else STATE_WIDTH
+    suffix = f" | {runtime}"
+    name_width = max(0, width - state_width - 3 - display_width(suffix))
+    section_name = truncate(name, name_width)
+    heading = f"{status}{' ' * max(0, state_width - display_width(status))} | {section_name}{suffix}"
+    lines = [truncate(heading, width)]
+    for index, agent in enumerate(agents):
+        lines.extend(agent_lines(agent, width, enabled, index == len(agents) - 1))
+    return lines
+
+
 def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: str, error: str | None = None, now: float | None = None) -> str:
     if now is None:
         now = time.time()
     projects = build_projects(data)
-    for project in projects:
-        project["rows"] = [
-            row for row in project["rows"]
-            if row["kind"] != "AGENT"
-            or str(row["node"].get("status", "unknown")).lower() != "closed"
-            or (row["node"].get("closed_at") is not None and now - row["node"]["closed_at"] <= CLOSED_ROW_SECONDS)
-        ]
-    orch_count = sum(row["kind"] == "ORCH" for project in projects for row in project["rows"])
-    agent_count = sum(row["kind"] == "AGENT" and str(row["node"].get("status", "unknown")).lower() != "closed" for project in projects for row in project["rows"])
-    required_runtime_width = max(
-        (display_width(runtime_label(row)) for project in projects for row in project["rows"]),
-        default=12,
-    )
-    required_path_width = max((path_reservation(row) for project in projects for row in project["rows"]), default=MIN_PATH_WIDTH)
-    state_width, path_width, runtime_width = table_layout(width, required_runtime_width, required_path_width)
+    rows = visible_rows(projects, now)
+    orch_rows = [row for row in rows if row["kind"] == "ORCH"]
+    agent_rows = [row for row in rows if row["kind"] == "AGENT"]
+    orch_count = len(orch_rows)
+    agent_count = sum(str(row["node"].get("status", "unknown")).lower() != "closed" for row in agent_rows)
+    project_names = {project["path"]: project["name"] for project in projects}
+    multiple_projects = len(projects) > 1
     heading = f"ORCH BOARD · {count_label(len(projects), 'project', 'projects')} · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}"
     if display_width(heading) > width:
         heading = f"ORCH · {len(projects)}P · {orch_count}O · {agent_count}A"
@@ -267,24 +307,29 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         lines.append(truncate(color(f"Registry read failed: {error}", "1;31", enabled), width))
     elif not projects:
         lines.append(truncate("No projects or agents registered.", width))
+    elif not orch_rows and not agent_rows:
+        lines.append(truncate("No live orchs or agents.", width))
     else:
-        with_runtime = runtime_width > 0
-        if with_runtime:
-            lines.append(truncate(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}} | {'HOST / MODEL':<{runtime_width}}", width))
-        else:
-            lines.append(truncate(f"{'STATE':<{state_width}} | {'HIERARCHY PATH':<{path_width}}", width))
-        for project in projects:
-            lines.append(truncate(color(f"{project['name']} · {count_label(project['queue_count'], 'queued notice', 'queued notices')}", "1;36", enabled), width))
-            if not project["rows"]:
-                lines.append(truncate("  No orchs or agents.", width))
-            else:
-                previous_group = None
-                for row in project["rows"]:
-                    if previous_group is not None and row["group"] != previous_group:
-                        lines.append("")
-                    lines.append(row_line(row, width, enabled, with_runtime, runtime_width, required_path_width))
-                    previous_group = row["group"]
+        sections = []
+        for orch in orch_rows:
+            project_name = project_names.get(str(orch["node"].get("project", "")), "unknown project")
+            agents = sorted((agent for agent in agent_rows if agent["group"] == orch["group"] and not agent["orphan"]), key=row_sort_key)
+            sections.append((project_name.casefold(), str(orch["node"].get("name") or orch["group_name"]).casefold(), orch, agents, project_name))
+        sections.sort(key=lambda section: (section[0], section[1]))
+        for _, _, orch, agents, project_name in sections:
+            lines.extend(orch_section(orch, agents, project_name, multiple_projects, width, enabled))
             lines.append("")
+        orphan_rows = sorted((row for row in agent_rows if row["orphan"]), key=lambda row: (project_names.get(str(row["node"].get("project", "")), "unknown project").casefold(), *row_sort_key(row)))
+        if orphan_rows:
+            lines.append("ORPHANS")
+            for index, row in enumerate(orphan_rows):
+                lines.extend(agent_lines(row, width, enabled, index == len(orphan_rows) - 1))
+        elif not sections:
+            lines.append(truncate("No live orchs or agents.", width))
+    for project in projects:
+        if project["queue_count"]:
+            label = count_label(project["queue_count"], "queued notice", "queued notices")
+            lines.append(truncate(color(f"{project['name']} · {label}", "1;36", enabled), width))
     while lines and lines[-1] == "":
         lines.pop()
     lines.append(footer(registry, refreshed_at, width))

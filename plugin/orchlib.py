@@ -38,12 +38,20 @@ def save_registry(path,data):
         os.replace(tmp,path)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False):
+def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False,return_status=False):
     p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
         fail(f"herdr {' '.join(map(str,args))} failed: {error}")
+    if return_status:
+        output=(p.stdout or p.stderr).strip()
+        if not output:
+            decoded={}
+        else:
+            try: decoded=json.loads(output)
+            except json.JSONDecodeError: decoded={"raw":output}
+        return p.returncode==0,decoded
     if p.returncode:
         if not return_errors: return None
         output=(p.stdout or p.stderr).strip()
@@ -155,10 +163,37 @@ def pane_ids(value):
         elif isinstance(node,list):
             for child in node: visit(child)
     visit(value); return found
+def reconcile_orchs(data):
+    prefix=os.environ["HERDR_SESSION"] + "/"
+    entries=[(key,entry) for key,entry in data["orchs"].items() if key.startswith(prefix) and not entry.get("gone")]
+    workspaces={}
+    for key,entry in entries:
+        workspace_id=entry.get("workspace")
+        if not workspace_id: return False
+        workspaces.setdefault(workspace_id,[]).append((key,entry))
+    gone=[]
+    for workspace_id,workspace_entries in workspaces.items():
+        succeeded,listing=herdr("pane","list","--workspace",workspace_id,check=False,return_status=True)
+        if not succeeded: return False
+        result_data=result(listing,"result")
+        panes=result_data.get("panes")
+        if not isinstance(panes,list) or any(not isinstance(pane,dict) or not isinstance(pane.get("pane_id"),str) or not pane["pane_id"] for pane in panes): return False
+        live_ids={pane["pane_id"] for pane in panes}
+        gone.extend(entry for _,entry in workspace_entries if entry.get("pane") not in live_ids)
+    for entry in gone:
+        entry["gone"]=True
+    return True
 def workspace():
     v=os.environ.get("HERDR_WORKSPACE_ID")
     if not v: fail("HERDR_WORKSPACE_ID is required")
     return v
+
+def current_pane():
+    succeeded,response=herdr("pane","current","--current",check=False,return_status=True)
+    pane=result(response,"result","pane").get("pane_id") if succeeded else None
+    if not isinstance(pane,str) or not pane:
+        fail("could not resolve current pane; re-run orch register from the orch pane")
+    return pane
 
 def carry_delivery_state(recipient, donors, now=None):
     now = time.time() if now is None else now
@@ -180,20 +215,19 @@ def carry_delivery_state(recipient, donors, now=None):
         }
 
 def register(name=None):
-    require_runtime(); project,_=project_and_tree(); pane=os.environ["HERDR_PANE_ID"]; key=session_key(pane); name=name or "orch"
+    require_runtime(); pane=current_pane(); project,_=project_and_tree(); key=session_key(pane); name=name or "orch"
     direction=os.environ.get("ORCH_BOARD_DIRECTION","right")
     if direction not in ("right","down"): fail("ORCH_BOARD_DIRECTION must be 'right' or 'down'")
     with locked() as d:
-        if key in d["orchs"] and not d["orchs"][key].get("gone"):
-            deliver(d); return
+        reconcile_orchs(d)
+        already_registered=key in d["orchs"] and not d["orchs"][key].get("gone")
         session=os.environ["HERDR_SESSION"] + "/"
-        for old_key,entry in d["orchs"].items():
-            if not old_key.startswith(session) or entry.get("project")!=project or entry.get("gone"): continue
-            listing=herdr("pane","list","--workspace",entry["workspace"],missing_workspace_ok=True)
-            if listing.get("missing_workspace") or entry.get("pane") not in pane_ids(listing): entry["gone"]=True
-        if key in d["orchs"]:
+        orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
+        if already_registered and not orphaned:
+            deliver(d); return
+        if key in d["orchs"] and not already_registered:
             d["orchs"][key].update({"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False})
-        else:
+        elif key not in d["orchs"]:
             d["orchs"][key]={"project":project,"name":name,"kind":os.environ.get("ORCH_KIND","claude"),"pane":pane,"workspace":workspace(),"tab":os.environ.get("HERDR_TAB_ID",""),"status":"idle","gone":False,"queue":[]}
         orphaned=[a for agent_key,a in d["agents"].items() if agent_key.startswith(session) and a.get("project")==project and a.get("orch","").startswith(session) and d["orchs"].get(a.get("orch"),{}).get("gone")]
         old_owners=sorted({a.get("orch") for a in orphaned})
@@ -206,8 +240,9 @@ def register(name=None):
             agent["orch"]=key
             d["orchs"][key]["queue"].append(f"[orch] {agent['name']} {agent.get('status','unknown')} · pane {agent.get('pane','?')} · read: herdr agent read {agent['name']}")
         carry_delivery_state(d["orchs"][key], donors)
-        opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
-        if opened is None: fail("failed step: open board pane")
+        if not already_registered:
+            opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
+            if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):
     require_runtime(); project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
@@ -296,6 +331,7 @@ def adopt(a):
             for old_key in tombstones:
                 d["agents"].pop(old_key,None)
             entry=idempotent[1]
+            entry.pop("closed_at",None)
             entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False)
             deliver(d)
             return
@@ -306,6 +342,7 @@ def adopt(a):
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
+        reconcile_orchs(d)
         require_registered(d)
         current = d["orchs"][who]
         if current.get("paused"):
