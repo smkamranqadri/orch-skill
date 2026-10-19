@@ -318,9 +318,10 @@ def agent_lines(row: dict, width: int, enabled: bool, last: bool) -> list[str]:
 def column_widths(width: int) -> tuple[int, int, int, int]:
     available = max(1, width - 4 - 6)
     if available < 50:
-        name = max(1, available * 38 // 100)
-        status = max(1, available * 22 // 100)
-        project = max(1, available * 23 // 100)
+        status = min(12, max(1, available - 3))
+        remaining = max(3, available - status)
+        name = min(13, max(1, remaining // 3 + 2))
+        project = min(10, max(1, remaining // 3))
     else:
         name = min(30, max(22, available // 3))
         status = 12
@@ -368,7 +369,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         padded_line(f"refresh: {REFRESH_SECONDS}s · last: {last}", width),
         padded_line(f"Status: All · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", width),
         "",
-        padded_line("  ".join(("Name", "Status", "Project", "Title")), width),
+        format_row("Name", "Status", "Project", "Title", width),
         padded_line("─" * max(1, width - 4), width),
         "",
     ]

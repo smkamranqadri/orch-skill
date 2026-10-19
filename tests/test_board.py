@@ -76,7 +76,7 @@ class BoardTests(unittest.TestCase):
             "orch board v0.1.0", "refresh: 1s · last: 12:34:56",
             "Status: All · 2 orchs · 3 agents",
         ])
-        self.assertEqual(plain[4], "Name  Status  Project  Title")
+        self.assertEqual(plain[4], board.format_row("Name", "Status", "Project", "Title", 100).strip())
         self.assertTrue(plain[5].startswith("─"))
         self.assertIn("orch-skill · 2 queued", plain)
         first_orch = next(i for i, line in enumerate(lines) if "▾ orch-claude" in line)
@@ -93,6 +93,33 @@ class BoardTests(unittest.TestCase):
         self.assertIn("* orphan-worker", "\n".join(plain))
         self.assertEqual(plain[-2:], ["", "q quit"])
         self.assertNotIn("refreshed", "\n".join(plain))
+
+    def test_header_cells_start_at_data_columns_at_supported_widths(self):
+        titles = {"p1": "Fictional task title"}
+        for width in (160, 100, 67, 55):
+            with self.subTest(width=width):
+                lines = self.render(width=width, titles=titles).splitlines()
+                header = lines[4]
+                name, status, project, title = board.column_widths(width)
+                offsets = (2, 2 + name + 2, 2 + name + status + 4,
+                           2 + name + status + project + 6)
+                self.assertEqual(tuple(header.find(cell) for cell in ("Name", "Status", "Project", "Title")), offsets)
+                row = next(line for line in lines if line[offsets[1]:offsets[1] + status].strip() == "idle  Q:2")
+                self.assertEqual(tuple(row[offset:offset + cell_width].strip() for offset, cell_width in zip(offsets, (name, status, project, title))),
+                                 (board.truncate("▾ orch-claude", name), "idle  Q:2", "orch-skill", board.truncate("Fictional task title", title)))
+
+    def test_narrow_status_column_keeps_status_and_queue_count(self):
+        lines = self.render(width=55).splitlines()
+        row = next(line for line in lines if "▾ orch-codex" in line)
+        name, status, _, _ = board.column_widths(55)
+        status_start = 2 + name + 2
+        self.assertEqual(row[status_start:status_start + status].strip(), "PAUSED 1")
+
+        data = sample_registry()
+        data["orchs"]["session-b/p1"].pop("paused")
+        lines = self.render(width=55, data=data).splitlines()
+        row = next(line for line in lines if "▾ orch-codex" in line)
+        self.assertEqual(row[status_start:status_start + status].strip(), "working  Q:0")
 
     def test_each_project_has_heading_even_without_queue_and_gone_queues_remain(self):
         data = {"version": 1, "orchs": {
@@ -162,7 +189,8 @@ class BoardTests(unittest.TestCase):
                 self.assertTrue(all(board.display_width(line) <= width for line in lines))
                 self.assertTrue(all(line.startswith("  ") for line in lines if line))
                 self.assertTrue(all(board.display_width(line) == width for line in lines if line))
-                self.assertIn("orphan-worker", "\n".join(lines))
+                if width == 55:
+                    self.assertIn("* orphan-wor…", "\n".join(lines))
 
     def test_color_modes_and_no_color(self):
         cases = (("16", "\033[1;34m"), ("256", "\033[1;38;5;111m"), ("truecolor", "\033[1;38;2;130;156;255m"))
