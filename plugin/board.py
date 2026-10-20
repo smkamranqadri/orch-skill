@@ -20,9 +20,9 @@ ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 CONTROL_SEQUENCE_RE = re.compile(r"\033(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\033\\))")
 BOARD_VERSION = "0.1.0"
 REFRESH_SECONDS = 1
-STATUS_ORDER = {"blocked": 0, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
-STATUS_GLYPHS = {"blocked": "!", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}
-STATUS_COLORS = {"blocked": "blocked", "working": "working", "idle": "dim", "done": "done", "unknown": "amber", "closed": "dim"}
+STATUS_ORDER = {"blocked": 0, "closing": 1, "cleanup": 1, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
+STATUS_GLYPHS = {"blocked": "!", "closing": "◷", "cleanup": "…", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}
+STATUS_COLORS = {"blocked": "blocked", "closing": "amber", "cleanup": "amber", "working": "working", "idle": "dim", "done": "done", "unknown": "amber", "closed": "dim"}
 STATE_WIDTH = 18
 MIN_PATH_WIDTH = 14
 MIN_OWNER_WIDTH = 6
@@ -204,6 +204,8 @@ def status_cell(row: dict, enabled: bool) -> str:
         held = int(row["node"]["paused"].get("count", 0))
         return color(f"PAUSED {held}", "amber", enabled, terminal_color_mode())
     status = str(row["node"].get("status", "unknown")).lower()
+    if row["kind"] == "AGENT" and row["node"].get("state") in ("closing", "cleanup"):
+        status = row["node"]["state"]
     display_status = status if status in STATUS_COLORS else "unknown"
     role = STATUS_COLORS[display_status]
     return color(display_status, role, enabled, terminal_color_mode())
@@ -326,12 +328,16 @@ def count_label(count: int, singular: str, plural: str) -> str:
 
 def visible_rows(projects: list[dict], now: float) -> list[dict]:
     rows = [row for project in projects for row in project["rows"]]
-    return [
-        row for row in rows
-        if row["kind"] != "AGENT"
-        or str(row["node"].get("status", "unknown")).lower() != "closed"
-        or (row["node"].get("closed_at") is not None and now - row["node"]["closed_at"] <= CLOSED_ROW_SECONDS)
-    ]
+    def retained(row: dict) -> bool:
+        if row["kind"] != "AGENT":
+            return True
+        node = row["node"]
+        closing = node.get("state") in ("cleanup", "closed") or str(node.get("status", "unknown")).lower() == "closed"
+        if not closing:
+            return True
+        closed_at = node.get("closed_at")
+        return closed_at is not None and now - closed_at <= CLOSED_ROW_SECONDS
+    return [row for row in rows if retained(row)]
 
 
 def agent_lines(row: dict, width: int, enabled: bool, last: bool, status_width: int | None = None) -> list[str]:
@@ -431,6 +437,12 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     return "\n".join(lines)
 
 
+def write_frame(output: str, clear: bool = False) -> None:
+    prefix = "\033[H\033[2J" if clear else "\033[H"
+    lines = output.split("\n")
+    sys.stdout.write(prefix + "\n".join(line + "\033[K" for line in lines) + "\n\033[J")
+
+
 class Board:
     def __init__(self, path: Path, width: int, color_enabled: bool, clock=None):
         self.path = Path(path)
@@ -456,6 +468,7 @@ class Board:
 
     def refresh(self) -> bool:
         self.titles = read_pane_titles() if os.environ.get("HERDR_ENV") else {}
+        self.refreshed_at = self.clock()
         try:
             mtime_ns = self.path.stat().st_mtime_ns
         except OSError:
@@ -476,7 +489,6 @@ class Board:
         self.loaded = True
         self.data = data
         self.error = error
-        self.refreshed_at = self.clock()
         self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error, now=self.now(), pane_titles=self.titles)
         return True
 
@@ -490,14 +502,21 @@ def run(board: Board, dynamic_width: bool = True) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setcbreak(sys.stdin.fileno())
     try:
-        sys.stdout.write("\033[H\033[2J" + board.output + "\n")
+        write_frame(board.output, clear=True)
         sys.stdout.flush()
         while True:
+            previous = board.output
             changed = board.refresh()
             if dynamic_width:
                 changed = board.set_width(shutil.get_terminal_size((100, 24)).columns) or changed
             if changed:
-                sys.stdout.write("\033[H\033[2J" + board.output + "\n")
+                old_lines = previous.splitlines()
+                new_lines = board.output.splitlines()
+                changed_lines = [index for index, (old, new) in enumerate(zip(old_lines, new_lines)) if old != new]
+                if len(old_lines) == len(new_lines) and changed_lines == [1]:
+                    sys.stdout.write(f"\033[s\033[{changed_lines[0] + 1};1H" + new_lines[1] + "\033[K\033[u")
+                else:
+                    write_frame(board.output)
                 sys.stdout.flush()
             fd = sys.stdin.fileno()
             readable, _, _ = select.select([fd], [], [], 1.0)
@@ -505,6 +524,8 @@ def run(board: Board, dynamic_width: bool = True) -> None:
                 keys = os.read(fd, 4096).decode(errors="ignore")
                 if "q" in keys.lower() or not keys:
                     break
+        sys.stdout.write(f"\033[{len(board.output.splitlines()) + 1};1H")
+        sys.stdout.flush()
     finally:
         if old_settings is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)

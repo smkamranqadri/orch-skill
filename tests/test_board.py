@@ -2,6 +2,7 @@ import json
 import fcntl
 import os
 import pty
+import re
 import select
 import struct
 import subprocess
@@ -212,6 +213,29 @@ class BoardTests(unittest.TestCase):
         self.assertNotIn("closed-worker", view.output)
         self.assertEqual(self.registry.stat().st_mtime_ns, mtime)
 
+    def test_closed_rows_from_both_close_paths_expire_and_missing_timestamps_stay_hidden(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/retention-garden", "name": "retention-orch", "status": "idle", "queue": [],
+        }}, "agents": {
+            "s/worktree-closed": {"project": "/fictional/retention-garden", "name": "worktree-closed", "orch": "s/p", "where": "worktree", "state": "closed", "status": "closed", "closed_at": 1000},
+            "s/pane-closed": {"project": "/fictional/retention-garden", "name": "pane-closed", "orch": "s/p", "where": "pane", "state": "closed", "status": "closed", "closed_at": 1000},
+            "s/cleanup-no-time": {"project": "/fictional/retention-garden", "name": "cleanup-no-time", "orch": "s/p", "state": "cleanup", "status": "done"},
+            "s/closed-no-time": {"project": "/fictional/retention-garden", "name": "closed-no-time", "orch": "s/p", "state": "closed", "status": "done"},
+        }}
+        self.registry.write_text(json.dumps(data))
+        view = board.Board(self.registry, 100, False, clock=lambda: "12:34:56")
+        now = [1599]
+        view.now = lambda: now[0]
+        self.assertTrue(view.refresh())
+        self.assertIn("worktree-closed", view.output)
+        self.assertIn("pane-closed", view.output)
+        self.assertNotIn("cleanup-no-time", view.output)
+        self.assertNotIn("closed-no-time", view.output)
+        now[0] = 1600.1
+        self.assertTrue(view.refresh())
+        self.assertNotIn("worktree-closed", view.output)
+        self.assertNotIn("pane-closed", view.output)
+
     def test_refresh_skips_unchanged_mtime_and_rereads_after_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "12:34:56")
         data = json.loads(self.registry.read_text())
@@ -231,6 +255,84 @@ class BoardTests(unittest.TestCase):
             self.assertEqual(view.refreshed_at, original_stamp)
             self.assertIn("fresh-worker", view.output)
             self.assertFalse(view.refresh())
+
+    def test_refresh_ticks_header_without_rereading_unchanged_registry(self):
+        times = iter(("2026-10-20 12:34:56", "2026-10-20 12:34:57", "2026-10-20 12:34:58"))
+        view = board.Board(self.registry, 100, False, clock=lambda: next(times))
+        with patch.object(Path, "read_text", wraps=self.registry.read_text) as read_text:
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:56", view.output)
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:57", view.output)
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:58", view.output)
+            self.assertEqual(read_text.call_count, 1)
+
+    def test_pty_header_ticks_twice_without_clearing_board(self):
+        process, master = self.start_pty(100)
+        try:
+            output = bytearray()
+            deadline = time.monotonic() + 8
+            distinct = set()
+            while time.monotonic() < deadline and len(distinct) < 3:
+                readable, _, _ = select.select([master], [], [], max(0, deadline - time.monotonic()))
+                if not readable:
+                    break
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+                distinct = set(re.findall(rb"last: (\d{2}:\d{2}:\d{2})", output))
+            self.assertGreaterEqual(len(distinct), 3, output.decode(errors="replace"))
+            rendered = output.decode(errors="replace")
+            self.assertEqual(rendered.count("\033[2J"), 1)
+            self.assertGreaterEqual(rendered.count("\033[2;1H"), 2)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
+    def test_header_tick_preserves_cursor_and_exit_leaves_cursor_below_frame(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/cursor-garden", "name": "cursor-orch", "status": "idle", "queue": [],
+        }}, "agents": {}}
+        self.registry.write_text(json.dumps(data))
+        process, master = self.start_pty(100)
+        output = bytearray()
+        deadline = time.monotonic() + 8
+        stamps = set()
+        try:
+            while time.monotonic() < deadline and len(stamps) < 2:
+                readable, _, _ = select.select([master], [], [], max(0, deadline - time.monotonic()))
+                if not readable:
+                    break
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+                stamps = set(re.findall(rb"last: (\d{2}:\d{2}:\d{2})", output))
+            self.assertGreaterEqual(len(stamps), 2, output.decode(errors="replace"))
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            while select.select([master], [], [], 0)[0]:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+            payload = output.decode(errors="replace")
+            self.assertRegex(payload, re.compile(r"\033\[s\033\[2;1H.*?\033\[u", re.S))
+            expected_row = len(board.render(data, 100, False, str(self.registry), "12:34:56").splitlines()) + 1
+            self.assertTrue(payload.endswith(f"\033[{expected_row};1H"), payload[-100:])
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
 
     def test_manifest_declares_board_pane_command(self):
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
@@ -424,6 +526,12 @@ class BoardTests(unittest.TestCase):
         row = next(line for line in lines if "odd-worker" in line)
         self.assertIn("unknown", row)
         self.assertNotIn("unrecognized", row)
+
+    def test_closing_and_cleanup_states_override_stale_done_status(self):
+        closing = {"kind": "AGENT", "node": {"name": "worker-alpha", "status": "done", "state": "closing"}}
+        cleanup = {"kind": "AGENT", "node": {"name": "worker-bravo", "status": "done", "state": "cleanup"}}
+        self.assertEqual(board.status_cell(closing, False), "closing")
+        self.assertEqual(board.status_cell(cleanup, False), "cleanup")
 
     def test_board_refreshes_title_changes_without_registry_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
@@ -621,6 +729,63 @@ class BoardTests(unittest.TestCase):
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 60, 0, 0))
             resized = self.read_pty_until(master, "─" * 56)
             self.assertNotIn("─" * 96, resized)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
+    def test_adding_agent_clears_old_footer_from_blank_separator(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/pty-garden", "name": "pty-orch", "status": "idle", "queue": [],
+        }}, "agents": {}}
+        self.registry.write_text(json.dumps(data))
+        process, master = self.start_pty(100)
+        screen = [[" "] * 100 for _ in range(24)]
+
+        def apply(output):
+            y = x = 0
+            pending_wrap = False
+            tokens = re.split(r"(\033\[[0-?]*[ -/]*[@-~])", output)
+            for token in tokens:
+                if token.startswith("\033["):
+                    command = token[2:]
+                    if command == "H": y = x = 0; pending_wrap = False
+                    elif command == "2J": screen[:] = [[" "] * 100 for _ in range(24)]; y = x = 0; pending_wrap = False
+                    elif command == "K": screen[y][x:] = [" "] * (100 - x)
+                    elif command == "J":
+                        screen[y][x:] = [" "] * (100 - x)
+                        for row in range(y + 1, 24): screen[row] = [" "] * 100
+                    elif command.endswith("H"):
+                        row, column = (int(value) for value in command[:-1].split(";"))
+                        y, x, pending_wrap = row - 1, column - 1, False
+                    continue
+                for char in token:
+                    if char == "\r": x = 0; pending_wrap = False
+                    elif char == "\n": y = min(23, y + 1); x = 0; pending_wrap = False
+                    elif char >= " ":
+                        if pending_wrap: y = min(23, y + 1); x = 0; pending_wrap = False
+                        screen[y][x] = char
+                        if x == 99: pending_wrap = True
+                        else: x += 1
+
+        try:
+            initial = self.read_pty_until(master, "q quit")
+            apply(initial)
+            data["agents"]["s/worker"] = {
+                "project": "/fictional/pty-garden", "name": "new-agent", "orch": "s/p", "status": "working",
+            }
+            self.registry.write_text(json.dumps(data))
+            future = self.registry.stat().st_mtime_ns + 2_000_000_000
+            os.utime(self.registry, ns=(future, future))
+            update = self.read_pty_until(master, "q quit")
+            self.assertIn("new-agent", update)
+            apply(update)
+            lines = ["".join(row).strip() for row in screen]
+            self.assertEqual(lines.count("q quit"), 1, lines)
             os.write(master, b"q")
             process.wait(timeout=3)
             self.assertEqual(process.returncode, 0)

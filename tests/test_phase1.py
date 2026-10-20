@@ -66,6 +66,13 @@ elif args[:2]==["worktree","create"]:
  open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
  print(json.dumps({"result":{"root_pane":{"pane_id":"wtpane"},"workspace":{"workspace_id":"wtws"},"worktree":{"path":path}}}))
 elif args[:2]==["worktree","remove"]:
+ if os.environ.get("REMOVE_JSON_EXIT_FAILURE")=="1":
+  path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read(); shutil.rmtree(path); subprocess.run(["git","-C",os.getcwd(),"worktree","prune"],check=True)
+  print(json.dumps({"result":{}})); sys.exit(7)
+ if os.environ.get("WORKSPACE_NOT_FOUND")=="1":
+  if os.environ.get("DIRTY_ON_WORKTREE_REMOVE")=="1":
+   path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read(); open(os.path.join(path,"late-fictional.txt"),"w").write("late worker output")
+  print(json.dumps({"error":{"code":"workspace_not_found","message":"workspace not found"}})); sys.exit(1)
  if os.environ.get("FAIL_WORKTREE_REMOVE")=="1": print("simulated remove failure",file=sys.stderr); sys.exit(3)
  path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read()
  shutil.rmtree(path)
@@ -337,6 +344,74 @@ else: print(json.dumps({"result":{}}))
   self.runcli('close','writer',ok=False,env=self.env|{'FAIL_CLOSE':'wtws'}); self.assertEqual(self.state()['agents']['session-a/writer']['state'],'closing')
   dirty=wt/'retry-dirty-fictional.txt'; dirty.write_text('retain on refusal'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('retry-dirty-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n); self.assertTrue(dirty.exists())
+ def test_close_retries_missing_worktree_workspace_and_is_idempotent(self):
+  self.reg(); self.spawn('writer','worktree'); data=self.state(); agent=data['agents']['session-a/writer']; agent['status']='done'; (self.home/'orch/registry.json').write_text(json.dumps(data)); wt=pathlib.Path(agent['worktree'])
+  self.runcli('close','writer',env=self.env|{'WORKSPACE_NOT_FOUND':'1'}); row=self.state()['agents']['session-a/writer']
+  self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
+  closed_at=row['closed_at']; self.runcli('close','writer',env=self.env|{'WORKSPACE_NOT_FOUND':'1'}); self.assertEqual(self.state()['agents']['session-a/writer']['closed_at'],closed_at)
+  self.spawn('retry-writer','worktree'); data=self.state(); retry=data['agents']['session-a/retry-writer']; retry.update(state='closing',status='done'); (self.home/'orch/registry.json').write_text(json.dumps(data)); shutil.rmtree(retry['worktree'])
+  self.runcli('close','retry-writer'); retry=self.state()['agents']['session-a/retry-writer']; self.assertEqual((retry['state'],retry['status']),('closed','closed')); self.assertIsInstance(retry['closed_at'],float)
+ def test_close_other_worktree_remove_errors_remain_retryable(self):
+  self.reg(); self.spawn('writer','worktree')
+  result=self.runcli('close','writer',ok=False,env=self.env|{'FAIL_WORKTREE_REMOVE':'1'})
+  self.assertIn('simulated remove failure',result.stderr)
+  row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closing','closing')); self.assertIn('worktree:wtws',row['created'])
+  self.runcli('close','writer'); row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
+ def test_close_missing_workspace_preserves_detached_unmerged_checkout(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree'])
+  subprocess.run(['git','-C',str(wt),'checkout','--detach'],check=True,env=self.env,capture_output=True)
+  (wt/'detached-fictional.txt').write_text('unmerged detached commit')
+  subprocess.run(['git','-C',str(wt),'add','detached-fictional.txt'],check=True,env=self.env)
+  subprocess.run(['git','-C',str(wt),'commit','-qm','detached fictional commit'],check=True,env=self.env)
+  result=self.runcli('close','writer',ok=False,env=self.env|{'WORKSPACE_NOT_FOUND':'1'})
+  self.assertIn('unmerged',result.stderr)
+  self.assertTrue((wt/'detached-fictional.txt').exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'live'); self.assertIn('worktree:wtws',row['created'])
+ def test_close_missing_workspace_rechecks_dirty_checkout_after_stopping_worker(self):
+  self.reg(); self.spawn('writer','worktree'); data=self.state(); row=data['agents']['session-a/writer']; row['started']=True; (self.home/'orch/registry.json').write_text(json.dumps(data)); wt=pathlib.Path(row['worktree'])
+  result=self.runcli('close','writer',ok=False,env=self.env|{'WORKSPACE_NOT_FOUND':'1','DIRTY_ON_WORKTREE_REMOVE':'1'})
+  self.assertIn('late-fictional.txt',result.stderr)
+  self.assertTrue((wt/'late-fictional.txt').exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('worktree:wtws',row['created'])
+ def test_close_missing_checkout_checks_branch_ancestry_on_retry(self):
+  self.reg(); self.spawn('writer','worktree'); row=self.state()['agents']['session-a/writer']; wt=pathlib.Path(row['worktree'])
+  (wt/'branch-only-fictional.txt').write_text('unmerged tracked commit')
+  subprocess.run(['git','-C',str(wt),'add','branch-only-fictional.txt'],check=True,env=self.env)
+  subprocess.run(['git','-C',str(wt),'commit','-qm','branch-only fictional commit'],check=True,env=self.env)
+  branch=row['branch']
+  subprocess.run(['git','-C',str(self.repo),'branch','fictional-upstream',branch],check=True,env=self.env)
+  subprocess.run(['git','-C',str(self.repo),'branch','--set-upstream-to=fictional-upstream',branch],check=True,env=self.env,capture_output=True)
+  data=self.state(); data['agents']['session-a/writer'].update(state='closing',status='closing'); (self.home/'orch/registry.json').write_text(json.dumps(data))
+  shutil.rmtree(wt); subprocess.run(['git','-C',str(self.repo),'worktree','prune'],check=True,env=self.env)
+  result=self.runcli('close','writer',ok=False)
+  self.assertIn('unmerged commits',result.stderr)
+  branch_exists=subprocess.run(['git','-C',str(self.repo),'show-ref','--verify',f'refs/heads/{branch}'],env=self.env,capture_output=True)
+  self.assertEqual(branch_exists.returncode,0)
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn(f'branch:{branch}',row['created'])
+ def test_close_rejects_failed_remove_with_nonerror_json_and_keeps_marker(self):
+  self.reg(); self.spawn('writer','worktree'); row=self.state()['agents']['session-a/writer']; wt=pathlib.Path(row['worktree'])
+  result=self.runcli('close','writer',ok=False,env=self.env|{'REMOVE_JSON_EXIT_FAILURE':'1'})
+  self.assertIn('herdr worktree remove',result.stderr)
+  self.assertFalse(wt.exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('worktree:wtws',row['created'])
+ def test_close_retry_recovers_after_branch_deleted_before_marker_save(self):
+  self.reg(); self.spawn('writer','worktree')
+  real_git=shutil.which('git'); wrapper=self.bin/'git'
+  wrapper.write_text('''#!/usr/bin/env python3
+import os,signal,subprocess,sys
+args=sys.argv[1:]
+result=subprocess.run([os.environ["REAL_GIT"],*args])
+if result.returncode==0 and os.environ.get("CRASH_AFTER_BRANCH_DELETE")=="1" and args[:2]==["branch","-d"]:
+ os.kill(os.getppid(),signal.SIGKILL)
+sys.exit(result.returncode)
+'''); wrapper.chmod(0o755)
+  result=self.runcli('close','writer',ok=False,env=self.env|{'REAL_GIT':real_git,'CRASH_AFTER_BRANCH_DELETE':'1'})
+  self.assertNotEqual(result.returncode,0)
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('branch:orch/writer',row['created'])
+  branch=subprocess.run([real_git,'-C',str(self.repo),'show-ref','--verify','--quiet','refs/heads/orch/writer'],env=self.env)
+  self.assertEqual(branch.returncode,1)
+  self.runcli('close','writer',env=self.env|{'REAL_GIT':real_git}); row=self.state()['agents']['session-a/writer']
+  self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
