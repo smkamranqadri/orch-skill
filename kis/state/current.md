@@ -1,9 +1,9 @@
 # Current
 
-Stamp: main c9bf7ae 7958b0fe729b
+Stamp: main f0ebe6a 06f41246fed6
 
-- Branch: `main` (see Stamp). `origin/main` is at `8f7212b` (force-pushed 2026-10-19); the board
-  merges and State syncs since then are NOT pushed (plain push, no force needed). No other branches or worktrees; all build and review agents are closed.
+- Branch: `main`, pushed to `origin/main` 2026-10-20 (plain push after the 2026-10-19 force-push).
+  Version 1.0.0 (CHANGELOG, plugin manifest, board header); the owner tags `v1.0.0`. No other branches or worktrees; all build and review agents are closed.
   `backup/pre-rewrite` is deleted. The remote branch `orch-0.12.2` still exists: the owner runs
   `git push origin --delete orch-0.12.2`. The old 0.12.2 build is gone from the tree (history
   `613aa67`); ideas worth keeping are in `kis/intent/ideas-from-0.12.2.md`.
@@ -26,7 +26,8 @@ Stamp: main c9bf7ae 7958b0fe729b
 - Blocker: none.
 - Command: `env -u HERDR_ENV -u XDG_STATE_HOME HOME=$(mktemp -d) ./tests/run.sh` (197 tests,
   passing on `main`, 2026-10-20; the PTY tests flake under heavy load, rerun one alone first).
-- Proof: suites re-run by the orchestrator after every merge. Live (2026-10-19): hook, worker
+- Proof: suites re-run by the orchestrator after every merge. 2026-10-20: 1.0.0 installed with
+  `./bootstrap.sh update --source .`, plugin reports 1.0.0, `check --source .` passes. Live (2026-10-19): hook, worker
   spawn and notice delivery; `orch adopt`; `./bootstrap.sh update --repo <github url>` refreshed
   the skill copy and `check` passes. The plugin and the `orch` CLI link still point at this
   checkout: `update` refuses to replace a local plugin link with a GitHub install. Reviewers:
