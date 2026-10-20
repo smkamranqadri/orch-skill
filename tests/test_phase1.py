@@ -66,6 +66,9 @@ elif args[:2]==["worktree","create"]:
  open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
  print(json.dumps({"result":{"root_pane":{"pane_id":"wtpane"},"workspace":{"workspace_id":"wtws"},"worktree":{"path":path}}}))
 elif args[:2]==["worktree","remove"]:
+ if os.environ.get("REMOVE_JSON_EXIT_FAILURE")=="1":
+  path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read(); shutil.rmtree(path); subprocess.run(["git","-C",os.getcwd(),"worktree","prune"],check=True)
+  print(json.dumps({"result":{}})); sys.exit(7)
  if os.environ.get("WORKSPACE_NOT_FOUND")=="1":
   if os.environ.get("DIRTY_ON_WORKTREE_REMOVE")=="1":
    path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read(); open(os.path.join(path,"late-fictional.txt"),"w").write("late worker output")
@@ -385,6 +388,12 @@ else: print(json.dumps({"result":{}}))
   branch_exists=subprocess.run(['git','-C',str(self.repo),'show-ref','--verify',f'refs/heads/{branch}'],env=self.env,capture_output=True)
   self.assertEqual(branch_exists.returncode,0)
   row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn(f'branch:{branch}',row['created'])
+ def test_close_rejects_failed_remove_with_nonerror_json_and_keeps_marker(self):
+  self.reg(); self.spawn('writer','worktree'); row=self.state()['agents']['session-a/writer']; wt=pathlib.Path(row['worktree'])
+  result=self.runcli('close','writer',ok=False,env=self.env|{'REMOVE_JSON_EXIT_FAILURE':'1'})
+  self.assertIn('herdr worktree remove',result.stderr)
+  self.assertFalse(wt.exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('worktree:wtws',row['created'])
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)

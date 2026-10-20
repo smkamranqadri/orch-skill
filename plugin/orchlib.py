@@ -449,11 +449,12 @@ def close_agent(a):
             if ws:
                 missing = False
                 if wt and Path(wt).exists():
-                    result = herdr("worktree","remove","--workspace",ws,check=False,return_errors=True)
+                    succeeded,result = herdr("worktree","remove","--workspace",ws,check=False,return_status=True)
                     error = result.get("error") if isinstance(result, dict) else None
-                    missing = isinstance(error, dict) and error.get("code") == "workspace_not_found"
-                    if error and not missing: fail(f"herdr worktree remove --workspace {ws} failed: {error.get('message', error)}")
-                    if result is None: fail(f"herdr worktree remove --workspace {ws} failed")
+                    missing = not succeeded and isinstance(error, dict) and error.get("code") == "workspace_not_found"
+                    if not succeeded and not missing:
+                        detail = error.get("message", error) if isinstance(error, dict) else result
+                        fail(f"herdr worktree remove --workspace {ws} failed: {detail}")
                 elif wt:
                     subprocess.run(["git","worktree","prune"],cwd=os.getcwd(),capture_output=True)
                 if missing:
