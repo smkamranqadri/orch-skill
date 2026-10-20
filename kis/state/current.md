@@ -37,3 +37,8 @@ Stamp: main cf805da deec612bbfaa
   Parked: the herdrctx-style board (its review found a missing title lookup timeout, a fixed
   8-column Project, titles ignoring the session prefix, flat agent rows), row select-and-enter,
   the idea list. Owner decision 2026-10-19: no more builder/reviewer loops for now.
+- Open (owner 2026-10-20): false `idle`/`done` notices. Workers repeatedly report idle or done
+  while still working (seen on every builder and reviewer run today), so the orch acts on a stale
+  signal and shows `done` early. Check: capture the raw `pane.agent_status_changed` payloads for one
+  run, compare with `herdr agent get`, then debounce in `plugin/hook.py` (confirm status is still
+  idle after a short delay before notifying). Related to the duplicate-notice root cause above.
