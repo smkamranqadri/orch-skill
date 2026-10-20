@@ -470,8 +470,14 @@ def close_agent(a):
                         if pruned.returncode: fail(f"failed step: prune missing worktree: {pruned.stderr.strip()}")
                 agent["created"].remove(f"worktree:{ws}"); save_registry(registry_path(),d)
             if f"branch:{agent['branch']}" in agent.get("created",[]):
-                p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=os.getcwd(),text=True,capture_output=True)
-                if p.returncode: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")
+                ref=f"refs/heads/{agent['branch']}"
+                exists=subprocess.run(["git","show-ref","--verify","--quiet",ref],cwd=os.getcwd(),capture_output=True)
+                if exists.returncode not in (0,1): fail(f"failed step: check branch {agent['branch']}: exit {exists.returncode}")
+                if exists.returncode == 0:
+                    p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=os.getcwd(),text=True,capture_output=True)
+                    if p.returncode:
+                        exists=subprocess.run(["git","show-ref","--verify","--quiet",ref],cwd=os.getcwd(),capture_output=True)
+                        if exists.returncode != 1: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")
                 agent["created"].remove(f"branch:{agent['branch']}"); save_registry(registry_path(),d)
         agent.setdefault("closed_at", time.time()); agent.update(state="closed",status="closed"); deliver(d)
 def deregister():

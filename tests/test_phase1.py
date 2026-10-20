@@ -394,6 +394,24 @@ else: print(json.dumps({"result":{}}))
   self.assertIn('herdr worktree remove',result.stderr)
   self.assertFalse(wt.exists())
   row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('worktree:wtws',row['created'])
+ def test_close_retry_recovers_after_branch_deleted_before_marker_save(self):
+  self.reg(); self.spawn('writer','worktree')
+  real_git=shutil.which('git'); wrapper=self.bin/'git'
+  wrapper.write_text('''#!/usr/bin/env python3
+import os,signal,subprocess,sys
+args=sys.argv[1:]
+result=subprocess.run([os.environ["REAL_GIT"],*args])
+if result.returncode==0 and os.environ.get("CRASH_AFTER_BRANCH_DELETE")=="1" and args[:2]==["branch","-d"]:
+ os.kill(os.getppid(),signal.SIGKILL)
+sys.exit(result.returncode)
+'''); wrapper.chmod(0o755)
+  result=self.runcli('close','writer',ok=False,env=self.env|{'REAL_GIT':real_git,'CRASH_AFTER_BRANCH_DELETE':'1'})
+  self.assertNotEqual(result.returncode,0)
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('branch:orch/writer',row['created'])
+  branch=subprocess.run([real_git,'-C',str(self.repo),'show-ref','--verify','--quiet','refs/heads/orch/writer'],env=self.env)
+  self.assertEqual(branch.returncode,1)
+  self.runcli('close','writer',env=self.env|{'REAL_GIT':real_git}); row=self.state()['agents']['session-a/writer']
+  self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
