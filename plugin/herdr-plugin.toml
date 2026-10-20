@@ -1,6 +1,6 @@
 id = "orch"
 name = "orch"
-version = "0.1.0"
+version = "1.0.0"
 min_herdr_version = "0.9.5"
 description = "Routes agent status events to the owning orch pane"
 platforms = ["linux", "macos"]

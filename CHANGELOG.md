@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0 (2026-10-20)
+
+- Board redesigned in the herdrctx style: version header, a ticking `refresh: 1s · last:` line,
+  status summary, aligned Name, Status, Project and Title columns, a heading per project with its
+  orchs and agents below it, and a `q quit` footer.
+- New `orch board` command: runs in place from a plain terminal, opens the full-screen overlay from
+  an agent pane.
+- `orch close` finishes when Herdr reports the worktree workspace already gone, resumes rows stuck
+  in `closing`, and refuses to delete unmerged or newly changed work without `--discard`.
+
 ## 0.1.0 (2026-10-19)
 
 Initial public release of orch.
