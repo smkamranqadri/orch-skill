@@ -462,6 +462,7 @@ class Board:
 
     def refresh(self) -> bool:
         self.titles = read_pane_titles() if os.environ.get("HERDR_ENV") else {}
+        self.refreshed_at = self.clock()
         try:
             mtime_ns = self.path.stat().st_mtime_ns
         except OSError:
@@ -482,7 +483,6 @@ class Board:
         self.loaded = True
         self.data = data
         self.error = error
-        self.refreshed_at = self.clock()
         self.output = render(data, self.width, self.color_enabled, str(self.path), self.refreshed_at, error, now=self.now(), pane_titles=self.titles)
         return True
 
@@ -499,11 +499,18 @@ def run(board: Board, dynamic_width: bool = True) -> None:
         sys.stdout.write("\033[H\033[2J" + board.output + "\n")
         sys.stdout.flush()
         while True:
+            previous = board.output
             changed = board.refresh()
             if dynamic_width:
                 changed = board.set_width(shutil.get_terminal_size((100, 24)).columns) or changed
             if changed:
-                sys.stdout.write("\033[H\033[2J" + board.output + "\n")
+                old_lines = previous.splitlines()
+                new_lines = board.output.splitlines()
+                changed_lines = [index for index, (old, new) in enumerate(zip(old_lines, new_lines)) if old != new]
+                if len(old_lines) == len(new_lines) and changed_lines == [1]:
+                    sys.stdout.write(f"\033[{changed_lines[0] + 1};1H" + new_lines[1])
+                else:
+                    sys.stdout.write("\033[H" + board.output + "\033[J")
                 sys.stdout.flush()
             fd = sys.stdin.fileno()
             readable, _, _ = select.select([fd], [], [], 1.0)

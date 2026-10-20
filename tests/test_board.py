@@ -2,6 +2,7 @@ import json
 import fcntl
 import os
 import pty
+import re
 import select
 import struct
 import subprocess
@@ -254,6 +255,46 @@ class BoardTests(unittest.TestCase):
             self.assertEqual(view.refreshed_at, original_stamp)
             self.assertIn("fresh-worker", view.output)
             self.assertFalse(view.refresh())
+
+    def test_refresh_ticks_header_without_rereading_unchanged_registry(self):
+        times = iter(("2026-10-20 12:34:56", "2026-10-20 12:34:57", "2026-10-20 12:34:58"))
+        view = board.Board(self.registry, 100, False, clock=lambda: next(times))
+        with patch.object(Path, "read_text", wraps=self.registry.read_text) as read_text:
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:56", view.output)
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:57", view.output)
+            self.assertTrue(view.refresh())
+            self.assertIn("last: 12:34:58", view.output)
+            self.assertEqual(read_text.call_count, 1)
+
+    def test_pty_header_ticks_twice_without_clearing_board(self):
+        process, master = self.start_pty(100)
+        try:
+            output = bytearray()
+            deadline = time.monotonic() + 8
+            distinct = set()
+            while time.monotonic() < deadline and len(distinct) < 3:
+                readable, _, _ = select.select([master], [], [], max(0, deadline - time.monotonic()))
+                if not readable:
+                    break
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+                distinct = set(re.findall(rb"last: (\d{2}:\d{2}:\d{2})", output))
+            self.assertGreaterEqual(len(distinct), 3, output.decode(errors="replace"))
+            rendered = output.decode(errors="replace")
+            self.assertEqual(rendered.count("\033[2J"), 1)
+            self.assertGreaterEqual(rendered.count("\033[2;1H"), 2)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
 
     def test_manifest_declares_board_pane_command(self):
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
