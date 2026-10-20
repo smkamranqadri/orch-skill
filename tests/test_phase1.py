@@ -66,7 +66,10 @@ elif args[:2]==["worktree","create"]:
  open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
  print(json.dumps({"result":{"root_pane":{"pane_id":"wtpane"},"workspace":{"workspace_id":"wtws"},"worktree":{"path":path}}}))
 elif args[:2]==["worktree","remove"]:
- if os.environ.get("WORKSPACE_NOT_FOUND")=="1": print(json.dumps({"error":{"code":"workspace_not_found","message":"workspace not found"}})); sys.exit(1)
+ if os.environ.get("WORKSPACE_NOT_FOUND")=="1":
+  if os.environ.get("DIRTY_ON_WORKTREE_REMOVE")=="1":
+   path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read(); open(os.path.join(path,"late-fictional.txt"),"w").write("late worker output")
+  print(json.dumps({"error":{"code":"workspace_not_found","message":"workspace not found"}})); sys.exit(1)
  if os.environ.get("FAIL_WORKTREE_REMOVE")=="1": print("simulated remove failure",file=sys.stderr); sys.exit(3)
  path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read()
  shutil.rmtree(path)
@@ -351,6 +354,22 @@ else: print(json.dumps({"result":{}}))
   self.assertIn('simulated remove failure',result.stderr)
   row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closing','closing')); self.assertIn('worktree:wtws',row['created'])
   self.runcli('close','writer'); row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
+ def test_close_missing_workspace_preserves_detached_unmerged_checkout(self):
+  self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree'])
+  subprocess.run(['git','-C',str(wt),'checkout','--detach'],check=True,env=self.env,capture_output=True)
+  (wt/'detached-fictional.txt').write_text('unmerged detached commit')
+  subprocess.run(['git','-C',str(wt),'add','detached-fictional.txt'],check=True,env=self.env)
+  subprocess.run(['git','-C',str(wt),'commit','-qm','detached fictional commit'],check=True,env=self.env)
+  result=self.runcli('close','writer',ok=False,env=self.env|{'WORKSPACE_NOT_FOUND':'1'})
+  self.assertIn('unmerged',result.stderr)
+  self.assertTrue((wt/'detached-fictional.txt').exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'live'); self.assertIn('worktree:wtws',row['created'])
+ def test_close_missing_workspace_rechecks_dirty_checkout_after_stopping_worker(self):
+  self.reg(); self.spawn('writer','worktree'); data=self.state(); row=data['agents']['session-a/writer']; row['started']=True; (self.home/'orch/registry.json').write_text(json.dumps(data)); wt=pathlib.Path(row['worktree'])
+  result=self.runcli('close','writer',ok=False,env=self.env|{'WORKSPACE_NOT_FOUND':'1','DIRTY_ON_WORKTREE_REMOVE':'1'})
+  self.assertIn('late-fictional.txt',result.stderr)
+  self.assertTrue((wt/'late-fictional.txt').exists())
+  row=self.state()['agents']['session-a/writer']; self.assertEqual(row['state'],'closing'); self.assertIn('worktree:wtws',row['created'])
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)
