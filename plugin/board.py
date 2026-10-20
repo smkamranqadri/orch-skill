@@ -514,7 +514,7 @@ def run(board: Board, dynamic_width: bool = True) -> None:
                 new_lines = board.output.splitlines()
                 changed_lines = [index for index, (old, new) in enumerate(zip(old_lines, new_lines)) if old != new]
                 if len(old_lines) == len(new_lines) and changed_lines == [1]:
-                    sys.stdout.write(f"\033[{changed_lines[0] + 1};1H" + new_lines[1])
+                    sys.stdout.write(f"\033[s\033[{changed_lines[0] + 1};1H" + new_lines[1] + "\033[K\033[u")
                 else:
                     write_frame(board.output)
                 sys.stdout.flush()
@@ -524,6 +524,8 @@ def run(board: Board, dynamic_width: bool = True) -> None:
                 keys = os.read(fd, 4096).decode(errors="ignore")
                 if "q" in keys.lower() or not keys:
                     break
+        sys.stdout.write(f"\033[{len(board.output.splitlines()) + 1};1H")
+        sys.stdout.flush()
     finally:
         if old_settings is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)

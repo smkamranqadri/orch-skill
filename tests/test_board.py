@@ -296,6 +296,44 @@ class BoardTests(unittest.TestCase):
                 process.wait()
             os.close(master)
 
+    def test_header_tick_preserves_cursor_and_exit_leaves_cursor_below_frame(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/cursor-garden", "name": "cursor-orch", "status": "idle", "queue": [],
+        }}, "agents": {}}
+        self.registry.write_text(json.dumps(data))
+        process, master = self.start_pty(100)
+        output = bytearray()
+        deadline = time.monotonic() + 8
+        stamps = set()
+        try:
+            while time.monotonic() < deadline and len(stamps) < 2:
+                readable, _, _ = select.select([master], [], [], max(0, deadline - time.monotonic()))
+                if not readable:
+                    break
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+                stamps = set(re.findall(rb"last: (\d{2}:\d{2}:\d{2})", output))
+            self.assertGreaterEqual(len(stamps), 2, output.decode(errors="replace"))
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            while select.select([master], [], [], 0)[0]:
+                try:
+                    output.extend(os.read(master, 65536))
+                except OSError:
+                    break
+            payload = output.decode(errors="replace")
+            self.assertRegex(payload, re.compile(r"\033\[s\033\[2;1H.*?\033\[u", re.S))
+            expected_row = len(board.render(data, 100, False, str(self.registry), "12:34:56").splitlines()) + 1
+            self.assertTrue(payload.endswith(f"\033[{expected_row};1H"), payload[-100:])
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
     def test_manifest_declares_board_pane_command(self):
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
         self.assertEqual(manifest["panes"], [{
@@ -743,7 +781,8 @@ class BoardTests(unittest.TestCase):
             self.registry.write_text(json.dumps(data))
             future = self.registry.stat().st_mtime_ns + 2_000_000_000
             os.utime(self.registry, ns=(future, future))
-            update = self.read_pty_until(master, "new-agent")
+            update = self.read_pty_until(master, "q quit")
+            self.assertIn("new-agent", update)
             apply(update)
             lines = ["".join(row).strip() for row in screen]
             self.assertEqual(lines.count("q quit"), 1, lines)
