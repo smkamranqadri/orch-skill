@@ -395,23 +395,27 @@ def list_agents(a):
         rows=[x for x in d["agents"].values() if (a.all or x.get("orch")==who) and (not a.idle or x.get("status")=="idle") and (not a.role or x.get("role")==a.role)]
         for x in sorted(rows,key=lambda x:(x.get("role",""),x.get("name",""))): print(f"{x.get('role','?')}\t{x.get('name','?')}\t{x.get('status','unknown')}\t{x.get('where','?')}")
         deliver(d)
-def verify_worktree_close(agent, wt):
+def verify_worktree_close(agent, wt=None):
     target = subprocess.run(["git","rev-parse","HEAD"],cwd=os.getcwd(),text=True,capture_output=True)
     if target.returncode: fail(f"close refused; cannot resolve merge target: {target.stderr.strip()}")
     target = target.stdout.strip()
-    refs = [("registered branch", agent["branch"])]
-    checkout = subprocess.run(["git","-C",wt,"rev-parse","HEAD"],text=True,capture_output=True)
-    if checkout.returncode: fail(f"close refused; cannot read worktree HEAD: {checkout.stderr.strip()}")
-    refs.append(("worktree HEAD", checkout.stdout.strip()))
+    refs = []
+    branch = subprocess.run(["git","rev-parse","--verify","--quiet",f"refs/heads/{agent['branch']}"],cwd=os.getcwd(),text=True,capture_output=True)
+    if branch.returncode == 0: refs.append(("registered branch", branch.stdout.strip()))
+    if wt:
+        checkout = subprocess.run(["git","-C",wt,"rev-parse","HEAD"],text=True,capture_output=True)
+        if checkout.returncode: fail(f"close refused; cannot read worktree HEAD: {checkout.stderr.strip()}")
+        refs.append(("worktree HEAD", checkout.stdout.strip()))
     unmerged = []
     for label, ref in refs:
         merged = subprocess.run(["git","merge-base","--is-ancestor",ref,target],cwd=os.getcwd(),capture_output=True)
         if merged.returncode:
             commits = subprocess.run(["git","log","--oneline",f"{target}..{ref}"],cwd=os.getcwd(),text=True,capture_output=True)
             unmerged.append(f"{label}: {commits.stdout.strip() or ref}")
-    status = subprocess.run(["git","-C",wt,"status","--porcelain","--ignored"],text=True,capture_output=True)
-    if unmerged or status.returncode or status.stdout:
-        fail(f"close refused; unmerged commits: {'; '.join(unmerged) or '(none)'}; dirty paths: {status.stdout.strip() or '(none)'}")
+    status = subprocess.run(["git","-C",wt,"status","--porcelain","--ignored"],text=True,capture_output=True) if wt else None
+    if unmerged or (status and (status.returncode or status.stdout)):
+        dirty_paths = status.stdout.strip() if status else ""
+        fail(f"close refused; unmerged commits: {'; '.join(unmerged) or '(none)'}; dirty paths: {dirty_paths or '(none)'}")
 def close_agent(a):
     require_runtime()
     with locked() as d:
@@ -426,8 +430,8 @@ def close_agent(a):
         if agent.get("state")=="closed":
             agent["state"]="cleanup"; agent["agent_closed"]=True
         wt=agent.get("worktree")
-        if wt and Path(wt).exists() and not a.discard:
-            verify_worktree_close(agent, wt)
+        if wt and not a.discard:
+            verify_worktree_close(agent, wt if Path(wt).exists() else None)
         agent.update(state="closing",status="closing"); save_registry(registry_path(),d)
         if agent.get("started") and not agent.get("stopped") and not agent.get("agent_closed"):
             herdr("agent","send-keys",a.name,"ctrl+c"); agent["stopped"]=True; save_registry(registry_path(),d)
