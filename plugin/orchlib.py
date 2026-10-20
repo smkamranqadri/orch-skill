@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core orch registry and Herdr helpers (Python 3.11+)."""
 from __future__ import annotations
-import fcntl, json, os, subprocess, sys, tempfile, time, tomllib
+import fcntl, json, os, shutil, subprocess, sys, tempfile, time, tomllib
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -415,7 +415,7 @@ def close_agent(a):
             if base.returncode or status.returncode or status.stdout:
                 log=subprocess.run(["git","log","--oneline",f"HEAD..{agent['branch']}"],text=True,capture_output=True).stdout.strip()
                 fail(f"close refused; unmerged commits: {log or '(none)'}; dirty paths: {status.stdout.strip() or '(none)'}")
-        agent["state"]="closing"; save_registry(registry_path(),d)
+        agent.update(state="closing",status="closing"); save_registry(registry_path(),d)
         if agent.get("started") and not agent.get("stopped") and not agent.get("agent_closed"):
             herdr("agent","send-keys",a.name,"ctrl+c"); agent["stopped"]=True; save_registry(registry_path(),d)
         for item in reversed(agent.get("created",[])):
@@ -428,7 +428,19 @@ def close_agent(a):
         if wt and not a.keep_checkout:
             ws=next((x.split(":",1)[1] for x in agent.get("created",[]) if x.startswith("worktree:")),None)
             if ws:
-                herdr("worktree","remove","--workspace",ws); agent["created"].remove(f"worktree:{ws}"); save_registry(registry_path(),d)
+                missing = False
+                if wt and Path(wt).exists():
+                    result = herdr("worktree","remove","--workspace",ws,check=False,return_errors=True)
+                    error = result.get("error") if isinstance(result, dict) else None
+                    missing = isinstance(error, dict) and error.get("code") == "workspace_not_found"
+                    if error and not missing: fail(f"herdr worktree remove --workspace {ws} failed: {error.get('message', error)}")
+                    if result is None: fail(f"herdr worktree remove --workspace {ws} failed")
+                elif wt:
+                    subprocess.run(["git","worktree","prune"],cwd=os.getcwd(),capture_output=True)
+                if missing:
+                    if wt and Path(wt).exists(): shutil.rmtree(wt)
+                    subprocess.run(["git","worktree","prune"],cwd=os.getcwd(),capture_output=True)
+                agent["created"].remove(f"worktree:{ws}"); save_registry(registry_path(),d)
             if f"branch:{agent['branch']}" in agent.get("created",[]):
                 p=subprocess.run(["git","branch","-D" if a.discard else "-d",agent["branch"]],cwd=os.getcwd(),text=True,capture_output=True)
                 if p.returncode: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")

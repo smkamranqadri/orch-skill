@@ -66,6 +66,7 @@ elif args[:2]==["worktree","create"]:
  open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path"),"w").write(os.path.realpath(os.path.join(cwd,path)))
  print(json.dumps({"result":{"root_pane":{"pane_id":"wtpane"},"workspace":{"workspace_id":"wtws"},"worktree":{"path":path}}}))
 elif args[:2]==["worktree","remove"]:
+ if os.environ.get("WORKSPACE_NOT_FOUND")=="1": print(json.dumps({"error":{"code":"workspace_not_found","message":"workspace not found"}})); sys.exit(1)
  if os.environ.get("FAIL_WORKTREE_REMOVE")=="1": print("simulated remove failure",file=sys.stderr); sys.exit(3)
  path=open(os.path.join(os.environ["XDG_STATE_HOME"],"wtws-path")).read()
  shutil.rmtree(path)
@@ -337,6 +338,19 @@ else: print(json.dumps({"result":{}}))
   self.runcli('close','writer',ok=False,env=self.env|{'FAIL_CLOSE':'wtws'}); self.assertEqual(self.state()['agents']['session-a/writer']['state'],'closing')
   dirty=wt/'retry-dirty-fictional.txt'; dirty.write_text('retain on refusal'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('retry-dirty-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n); self.assertTrue(dirty.exists())
+ def test_close_retries_missing_worktree_workspace_and_is_idempotent(self):
+  self.reg(); self.spawn('writer','worktree'); data=self.state(); agent=data['agents']['session-a/writer']; agent['status']='done'; (self.home/'orch/registry.json').write_text(json.dumps(data)); wt=pathlib.Path(agent['worktree'])
+  self.runcli('close','writer',env=self.env|{'WORKSPACE_NOT_FOUND':'1'}); row=self.state()['agents']['session-a/writer']
+  self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
+  closed_at=row['closed_at']; self.runcli('close','writer',env=self.env|{'WORKSPACE_NOT_FOUND':'1'}); self.assertEqual(self.state()['agents']['session-a/writer']['closed_at'],closed_at)
+  self.spawn('retry-writer','worktree'); data=self.state(); retry=data['agents']['session-a/retry-writer']; retry.update(state='closing',status='done'); (self.home/'orch/registry.json').write_text(json.dumps(data)); shutil.rmtree(retry['worktree'])
+  self.runcli('close','retry-writer'); retry=self.state()['agents']['session-a/retry-writer']; self.assertEqual((retry['state'],retry['status']),('closed','closed')); self.assertIsInstance(retry['closed_at'],float)
+ def test_close_other_worktree_remove_errors_remain_retryable(self):
+  self.reg(); self.spawn('writer','worktree')
+  result=self.runcli('close','writer',ok=False,env=self.env|{'FAIL_WORKTREE_REMOVE':'1'})
+  self.assertIn('simulated remove failure',result.stderr)
+  row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closing','closing')); self.assertIn('worktree:wtws',row['created'])
+  self.runcli('close','writer'); row=self.state()['agents']['session-a/writer']; self.assertEqual((row['state'],row['status']),('closed','closed')); self.assertIsInstance(row['closed_at'],float)
  def test_close_refuses_ignored_paths_without_stopping(self):
   self.reg(); self.spawn('writer','worktree'); wt=pathlib.Path(self.state()['agents']['session-a/writer']['worktree']); (wt/'.gitignore').write_text('ignored-fictional.txt\n'); (wt/'ignored-fictional.txt').write_text('ignored'); n=len(self.calls())
   p=self.runcli('close','writer',ok=False); self.assertIn('ignored-fictional.txt',p.stderr); self.assertEqual(len(self.calls()),n)

@@ -425,6 +425,16 @@ class BoardTests(unittest.TestCase):
         self.assertIn("unknown", row)
         self.assertNotIn("unrecognized", row)
 
+    def test_closing_and_cleanup_states_override_stale_done_status(self):
+        data = {"version": 1, "orchs": {}, "agents": {
+            "s/closing": {"project": "/fictional/closing-garden", "name": "closing-worker", "status": "done", "state": "closing"},
+            "s/cleanup": {"project": "/fictional/closing-garden", "name": "cleanup-worker", "status": "done", "state": "cleanup", "closed_at": 999},
+        }}
+        lines = self.render(data=data).splitlines()
+        self.assertIn("closing", next(line for line in lines if "closing-worker" in line))
+        self.assertIn("cleanup", next(line for line in lines if "cleanup-worker" in line))
+        self.assertNotIn("done", "\n".join(line for line in lines if "worker" in line))
+
     def test_board_refreshes_title_changes_without_registry_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
         with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_SESSION": "session-a"}), patch(

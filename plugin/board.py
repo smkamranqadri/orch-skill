@@ -204,6 +204,8 @@ def status_cell(row: dict, enabled: bool) -> str:
         held = int(row["node"]["paused"].get("count", 0))
         return color(f"PAUSED {held}", "amber", enabled, terminal_color_mode())
     status = str(row["node"].get("status", "unknown")).lower()
+    if row["kind"] == "AGENT" and row["node"].get("state") in ("closing", "cleanup"):
+        status = row["node"]["state"]
     display_status = status if status in STATUS_COLORS else "unknown"
     role = STATUS_COLORS[display_status]
     return color(display_status, role, enabled, terminal_color_mode())
