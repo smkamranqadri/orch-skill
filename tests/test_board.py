@@ -212,6 +212,29 @@ class BoardTests(unittest.TestCase):
         self.assertNotIn("closed-worker", view.output)
         self.assertEqual(self.registry.stat().st_mtime_ns, mtime)
 
+    def test_closed_rows_from_both_close_paths_expire_and_missing_timestamps_stay_hidden(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/retention-garden", "name": "retention-orch", "status": "idle", "queue": [],
+        }}, "agents": {
+            "s/worktree-closed": {"project": "/fictional/retention-garden", "name": "worktree-closed", "orch": "s/p", "where": "worktree", "state": "closed", "status": "closed", "closed_at": 1000},
+            "s/pane-closed": {"project": "/fictional/retention-garden", "name": "pane-closed", "orch": "s/p", "where": "pane", "state": "closed", "status": "closed", "closed_at": 1000},
+            "s/cleanup-no-time": {"project": "/fictional/retention-garden", "name": "cleanup-no-time", "orch": "s/p", "state": "cleanup", "status": "done"},
+            "s/closed-no-time": {"project": "/fictional/retention-garden", "name": "closed-no-time", "orch": "s/p", "state": "closed", "status": "done"},
+        }}
+        self.registry.write_text(json.dumps(data))
+        view = board.Board(self.registry, 100, False, clock=lambda: "12:34:56")
+        now = [1599]
+        view.now = lambda: now[0]
+        self.assertTrue(view.refresh())
+        self.assertIn("worktree-closed", view.output)
+        self.assertIn("pane-closed", view.output)
+        self.assertNotIn("cleanup-no-time", view.output)
+        self.assertNotIn("closed-no-time", view.output)
+        now[0] = 1600.1
+        self.assertTrue(view.refresh())
+        self.assertNotIn("worktree-closed", view.output)
+        self.assertNotIn("pane-closed", view.output)
+
     def test_refresh_skips_unchanged_mtime_and_rereads_after_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "12:34:56")
         data = json.loads(self.registry.read_text())

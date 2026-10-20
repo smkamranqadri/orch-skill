@@ -328,12 +328,16 @@ def count_label(count: int, singular: str, plural: str) -> str:
 
 def visible_rows(projects: list[dict], now: float) -> list[dict]:
     rows = [row for project in projects for row in project["rows"]]
-    return [
-        row for row in rows
-        if row["kind"] != "AGENT"
-        or str(row["node"].get("status", "unknown")).lower() != "closed"
-        or (row["node"].get("closed_at") is not None and now - row["node"]["closed_at"] <= CLOSED_ROW_SECONDS)
-    ]
+    def retained(row: dict) -> bool:
+        if row["kind"] != "AGENT":
+            return True
+        node = row["node"]
+        closing = node.get("state") in ("cleanup", "closed") or str(node.get("status", "unknown")).lower() == "closed"
+        if not closing:
+            return True
+        closed_at = node.get("closed_at")
+        return closed_at is not None and now - closed_at <= CLOSED_ROW_SECONDS
+    return [row for row in rows if retained(row)]
 
 
 def agent_lines(row: dict, width: int, enabled: bool, last: bool, status_width: int | None = None) -> list[str]:
