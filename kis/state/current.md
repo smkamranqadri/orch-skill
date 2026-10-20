@@ -1,9 +1,9 @@
 # Current
 
-Stamp: main 378185f 5a26d70c0274
+Stamp: main cf805da deec612bbfaa
 
-- Branch: `main` at `378185f`, pushed to `origin/main` 2026-10-19 (force-push of the rewritten
-  history, 189 commits). No other branches or worktrees; all build and review agents are closed.
+- Branch: `main` at `cf805da`. `origin/main` is at `8f7212b` (force-pushed 2026-10-19); the board
+  merge `cf805da` and its State sync are NOT pushed (plain push, no force needed). No other branches or worktrees; all build and review agents are closed.
   `backup/pre-rewrite` is deleted. The remote branch `orch-0.12.2` still exists: the owner runs
   `git push origin --delete orch-0.12.2`. The old 0.12.2 build is gone from the tree (history
   `613aa67`); ideas worth keeping are in `kis/intent/ideas-from-0.12.2.md`.
@@ -12,8 +12,14 @@ Stamp: main 378185f 5a26d70c0274
   register with the live pane, and the pre-release review fixes (failed pane commands no longer
   mark orchs gone, re-adoption clears `closed_at`, queue totals of gone orchs stay visible, PTY
   board tests wait for output). The pre-release fixes were not re-reviewed.
+  2026-10-20: herdrctx-style board (header, aligned Name/Status/Project/Title, a heading per
+  project with its orchs below, `q quit` footer) and `orch board` (in place on a plain TTY, else
+  the `board-full` overlay) built, reviewed once (1 round, 9 findings, fixed, fix commits not
+  re-reviewed) and merged. Not seen live in Herdr: `orch board` from a plain shell and from an
+  agent pane.
 - Blocker: none.
-- Command: `./tests/run.sh` (180 tests, passing on `main`, 2026-10-19; about 300 s).
+- Command: `env -u HERDR_ENV -u XDG_STATE_HOME HOME=$(mktemp -d) ./tests/run.sh` (184 tests,
+  passing on `main`, 2026-10-20; the PTY tests flake under heavy load, rerun one alone first).
 - Proof: suites re-run by the orchestrator after every merge. Live (2026-10-19): hook, worker
   spawn and notice delivery; `orch adopt`; `./bootstrap.sh update --repo <github url>` refreshed
   the skill copy and `check` passes. The plugin and the `orch` CLI link still point at this
