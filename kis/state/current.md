@@ -1,9 +1,9 @@
 # Current
 
-Stamp: main cf805da deec612bbfaa
+Stamp: main c9bf7ae 7958b0fe729b
 
-- Branch: `main` at `cf805da`. `origin/main` is at `8f7212b` (force-pushed 2026-10-19); the board
-  merge `cf805da` and its State sync are NOT pushed (plain push, no force needed). No other branches or worktrees; all build and review agents are closed.
+- Branch: `main` (see Stamp). `origin/main` is at `8f7212b` (force-pushed 2026-10-19); the board
+  merges and State syncs since then are NOT pushed (plain push, no force needed). No other branches or worktrees; all build and review agents are closed.
   `backup/pre-rewrite` is deleted. The remote branch `orch-0.12.2` still exists: the owner runs
   `git push origin --delete orch-0.12.2`. The old 0.12.2 build is gone from the tree (history
   `613aa67`); ideas worth keeping are in `kis/intent/ideas-from-0.12.2.md`.
@@ -17,8 +17,14 @@ Stamp: main cf805da deec612bbfaa
   the `board-full` overlay) built, reviewed once (1 round, 9 findings, fixed, fix commits not
   re-reviewed) and merged. Not seen live in Herdr: `orch board` from a plain shell and from an
   agent pane.
+  2026-10-20 later: stuck `closing` rows, the 1 s header tick, redraw erase and cursor fixes, and
+  the close-fallback data-loss guards (checkout HEAD, branch ancestry, exit status) built, reviewed
+  once (7 findings, all fixed, fix commits not re-reviewed) and merged. Live: the two stuck rows
+  were finished with `orch close`, and `orch close boardfix2` removed its worktree and branch.
+  Known annoyance: `orch close` refuses a worktree holding only ignored `__pycache__` dirs
+  unless `--discard` is passed.
 - Blocker: none.
-- Command: `env -u HERDR_ENV -u XDG_STATE_HOME HOME=$(mktemp -d) ./tests/run.sh` (184 tests,
+- Command: `env -u HERDR_ENV -u XDG_STATE_HOME HOME=$(mktemp -d) ./tests/run.sh` (197 tests,
   passing on `main`, 2026-10-20; the PTY tests flake under heavy load, rerun one alone first).
 - Proof: suites re-run by the orchestrator after every merge. Live (2026-10-19): hook, worker
   spawn and notice delivery; `orch adopt`; `./bootstrap.sh update --repo <github url>` refreshed
