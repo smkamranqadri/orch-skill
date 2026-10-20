@@ -437,6 +437,12 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
     return "\n".join(lines)
 
 
+def write_frame(output: str, clear: bool = False) -> None:
+    prefix = "\033[H\033[2J" if clear else "\033[H"
+    lines = output.split("\n")
+    sys.stdout.write(prefix + "\n".join(line + "\033[K" for line in lines) + "\n\033[J")
+
+
 class Board:
     def __init__(self, path: Path, width: int, color_enabled: bool, clock=None):
         self.path = Path(path)
@@ -496,7 +502,7 @@ def run(board: Board, dynamic_width: bool = True) -> None:
         old_settings = termios.tcgetattr(sys.stdin.fileno())
         tty.setcbreak(sys.stdin.fileno())
     try:
-        sys.stdout.write("\033[H\033[2J" + board.output + "\n")
+        write_frame(board.output, clear=True)
         sys.stdout.flush()
         while True:
             previous = board.output
@@ -510,7 +516,7 @@ def run(board: Board, dynamic_width: bool = True) -> None:
                 if len(old_lines) == len(new_lines) and changed_lines == [1]:
                     sys.stdout.write(f"\033[{changed_lines[0] + 1};1H" + new_lines[1])
                 else:
-                    sys.stdout.write("\033[H" + board.output + "\033[J")
+                    write_frame(board.output)
                 sys.stdout.flush()
             fd = sys.stdin.fileno()
             readable, _, _ = select.select([fd], [], [], 1.0)

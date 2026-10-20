@@ -700,6 +700,62 @@ class BoardTests(unittest.TestCase):
                 process.wait()
             os.close(master)
 
+    def test_adding_agent_clears_old_footer_from_blank_separator(self):
+        data = {"version": 1, "orchs": {"s/p": {
+            "project": "/fictional/pty-garden", "name": "pty-orch", "status": "idle", "queue": [],
+        }}, "agents": {}}
+        self.registry.write_text(json.dumps(data))
+        process, master = self.start_pty(100)
+        screen = [[" "] * 100 for _ in range(24)]
+
+        def apply(output):
+            y = x = 0
+            pending_wrap = False
+            tokens = re.split(r"(\033\[[0-?]*[ -/]*[@-~])", output)
+            for token in tokens:
+                if token.startswith("\033["):
+                    command = token[2:]
+                    if command == "H": y = x = 0; pending_wrap = False
+                    elif command == "2J": screen[:] = [[" "] * 100 for _ in range(24)]; y = x = 0; pending_wrap = False
+                    elif command == "K": screen[y][x:] = [" "] * (100 - x)
+                    elif command == "J":
+                        screen[y][x:] = [" "] * (100 - x)
+                        for row in range(y + 1, 24): screen[row] = [" "] * 100
+                    elif command.endswith("H"):
+                        row, column = (int(value) for value in command[:-1].split(";"))
+                        y, x, pending_wrap = row - 1, column - 1, False
+                    continue
+                for char in token:
+                    if char == "\r": x = 0; pending_wrap = False
+                    elif char == "\n": y = min(23, y + 1); x = 0; pending_wrap = False
+                    elif char >= " ":
+                        if pending_wrap: y = min(23, y + 1); x = 0; pending_wrap = False
+                        screen[y][x] = char
+                        if x == 99: pending_wrap = True
+                        else: x += 1
+
+        try:
+            initial = self.read_pty_until(master, "q quit")
+            apply(initial)
+            data["agents"]["s/worker"] = {
+                "project": "/fictional/pty-garden", "name": "new-agent", "orch": "s/p", "status": "working",
+            }
+            self.registry.write_text(json.dumps(data))
+            future = self.registry.stat().st_mtime_ns + 2_000_000_000
+            os.utime(self.registry, ns=(future, future))
+            update = self.read_pty_until(master, "new-agent")
+            apply(update)
+            lines = ["".join(row).strip() for row in screen]
+            self.assertEqual(lines.count("q quit"), 1, lines)
+            os.write(master, b"q")
+            process.wait(timeout=3)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
     def test_board_plugin_actions_are_stable(self):
         manifest = tomllib.loads((ROOT / "plugin" / "herdr-plugin.toml").read_text())
         self.assertEqual(manifest["actions"], [
