@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+with open(os.environ["ORCH_BOARD_HERDR_CALLS"], "a", encoding="utf-8") as calls:
+    calls.write(json.dumps(args) + "\n")
+
+if args == ["pane", "current", "--current"]:
+    print(json.dumps({"result": {"pane": {"pane_id": os.environ.get("ORCH_BOARD_PANE", "fixture-pane")}}}))
+elif args[:2] == ["agent", "get"]:
+    response = os.environ.get("ORCH_BOARD_AGENT_RESPONSE", "")
+    if response == "transport":
+        print("daemon unavailable", file=sys.stderr)
+        raise SystemExit(7)
+    if response == "malformed":
+        print("{")
+        raise SystemExit(0)
+    if response == "empty":
+        print(json.dumps({"result": {}}))
+        raise SystemExit(0)
+    if response == "absent":
+        print(json.dumps({"error": {"code": "agent_not_found", "message": "agent not found"}}), file=sys.stderr)
+        raise SystemExit(1)
+    if os.environ.get("ORCH_BOARD_AGENT_STATUS") == "missing":
+        print(json.dumps({"error": {"code": "agent_not_found", "message": "agent not found"}}), file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps({"result": {"agent": {"status": os.environ.get("ORCH_BOARD_AGENT_STATUS", "unknown")}}}))
+elif args == ["plugin", "action", "invoke", "board-full", "--plugin", "orch"]:
+    if os.environ.get("ORCH_BOARD_OVERLAY_FAIL") == "1":
+        print("overlay unavailable", file=sys.stderr)
+        raise SystemExit(1)
+    print("overlay opened")
+else:
+    print("unexpected fake Herdr command", file=sys.stderr)
+    raise SystemExit(2)

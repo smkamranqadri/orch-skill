@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "orchs": {
+    "fictional-session/pane": {
+      "project": "/fictional/golden-garden",
+      "name": "golden-orch",
+      "pane": "pane",
+      "status": "idle",
+      "queue": ["notice one", "notice two"]
+    }
+  },
+  "agents": {
+    "fictional-session/worker": {
+      "project": "/fictional/golden-garden",
+      "name": "golden-worker",
+      "pane": "worker-pane",
+      "orch": "fictional-session/pane",
+      "status": "done"
+    }
+  }
+}

@@ -440,7 +440,9 @@ else:
         data = self.registry()
         self.assertEqual(data["agents"][f"{SESSION}/{alias}"]["closed_at"], 2000.0)
         output = board.render(data, 100, False, str(self.registry_path), "12:34:56", now=2000.0)
-        self.assertEqual([line for line in output.splitlines() if alias in line], ["× CLOSED           |   └─ fictional-adopted"])
+        rows = [line[2:-2] for line in output.splitlines() if alias in line]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0][:30].strip(), rows[0][32:44].strip()), ("└ fictional-adopted", "closed"))
 
     def test_closed_worker_notice_delivers_to_idle_owner(self):
         close = {"event": "pane.closed", "data": {"pane_id": "w2:p1", "type": "pane_closed", "workspace_id": "w2"}}

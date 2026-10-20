@@ -39,7 +39,10 @@ def save_registry(path,data):
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 def herdr(*args,check=True,missing_workspace_ok=False,return_errors=False,return_status=False):
-    p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
+    try:
+        p=subprocess.run(["herdr",*map(str,args)],text=True,capture_output=True)
+    except FileNotFoundError as exc:
+        p=subprocess.CompletedProcess(["herdr",*map(str,args)],127,"",str(exc))
     if check and p.returncode:
         error=(p.stderr or p.stdout).strip()
         if missing_workspace_ok and args[:3]==("pane","list","--workspace") and "workspace not found" in error.lower(): return {"missing_workspace":True}
@@ -194,6 +197,47 @@ def current_pane():
     if not isinstance(pane,str) or not pane:
         fail("could not resolve current pane; re-run orch register from the orch pane")
     return pane
+
+def pane_has_running_agent(pane):
+    succeeded,response=herdr("agent","get",pane,check=False,return_status=True)
+    if succeeded:
+        result_data=result(response,"result")
+        agent=result_data.get("agent")
+        if isinstance(agent,dict) and agent:
+            return True
+        return None
+    error=result(response,"error")
+    code=str(error.get("code", "")).lower()
+    message=str(error.get("message", "")).lower()
+    if code in {"agent_not_found", "agent_not_running", "not_found", "not_running"} or "agent not found" in message or "agent not running" in message:
+        return False
+    return None
+
+def board_command(a):
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        succeeded,response=herdr("pane","current","--current",check=False,return_status=True)
+        pane=result(response,"result","pane").get("pane_id") if succeeded else None
+        if not isinstance(pane,str) or not pane: pane=None
+        if pane and pane_has_running_agent(pane) is False:
+            command=[sys.executable,str(Path(__file__).with_name("board.py"))]
+            if a.once: command.append("--once")
+            if a.width is not None: command.extend(["--width",str(a.width)])
+            completed=subprocess.run(command,check=False)
+            return completed.returncode
+    command=["herdr","plugin","action","invoke","board-full","--plugin","orch"]
+    try:
+        opened=subprocess.run(command,text=True,capture_output=True,check=False)
+    except FileNotFoundError as exc:
+        print(f"orch board: could not launch herdr: {exc}", file=sys.stderr)
+        print(" ".join(command))
+        return 127
+    if opened.returncode:
+        diagnostic=(opened.stderr or opened.stdout).strip()
+        if diagnostic:
+            print(f"orch board: overlay failed: {diagnostic}", file=sys.stderr)
+        print(" ".join(command))
+        return opened.returncode
+    return 0
 
 def carry_delivery_state(recipient, donors, now=None):
     now = time.time() if now is None else now
@@ -398,6 +442,7 @@ def deregister():
 def parser():
     import argparse
     p=argparse.ArgumentParser(prog="orch"); sub=p.add_subparsers(dest="command",required=True)
+    b=sub.add_parser("board",help="show the orch board"); b.add_argument("--once",action="store_true"); b.add_argument("--width",type=int)
     r=sub.add_parser("register"); r.add_argument("--name")
     s=sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("--role",required=True,choices=["plan","build","review","explore"]); s.add_argument("--kind",required=True,choices=["claude","codex"]); s.add_argument("--model"); s.add_argument("--effort"); s.add_argument("--where",required=True,choices=["pane","tab","worktree"]); s.add_argument("--writes",action="store_true"); s.add_argument("--base"); s.add_argument("--brief",required=True,type=Path)
     ad=sub.add_parser("adopt"); ad.add_argument("target"); ad.add_argument("--role",choices=["plan","build","review","explore"]); ad.add_argument("--name")
@@ -406,7 +451,8 @@ def parser():
     sub.add_parser("deregister"); rs=sub.add_parser("resume"); rs.add_argument("--name"); return p
 def main(argv=None):
     a=parser().parse_args(argv)
-    if a.command=="register": register(a.name)
+    if a.command=="board": raise SystemExit(board_command(a))
+    elif a.command=="register": register(a.name)
     elif a.command=="spawn": spawn(a)
     elif a.command=="adopt": adopt(a)
     elif a.command=="list": list_agents(a)
