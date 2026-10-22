@@ -22,6 +22,14 @@ Effort S/M/L includes tests.
    never atomic. M, plugin.
 5. **Literal-mutation runner.** Reusable runner that demands the named test fails and verifies
    restore with `cmp`: `tests/mutate-orch-plugin.py` (120 lines). S, tests.
+15. **Spawn never submits.** (Found in v1 on 2026-10-22, not from 0.12.2; numbered last so the
+    others keep their numbers.) `orch spawn --brief FILE` pastes the whole brief into a Claude
+    worker's input box ("[Pasted text #1 +65 lines]") and never sends Enter, so the worker sits
+    idle while the spawn looks done; seen 3 of 3 times (lore-plan-review, lore-p1-reads,
+    lore-p1-store), worked around with `herdr pane send-keys <pane> Enter`. It also breaks the
+    skill's own rule to send only `The user asked for this: <brief path>`. Fix: send the pointer
+    line, wait for `agent_status` working or `completion_seq` to move, send Enter once if still
+    idle, and report a spawn that never starts. Tartib #524. S, plugin/tests.
 
 ## Feature candidates (new product decisions)
 
