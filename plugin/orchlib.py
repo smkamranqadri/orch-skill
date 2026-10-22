@@ -77,6 +77,8 @@ def project_and_tree(cwd=None):
     return project,tree
 DEFAULT_PROMPTS_PER_HOUR = 6
 PROMPT_WINDOW_SECONDS = 3600
+SPAWN_START_ATTEMPTS = int(os.environ.get("ORCH_START_POLL_ATTEMPTS", "15"))
+SPAWN_START_INTERVAL = float(os.environ.get("ORCH_START_POLL_INTERVAL", "0.5"))
 
 def prompts_per_hour():
     path = Path.home() / ".config/orch/config.toml"
@@ -166,6 +168,32 @@ def pane_ids(value):
         elif isinstance(node,list):
             for child in node: visit(child)
     visit(value); return found
+
+def active_agent(data, pane, session):
+    prefix=session + "/"
+    active=[(key,entry) for key,entry in data["agents"].items()
+            if key.startswith(prefix) and entry.get("pane")==pane
+            and entry.get("state")!="closed" and not entry.get("agent_closed")]
+    return max(active,key=lambda item:item[1].get("since",0),default=(None,None))
+
+def agent_info(target):
+    response=herdr("agent","get",target,check=False)
+    return result(response,"result","agent")
+
+def sequence_value(info, key):
+    value=info.get(key)
+    return value if isinstance(value,int) and not isinstance(value,bool) else None
+
+def wait_for_spawn(pane, baseline):
+    for attempt in range(SPAWN_START_ATTEMPTS):
+        info=agent_info(pane)
+        changed=any(sequence_value(info,key) is not None and (baseline.get(key) is None or sequence_value(info,key)>baseline[key])
+                    for key in ("state_change_seq","completion_seq"))
+        if info.get("agent_status")=="working" or changed:
+            return True
+        if attempt + 1 < SPAWN_START_ATTEMPTS:
+            time.sleep(SPAWN_START_INTERVAL)
+    return False
 def reconcile_orchs(data):
     prefix=os.environ["HERDR_SESSION"] + "/"
     entries=[(key,entry) for key,entry in data["orchs"].items() if key.startswith(prefix) and not entry.get("gone")]
@@ -289,7 +317,9 @@ def register(name=None):
             if opened is None: fail("failed step: open board pane")
         deliver(d)
 def spawn(a):
-    require_runtime(); project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
+    require_runtime(); a.brief=Path(a.brief).expanduser().resolve()
+    if not a.brief.is_file(): fail(f"brief does not exist: {a.brief}")
+    project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
     with locked() as d:
         require_registered(d)
         if key in d["agents"] and d["agents"][key].get("state") in ("starting","live","cleanup","closing"): fail(f"agent already exists: {a.name}")
@@ -315,6 +345,9 @@ def spawn(a):
                 out=herdr("worktree","create","--cwd",project,"--branch",f"orch/{a.name}","--base",a.base or "HEAD","--path",f"../{Path(project).name}.wt/{a.name}","--label",a.name,"--no-focus"); pane=result(out,"result","root_pane").get("pane_id"); ws=result(out,"result","workspace").get("workspace_id"); wt=result(out,"result","worktree").get("path") or f"../{Path(project).name}.wt/{a.name}"
                 if not pane or not ws: fail("failed step: create worktree (missing pane or workspace id)")
                 created.extend([f"workspace:{ws}",f"worktree:{ws}",f"branch:orch/{a.name}"]); d["agents"][key].update(worktree=str((Path(project)/wt).resolve()),tree=str((Path(project)/wt).resolve())); save_registry(registry_path(),d)
+            occupied_key,occupied=active_agent(d,pane,os.environ["HERDR_SESSION"])
+            if occupied_key:
+                fail(f"pane already held by non-closed agent: {occupied.get('name',occupied_key)} ({pane})")
             d["agents"][key]["pane"]=pane
             save_registry(registry_path(),d)
             argv=["agent","start",a.name,"--kind",a.kind,"--pane",pane,"--"]
@@ -324,8 +357,24 @@ def spawn(a):
             else:
                 if a.model: argv += ["-m",a.model]
                 if a.effort: argv += ["-c",f"model_reasoning_effort={a.effort}"]
-            herdr(*argv); d["agents"][key]["started"]=True; save_registry(registry_path(),d); herdr("agent","prompt",a.name,a.brief.read_text()); d["agents"][key].update(state="live",status="working"); deliver(d)
+            herdr(*argv); d["agents"][key]["started"]=True; save_registry(registry_path(),d)
+            baseline_info=agent_info(pane)
+            baseline={field:sequence_value(baseline_info,field) for field in ("state_change_seq","completion_seq")}
+            d["agents"][key]["completion_seq"]=baseline["completion_seq"]
+            save_registry(registry_path(),d)
+            herdr("agent","prompt",a.name,f"The user asked for this: {a.brief}")
+            started=wait_for_spawn(pane,baseline)
+            if not started:
+                herdr("agent","send-keys",a.name,"Enter",check=False)
+                started=wait_for_spawn(pane,baseline)
+            if not started:
+                d["agents"][key].update(state="not-started",status="not-started")
+                deliver(d)
+                print(f"orch: agent on pane {pane} did not start; run: herdr agent send-keys {a.name} Enter",file=sys.stderr)
+                raise SystemExit(1)
+            d["agents"][key].update(state="live",status="working"); deliver(d)
         except BaseException as exc:
+            if d["agents"].get(key,{}).get("state")=="not-started": raise
             for item in [x for x in reversed(created) if not x.startswith("branch:")]+[x for x in reversed(created) if x.startswith("branch:")]:
                 kind,ident=item.split(":",1)
                 ok=True
@@ -343,23 +392,19 @@ def adopt(a):
     require_runtime(); project,tree=project_and_tree(); owner=session_key(os.environ["HERDR_PANE_ID"])
     with locked() as d:
         require_registered(d)
-        response=herdr("agent","get",a.target,check=False)
-        info=result(response,"result","agent")
+        info=agent_info(a.target)
         name=info.get("name"); pane=info.get("pane_id")
         kind=info.get("agent") or info.get("kind"); status=info.get("agent_status") or info.get("status")
         if not name or not pane or not kind or not status: fail(f"unknown agent or pane: {a.target}")
         adopted_name=a.name or name
         prefix=os.environ["HERDR_SESSION"]+"/"; key=session_key(adopted_name)
-        conflicts=[(old_key,entry) for old_key,entry in d["agents"].items() if old_key.startswith(prefix) and (old_key==key or entry.get("pane")==pane or entry.get("name")==adopted_name)]
+        conflicts=[(old_key,entry) for old_key,entry in d["agents"].items() if old_key.startswith(prefix) and (old_key==key or entry.get("name")==adopted_name or (entry.get("pane")==pane and (entry.get("state")!="closed" and not entry.get("agent_closed"))))]
         tombstones=[]; idempotent=None
         for old_key,entry in conflicts:
             same_pane=entry.get("pane")==pane
             if (old_key==key or entry.get("name")==adopted_name) and not same_pane:
                 fail(f"agent name already in use in this session: {adopted_name}")
             if not same_pane:
-                continue
-            if entry.get("adopted") and entry.get("state")=="closed":
-                tombstones.append(old_key)
                 continue
             if entry.get("adopted") and entry.get("orch")==owner and old_key==key and entry.get("name")==adopted_name:
                 idempotent=(old_key,entry)
@@ -376,12 +421,12 @@ def adopt(a):
                 d["agents"].pop(old_key,None)
             entry=idempotent[1]
             entry.pop("closed_at",None)
-            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False)
+            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False,completion_seq=sequence_value(info,"completion_seq"))
             deliver(d)
             return
         for old_key in tombstones:
             d["agents"].pop(old_key,None)
-        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"adopted":True}
+        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"completion_seq":sequence_value(info,"completion_seq"),"adopted":True}
         deliver(d)
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
