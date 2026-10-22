@@ -30,6 +30,26 @@ Effort S/M/L includes tests.
     skill's own rule to send only `The user asked for this: <brief path>`. Fix: send the pointer
     line, wait for `agent_status` working or `completion_seq` to move, send Enter once if still
     idle, and report a spawn that never starts. Tartib #524. S, plugin/tests.
+16. **Proof-carrying handoffs and `orch verify`.** (From lore 2.0 P1, 2026-10-22.) Worker reports
+    were wrong in ways only checking caught: a cited final test log that did not exist, a guard
+    that survived its mutation left out of the handoff, swapped counts, a reviewer's wrong sum.
+    The orch re-verified by hand each time. Proposal, prototyped in lore-skill
+    `.orch/lore-2.0/{p1-common.md,review-common.md,verify.sh}`:
+    - `references/proof.md`, appended to every brief by `orch spawn`: builders record `run_log`
+      (last line `exit=0`), `run_sha256`, `tree_sha256` (`git diff HEAD --binary` plus untracked
+      files' sha256, taken right after the final run) and a `mutations.log`, one line per guard
+      with `tripped=` and `restored byte-identical=`. Reviewers ship a repro script that takes a
+      checkout and prints `F<n> REPRODUCED|NOT-REPRODUCED|MANUAL`; the same script proves the fix
+      round (`NOT-REPRODUCED`).
+    - `orch verify NAME`: knows the worker's role and worktree from the registry. Build: log
+      exists, hash matches, `exit=0`, tree unchanged since the run, latest line per guard tripped
+      and restored. Review: run the repro script against the reviewed tree, then after fixes. Then a
+      clean detached-worktree `tests` run in a plain pane (`herdr pane run`), never an agent.
+      Output is PASS/FAIL lines only, so the orch reads a verdict, not prose.
+    - Notices: send "done" only when the handoff's proof block exists (also fixes idea 15's early
+      notices). `orch board` shows proof state: missing, failing, passing.
+    The prototype caught its own first bug on real data (a worker's log had extra columns). M,
+    skill/plugin/tests.
 
 ## Feature candidates (new product decisions)
 
