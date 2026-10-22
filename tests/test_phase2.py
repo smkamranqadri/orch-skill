@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from unittest import mock
@@ -62,6 +63,7 @@ class PhaseTwo(unittest.TestCase):
                 "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "CALLS", "PROMPTS",
                 "HERDR_TEST_STATE", "HERDR_DELAY_GET", "HERDR_AGENT_GET_FAILURE",
                 "HERDR_PANE_LIST_FAILURE", "HERDR_PANE_LIST_EXIT_FAILURE", "HERDR_TEST_PANES",
+                "ORCH_DEBOUNCE_SECONDS",
             }:
                 clean.pop(key, None)
         self.env = clean | {
@@ -100,7 +102,12 @@ args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as stream:
     stream.write(json.dumps(args) + "\\n")
 state = json.load(open(os.environ["HERDR_TEST_STATE"]))
-if args[:2] == ["agent", "get"]:
+if args[:2] == ["agent", "start"]:
+    pane = args[args.index("--pane") + 1]
+    state["panes"][pane] = {"name": args[2], "pane_id": pane, "agent": args[args.index("--kind") + 1], "agent_status": "working", "state_change_seq": 1, "completion_seq": 0}
+    json.dump(state, open(os.environ["HERDR_TEST_STATE"], "w"))
+    print(json.dumps({"result": {}}))
+elif args[:2] == ["agent", "get"]:
     if os.environ.get("HERDR_DELAY_GET"):
         time.sleep(float(os.environ["HERDR_DELAY_GET"]))
     if os.environ.get("HERDR_AGENT_GET_FAILURE") == "1":
@@ -172,7 +179,7 @@ else:
                 OTHER_ORCH: {"project": str(self.repo), "name": "orch-other", "kind": "codex", "workspace": "w2", "tab": "w2:t1", "pane": "w2:p8", "status": "working", "gone": False, "queue": []},
             },
             "agents": {
-                f"{SESSION}/quartz-builder": {"name": "quartz-builder", "pane": "w2:p1", "orch": ORCH, "project": str(self.repo), "kind": "claude", "state": "live", "status": worker_status, "created": ["pane:w2:p1"]},
+                f"{SESSION}/quartz-builder": {"name": "quartz-builder", "pane": "w2:p1", "orch": ORCH, "project": str(self.repo), "kind": "claude", "state": "live", "status": worker_status, "created": ["pane:w2:p1"], "sequence_capable": False},
                 f"{SESSION}/maple-worker": {"name": "maple-worker", "pane": "w2:p2", "orch": OTHER_ORCH, "project": str(self.repo), "kind": "codex", "state": "live", "status": "working", "created": ["pane:w2:p2"]},
                 f"{SESSION}/sample-worker": {"name": "sample-worker", "pane": "w2:p3", "orch": ORCH, "project": str(self.repo), "kind": "custom", "state": "live", "status": "unknown", "created": ["pane:w2:p3"]},
             },
@@ -190,14 +197,37 @@ else:
         panes.update(updates)
         self.herdr_state.write_text(json.dumps({"panes": panes}))
 
-    def run_hook(self, item, *, fail_prompt=False):
+    def run_hook(self, item, *, fail_prompt=False, extra_env=None):
         env = self.env | {
             "HERDR_PLUGIN_EVENT": item["event"].replace("pane_closed", "pane.closed"),
             "HERDR_PLUGIN_EVENT_JSON": json.dumps(item["data"]),
         }
         if fail_prompt:
             env["FAIL_PROMPT"] = "1"
+        env.update(extra_env or {})
         return subprocess.run([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, capture_output=True)
+
+    def set_sequence_worker(self, status, *, state_seq=10, completion_seq=None):
+        data = self.registry()
+        row = data["agents"][f"{SESSION}/quartz-builder"]
+        row.update(sequence_capable=True, completion_seq=None, turn_open=True, seen_state_seq=state_seq, seen_completion_seq=None)
+        self.registry_path.write_text(json.dumps(data))
+        info = {"agent": "claude", "agent_status": status, "state_change_seq": state_seq}
+        if completion_seq is not None:
+            info["completion_seq"] = completion_seq
+        self.write_herdr_state(**{"w2:p1": info})
+
+    def wait_for_worker_status(self, status, timeout=2):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            row = self.registry()["agents"][f"{SESSION}/quartz-builder"]
+            if row.get("status") == status:
+                return
+            time.sleep(0.005)
+        self.fail(f"worker status did not become {status!r}")
+
+    def status_event(self, status):
+        return {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": status}}
 
     def run_cli(self, *args, env=None, ok=True):
         result = subprocess.run([str(CLI), *args], cwd=self.repo, env=env or self.env, text=True, capture_output=True)
@@ -283,14 +313,417 @@ else:
         self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
         self.assertEqual(self.registry()["agents"][f"{SESSION}/quartz-builder"]["status"], "done")
 
+    def test_unchanged_completion_debounces_until_idle_stays_terminal(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["seen_completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = True
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "completion_seq": 8}})
+        idle = {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "idle"}}
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(idle["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.1",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("idle")
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "completion_seq": 8}})
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working"}})
+        self.run_hook({"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "working"}})
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle"}})
+        result = self.run_hook(idle, extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+
+    def test_rising_completion_seq_queues_one_notice_and_updates_baseline(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["seen_completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = True
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "completion_seq": 9, "state_change_seq": 9}})
+        done = {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "done"}}
+        for _ in range(2):
+            result = self.run_hook(done)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+        saved = self.registry()["agents"][f"{SESSION}/quartz-builder"]
+        self.assertFalse(saved["turn_open"])
+        self.assertEqual(saved["seen_completion_seq"], 9)
+
+    def test_missing_completion_seq_uses_legacy_status_change_notice(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = False
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done"}})
+        result = self.run_hook(event_for("claude", "done"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+
+    def test_fresh_sequence_worker_does_not_fall_back_before_first_completion(self):
+        for _ in range(2):
+            self.set_sequence_worker("working", state_seq=255)
+            self.assertEqual(self.run_hook(self.status_event("working")).returncode, 0)
+            env = self.env | {
+                "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+                "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+                "ORCH_DEBOUNCE_SECONDS": "0.15",
+            }
+            self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 255}})
+            process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.wait_for_worker_status("done")
+            self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 255}})
+            result = self.run_hook(self.status_event("working"))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            stdout, stderr = process.communicate(timeout=3)
+            self.assertEqual(process.returncode, 0, stderr or stdout)
+            data = self.registry()
+            self.assertEqual(data["orchs"][ORCH]["queue"], [])
+            self.assertEqual(data["agents"][f"{SESSION}/quartz-builder"]["status"], "working")
+            self.assertTrue(data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"])
+
+    def test_blocked_first_completion_does_not_consume_notice_watermark(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=True, completion_seq=None, turn_open=True, seen_state_seq=10, seen_completion_seq=None)
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "blocked", "completion_seq": 255}})
+        result = self.run_hook({"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "blocked"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["status"], "blocked")
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["completion_seq"], 255)
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["seen_completion_seq"], 255)
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "blocked", "w2:p1")])
+
+    def test_working_completion_does_not_consume_terminal_notice_watermark(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=True, completion_seq=254)
+        self.registry_path.write_text(json.dumps(data))
+        for status in ("working", "done"):
+            self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": status, "completion_seq": 255}})
+            result = self.run_hook(event_for("claude", status))
+            self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["completion_seq"], 255)
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["seen_completion_seq"], 255)
+
+    def test_terminal_blip_that_returns_to_working_is_not_notified(self):
+        self.set_sequence_worker("done")
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.15",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 10}})
+        self.assertEqual(self.run_hook(self.status_event("working")).returncode, 0)
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+
+    def test_idle_without_completion_is_notified_after_debounce(self):
+        self.set_sequence_worker("idle", state_seq=12)
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+        self.assertFalse(saved["agents"][f"{SESSION}/quartz-builder"]["turn_open"])
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["seen_state_seq"], 12)
+
+    def test_stable_terminal_at_working_sequence_notifies_once(self):
+        self.set_sequence_worker("working", state_seq=318)
+        self.assertEqual(self.run_hook(self.status_event("working")).returncode, 0)
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "state_change_seq": 318}})
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+
+    def test_done_then_idle_in_one_turn_notifies_once(self):
+        self.set_sequence_worker("working", state_seq=19, completion_seq=19)
+        self.run_hook(self.status_event("working"))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 20, "completion_seq": 20}})
+        result = self.run_hook(self.status_event("done"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "state_change_seq": 21, "completion_seq": 20}})
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+
+    def test_working_event_opens_next_turn(self):
+        self.set_sequence_worker("working", state_seq=19, completion_seq=19)
+        self.run_hook(self.status_event("working"))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 20, "completion_seq": 20}})
+        self.run_hook(self.status_event("done"))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 21, "completion_seq": 20}})
+        self.run_hook(self.status_event("working"))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "state_change_seq": 22, "completion_seq": 20}})
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [
+            notice("quartz-builder", "done", "w2:p1"),
+            notice("quartz-builder", "idle", "w2:p1"),
+        ])
+
+    def test_newer_working_during_debounce_rejects_stale_terminal_snapshot(self):
+        self.set_sequence_worker("idle", state_seq=30)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("idle")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.15",
+        }
+        delayed = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("idle")
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 31}})
+        result = self.run_hook(self.status_event("working"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stdout, stderr = delayed.communicate(timeout=3)
+        self.assertEqual(delayed.returncode, 0, stderr or stdout)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [])
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["status"], "working")
+        self.assertTrue(saved["agents"][f"{SESSION}/quartz-builder"]["turn_open"])
+
+    def test_observed_sequence_guard_rejects_stale_recheck_snapshot(self):
+        self.set_sequence_worker("idle", state_seq=30)
+        key = f"{SESSION}/quartz-builder"
+
+        def commit_newer_working(_seconds):
+            with orchlib.locked() as registry:
+                registry["agents"][key].update(status="working", seen_state_seq=31, state_change_seq=31)
+
+        with mock.patch.dict(os.environ, self.env), \
+                mock.patch.object(hook, "live_agent", return_value={"agent_status": "idle", "state_change_seq": 30}), \
+                mock.patch.object(hook.time, "sleep", side_effect=commit_newer_working):
+            hook.debounce_terminal_notice(key, "w2:p1", 30)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [])
+        self.assertEqual(saved["agents"][key]["status"], "working")
+        self.assertEqual(saved["agents"][key]["seen_state_seq"], 31)
+
+    def test_herdr_restart_resets_observed_sequences_and_allows_turn_notice(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(
+            sequence_capable=True, turn_open=True, seen_state_seq=346, seen_completion_seq=346,
+            state_change_seq=346, completion_seq=346,
+        )
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 23, "completion_seq": 23}})
+        result = self.run_hook(self.status_event("done"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+        row = saved["agents"][f"{SESSION}/quartz-builder"]
+        self.assertEqual((row["seen_state_seq"], row["seen_completion_seq"]), (23, 23))
+
+    def test_completion_counter_restart_is_recorded_on_first_event(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(
+            sequence_capable=True, turn_open=True, seen_state_seq=23, seen_completion_seq=346,
+            state_change_seq=23, completion_seq=346,
+        )
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 23, "completion_seq": 23}})
+        with mock.patch.dict(os.environ, self.env), \
+                mock.patch.object(hook, "live_agent", return_value={"agent": "claude", "agent_status": "working", "state_change_seq": 23, "completion_seq": 23}), \
+                mock.patch.object(hook, "debounce_terminal_notice"):
+            hook.process_event("pane.agent_status_changed", {"pane_id": "w2:p1"})
+        row = self.registry()["agents"][f"{SESSION}/quartz-builder"]
+        self.assertEqual((row["seen_state_seq"], row["seen_completion_seq"]), (23, 23))
+
+    def test_overlapping_done_and_idle_debounces_queue_once(self):
+        self.set_sequence_worker("done", state_seq=20)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.2",
+        }
+        first = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "state_change_seq": 21}})
+        second = subprocess.Popen(
+            [sys.executable, str(HOOK)], cwd=self.repo,
+            env=self.env | {"HERDR_PLUGIN_EVENT": "pane.agent_status_changed", "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("idle")["data"]), "ORCH_DEBOUNCE_SECONDS": "0.2"},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        first_out, first_err = first.communicate(timeout=3)
+        second_out, second_err = second.communicate(timeout=3)
+        self.assertEqual(first.returncode, 0, first_err or first_out)
+        self.assertEqual(second.returncode, 0, second_err or second_out)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+
+    def test_late_completion_for_debounced_turn_does_not_queue_twice(self):
+        self.set_sequence_worker("idle", state_seq=30)
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 30, "completion_seq": 1}})
+        result = self.run_hook(self.status_event("done"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+        self.assertEqual(self.registry()["agents"][f"{SESSION}/quartz-builder"]["seen_completion_seq"], 1)
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 31, "completion_seq": 1}})
+        self.run_hook(self.status_event("working"))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "state_change_seq": 31, "completion_seq": 1}})
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.15",
+        }
+        delayed = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "working", "state_change_seq": 31, "completion_seq": 1}})
+        self.run_hook(self.status_event("working"))
+        stdout, stderr = delayed.communicate(timeout=3)
+        self.assertEqual(delayed.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+
+    def test_turn_flag_suppresses_later_status_for_same_turn(self):
+        agent = {"orch": ORCH, "name": "quartz-builder", "turn_open": True}
+        registry = {"agents": {}, "orchs": {ORCH: {"queue": []}}}
+        self.assertTrue(hook.queue_terminal_notice(registry, agent, "done", "w2:p1"))
+        self.assertFalse(hook.queue_terminal_notice(registry, agent, "idle", "w2:p1"))
+        self.assertEqual(registry["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+
+        agent = {"orch": ORCH, "name": "quartz-builder", "turn_open": True}
+        registry["orchs"][ORCH]["queue"] = []
+        self.assertTrue(hook.queue_terminal_notice(registry, agent, "done", "w2:p1"))
+        self.assertFalse(hook.queue_terminal_notice(registry, agent, "idle", "w2:p1"))
+        self.assertEqual(registry["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+
+    def test_completion_notice_is_immediate_and_debounce_duplicate_is_suppressed(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=True, completion_seq=0, turn_open=True, seen_state_seq=39, seen_completion_seq=0)
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "state_change_seq": 40, "completion_seq": 1}})
+        started = time.monotonic()
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "2"})
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+        result = self.run_hook(self.status_event("idle"), extra_env={"ORCH_DEBOUNCE_SECONDS": "0.01"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "idle", "w2:p1")])
+
+    def test_registry_lock_is_free_during_terminal_debounce(self):
+        self.set_sequence_worker("done", state_seq=50)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "2",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        started = time.monotonic()
+        result = subprocess.run([str(CLI), "list"], cwd=self.repo, env=self.env, text=True, capture_output=True, timeout=1.0)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(elapsed, 1.0)
+        self.assertIsNone(process.poll(), "debounce hook completed before its sleep ended")
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+
+    def test_debounce_skips_row_closed_while_sleeping(self):
+        self.set_sequence_worker("done", state_seq=60)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.1",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(state="closed", agent_closed=True)
+        self.registry_path.write_text(json.dumps(data))
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+
+    def test_debounce_skips_row_reassigned_to_another_pane(self):
+        self.set_sequence_worker("done", state_seq=70)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.1",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["pane"] = "w2:p77"
+        self.registry_path.write_text(json.dumps(data))
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+
+    def test_debounce_skips_row_that_lost_sequence_capability(self):
+        self.set_sequence_worker("done", state_seq=80)
+        env = self.env | {
+            "HERDR_PLUGIN_EVENT": "pane.agent_status_changed",
+            "HERDR_PLUGIN_EVENT_JSON": json.dumps(self.status_event("done")["data"]),
+            "ORCH_DEBOUNCE_SECONDS": "0.1",
+        }
+        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.repo, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for_worker_status("done")
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = False
+        self.registry_path.write_text(json.dumps(data))
+        stdout, stderr = process.communicate(timeout=3)
+        self.assertEqual(process.returncode, 0, stderr or stdout)
+        self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [])
+
+    def test_spawn_start_detects_sequence_advance_without_working_status(self):
+        responses = [
+            {"agent_status": "idle", "state_change_seq": 5, "completion_seq": 4},
+            {"agent_status": "idle", "state_change_seq": 6, "completion_seq": 4},
+        ]
+        with mock.patch.object(orchlib, "SPAWN_START_ATTEMPTS", 2), \
+                mock.patch.object(orchlib, "SPAWN_START_INTERVAL", 0), \
+                mock.patch.object(orchlib, "agent_info", side_effect=responses):
+            self.assertTrue(orchlib.wait_for_spawn("w2:p7", {"state_change_seq": 5, "completion_seq": 4}))
+
+    def test_reused_pane_resolves_live_row_ahead_of_closed_history(self):
+        data = self.registry()
+        data["agents"] = {
+            f"{SESSION}/old-closed": {"name": "old-closed", "pane": "w2:p1", "orch": ORCH, "state": "closed", "status": "closed", "since": 99, "created": []},
+            f"{SESSION}/old-cleanup": {"name": "old-cleanup", "pane": "w2:p1", "orch": ORCH, "state": "cleanup", "status": "closed", "agent_closed": True, "since": 100, "created": []},
+            f"{SESSION}/a-older-live": {"name": "older-live", "pane": "w2:p1", "orch": ORCH, "state": "live", "status": "working", "since": 2, "created": ["pane:w2:p1"]},
+            f"{SESSION}/z-new-live": {"name": "new-live", "pane": "w2:p1", "orch": ORCH, "state": "live", "status": "working", "since": 2, "created": ["pane:w2:p1"]},
+        }
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done"}})
+        result = self.run_hook(event_for("claude", "done"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = self.registry()
+        self.assertEqual(data["agents"][f"{SESSION}/z-new-live"]["status"], "done")
+        self.assertEqual(data["agents"][f"{SESSION}/a-older-live"]["status"], "working")
+        self.assertEqual(data["agents"][f"{SESSION}/old-cleanup"]["status"], "closed")
+        self.assertEqual(data["agents"][f"{SESSION}/old-closed"]["status"], "closed")
+        self.assertEqual(data["orchs"][ORCH]["queue"], [notice("new-live", "done", "w2:p1")])
+
+        result = self.run_hook({"event": "pane.closed", "data": {"pane_id": "w2:p1", "type": "pane_closed", "workspace_id": "w2"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = self.registry()
+        self.assertEqual(data["agents"][f"{SESSION}/z-new-live"]["status"], "closed")
+        self.assertEqual(data["agents"][f"{SESSION}/a-older-live"]["status"], "working")
+        self.assertEqual(data["agents"][f"{SESSION}/old-cleanup"]["status"], "closed")
+        self.assertEqual(data["agents"][f"{SESSION}/old-closed"]["status"], "closed")
+        self.assertEqual(data["orchs"][ORCH]["queue"], [notice("new-live", "done", "w2:p1"), notice("new-live", "closed", "w2:p1")])
+
     def test_idle_and_unknown_to_blocked_queue_notice(self):
         item = event_for("sample-worker", "blocked")
-        self.write_herdr_state(**{"w2:p3": {"agent": "sample-worker", "agent_status": "blocked"}})
+        self.write_herdr_state(**{"w2:p3": {"agent": "sample-worker", "agent_status": "blocked", "completion_seq": 0}})
         for old in ("idle", "unknown"):
             with self.subTest(old=old):
                 self.write_registry(worker_status=old)
                 data = self.registry()
                 data["agents"][f"{SESSION}/sample-worker"]["status"] = old
+                data["agents"][f"{SESSION}/sample-worker"]["completion_seq"] = 0
                 self.registry_path.write_text(json.dumps(data))
                 result = self.run_hook(item)
                 self.assertEqual(result.returncode, 0, result.stderr)

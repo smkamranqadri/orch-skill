@@ -533,6 +533,10 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(board.status_cell(closing, False), "closing")
         self.assertEqual(board.status_cell(cleanup, False), "cleanup")
 
+    def test_not_started_state_is_rendered_as_itself(self):
+        row = {"kind": "AGENT", "node": {"name": "worker-charlie", "status": "not-started", "state": "not-started"}}
+        self.assertEqual(board.status_cell(row, False), "not-started")
+
     def test_board_refreshes_title_changes_without_registry_change(self):
         view = board.Board(self.registry, 100, False, clock=lambda: "2026-10-19 12:34:56")
         with patch.dict(os.environ, {"HERDR_ENV": "1", "HERDR_SESSION": "session-a"}), patch(
