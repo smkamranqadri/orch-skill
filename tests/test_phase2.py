@@ -177,7 +177,7 @@ else:
                 OTHER_ORCH: {"project": str(self.repo), "name": "orch-other", "kind": "codex", "workspace": "w2", "tab": "w2:t1", "pane": "w2:p8", "status": "working", "gone": False, "queue": []},
             },
             "agents": {
-                f"{SESSION}/quartz-builder": {"name": "quartz-builder", "pane": "w2:p1", "orch": ORCH, "project": str(self.repo), "kind": "claude", "state": "live", "status": worker_status, "created": ["pane:w2:p1"]},
+                f"{SESSION}/quartz-builder": {"name": "quartz-builder", "pane": "w2:p1", "orch": ORCH, "project": str(self.repo), "kind": "claude", "state": "live", "status": worker_status, "created": ["pane:w2:p1"], "sequence_capable": False},
                 f"{SESSION}/maple-worker": {"name": "maple-worker", "pane": "w2:p2", "orch": OTHER_ORCH, "project": str(self.repo), "kind": "codex", "state": "live", "status": "working", "created": ["pane:w2:p2"]},
                 f"{SESSION}/sample-worker": {"name": "sample-worker", "pane": "w2:p3", "orch": ORCH, "project": str(self.repo), "kind": "custom", "state": "live", "status": "unknown", "created": ["pane:w2:p3"]},
             },
@@ -291,6 +291,8 @@ else:
     def test_idle_without_completion_or_unchanged_completion_is_quiet(self):
         data = self.registry()
         data["agents"][f"{SESSION}/quartz-builder"]["completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["notice_completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = True
         self.registry_path.write_text(json.dumps(data))
         self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "idle", "completion_seq": 8}})
         idle = {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "idle"}}
@@ -314,6 +316,8 @@ else:
     def test_rising_completion_seq_queues_one_notice_and_updates_baseline(self):
         data = self.registry()
         data["agents"][f"{SESSION}/quartz-builder"]["completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["notice_completion_seq"] = 8
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = True
         self.registry_path.write_text(json.dumps(data))
         self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done", "completion_seq": 9, "state_change_seq": 9}})
         done = {"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "done"}}
@@ -321,13 +325,55 @@ else:
             result = self.run_hook(done)
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
-        self.assertEqual(self.registry()["agents"][f"{SESSION}/quartz-builder"]["completion_seq"], 9)
+        self.assertEqual(self.registry()["agents"][f"{SESSION}/quartz-builder"]["notice_completion_seq"], 9)
 
     def test_missing_completion_seq_uses_legacy_status_change_notice(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"] = False
+        self.registry_path.write_text(json.dumps(data))
         self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "done"}})
         result = self.run_hook(event_for("claude", "done"))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.registry()["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+
+    def test_fresh_sequence_worker_does_not_fall_back_before_first_completion(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=False, completion_seq=None, notice_completion_seq=None)
+        self.registry_path.write_text(json.dumps(data))
+        for status in ("working", "done", "working"):
+            self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": status, "state_change_seq": 255}})
+            result = self.run_hook(event_for("claude", status))
+            self.assertEqual(result.returncode, 0, result.stderr)
+        data = self.registry()
+        self.assertEqual(data["orchs"][ORCH]["queue"], [])
+        self.assertEqual(data["agents"][f"{SESSION}/quartz-builder"]["status"], "working")
+        self.assertTrue(data["agents"][f"{SESSION}/quartz-builder"]["sequence_capable"])
+
+    def test_blocked_first_completion_does_not_consume_notice_watermark(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=True, completion_seq=None, notice_completion_seq=None)
+        self.registry_path.write_text(json.dumps(data))
+        self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": "blocked", "completion_seq": 255}})
+        result = self.run_hook({"event": "pane.agent_status_changed", "data": {"pane_id": "w2:p1", "agent_status": "blocked"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["status"], "blocked")
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["completion_seq"], 255)
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["notice_completion_seq"], None)
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "blocked", "w2:p1")])
+
+    def test_working_completion_does_not_consume_terminal_notice_watermark(self):
+        data = self.registry()
+        data["agents"][f"{SESSION}/quartz-builder"].update(sequence_capable=True, completion_seq=254)
+        self.registry_path.write_text(json.dumps(data))
+        for status in ("working", "done"):
+            self.write_herdr_state(**{"w2:p1": {"agent": "claude", "agent_status": status, "completion_seq": 255}})
+            result = self.run_hook(event_for("claude", status))
+            self.assertEqual(result.returncode, 0, result.stderr)
+        saved = self.registry()
+        self.assertEqual(saved["orchs"][ORCH]["queue"], [notice("quartz-builder", "done", "w2:p1")])
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["completion_seq"], 255)
+        self.assertEqual(saved["agents"][f"{SESSION}/quartz-builder"]["notice_completion_seq"], 255)
 
     def test_spawn_start_detects_sequence_advance_without_working_status(self):
         responses = [

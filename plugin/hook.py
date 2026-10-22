@@ -125,24 +125,27 @@ def process_event(event, payload):
 
         if agent:
             previous = agent.get("status", "unknown")
+            if info and any(field in info for field in ("state_change_seq", "completion_seq")):
+                agent["sequence_capable"] = True
+                agent.setdefault("notice_completion_seq", agent.get("completion_seq"))
             completion_seq = info.get("completion_seq") if info else None
             if isinstance(completion_seq, bool) or not isinstance(completion_seq, int):
                 completion_seq = None
             if status in NOTIFY_STATUSES:
-                last_completion_seq = agent.get("completion_seq")
                 if status == "blocked":
                     if status != previous:
                         queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
-                elif completion_seq is not None:
-                    if last_completion_seq is None or completion_seq > last_completion_seq:
+                elif agent.get("sequence_capable"):
+                    last_notified = agent.get("notice_completion_seq")
+                    if completion_seq is not None and (last_notified is None or completion_seq > last_notified):
                         queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
-                        agent["completion_seq"] = completion_seq
-                elif last_completion_seq is None and status != previous:
+                        agent["notice_completion_seq"] = completion_seq
+                elif status != previous:
                     # Older Herdr and adopted agents without a sequence baseline keep the legacy status-change behavior.
                     if not ({previous, status} <= QUIET_FLIP):
                         queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
-            if completion_seq is not None:
-                agent["completion_seq"] = max(agent.get("completion_seq", completion_seq), completion_seq)
+            if completion_seq is not None and (agent.get("completion_seq") is None or completion_seq > agent["completion_seq"]):
+                agent["completion_seq"] = completion_seq
             agent["status"] = status
         elif orch:
             orch["status"] = status

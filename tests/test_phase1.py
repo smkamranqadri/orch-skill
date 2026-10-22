@@ -7,7 +7,7 @@ class PhaseOne(unittest.TestCase):
   (self.root/'brief.txt').write_text('Build fictional widget')
   self.home=self.root/'state'; self.home.mkdir(); self.userhome=self.root/'home'; self.userhome.mkdir(); self.bin=self.root/'bin'; self.bin.mkdir(); self.log=self.root/'calls.jsonl'; self.resources=self.home/'herdr-resources.json'; self.resources.write_text(json.dumps({'panes':{},'tabs':{}}))
   scrubbed=os.environ.copy()
-  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR','PANE_CURRENT_ID','PANE_CURRENT_FAILURE','PANE_CURRENT_EXIT_FAILURE','START_AFTER_ENTER','START_NEVER','ENTER_SENT','FORCE_PANE_ID'):
+  for name in ('FAIL_START','FAIL_PROMPT','FAIL_CLOSE','FAIL_WORKTREE_REMOVE','LIVE_AGENT','CHECK_RESOURCE','CHECK_RESERVATION','MISSING_WORKSPACE','PANE_LIST_ERROR','PANE_CURRENT_ID','PANE_CURRENT_FAILURE','PANE_CURRENT_EXIT_FAILURE','START_AFTER_ENTER','START_NEVER','ENTER_SENT','FORCE_PANE_ID','NO_COMPLETION_SEQ'):
    scrubbed.pop(name,None)
   self.env=scrubbed|{'HOME':str(self.userhome),'GIT_CONFIG_GLOBAL':str(self.userhome/'gitconfig'),'GIT_CONFIG_SYSTEM':os.devnull,'XDG_CONFIG_HOME':str(self.userhome/'config'),'PATH':str(self.bin)+os.pathsep+scrubbed['PATH'],'XDG_STATE_HOME':str(self.home),'CALLS':str(self.log),'HERDR_ENV':'1','HERDR_SESSION':'session-a','HERDR_PANE_ID':'p1','HERDR_WORKSPACE_ID':'ws1','HERDR_TAB_ID':'tab1','PANE_CURRENT_FIXTURE':str(ROOT/'tests'/'fixtures'/'herdr'/'pane-current.json'),'ORCH_START_POLL_INTERVAL':'0','ORCH_START_POLL_ATTEMPTS':'3','ENTER_SENT_FILE':str(self.root/'enter-sent')}
   fake=self.bin/'herdr'
@@ -107,7 +107,7 @@ elif args[:2]==["agent","get"]:
   else:
    started=not os.environ.get("START_NEVER") and (not os.environ.get("START_AFTER_ENTER") or os.path.exists(os.environ["ENTER_SENT_FILE"]))
    status="working" if started else "idle"
-   print(json.dumps({"result":{"agent":{"agent_status":status,"state_change_seq":2 if started else 1,"completion_seq":0}}}))
+   print(json.dumps({"result":{"agent":{"agent_status":status,"state_change_seq":2 if started else 1,**({} if os.environ.get("NO_COMPLETION_SEQ") else {"completion_seq":0})}}}))
 elif args[:2]==["agent","send-keys"] and args[-1:]==["Enter"]:
  if os.environ.get("ENTER_SENT_FILE"): open(os.environ["ENTER_SENT_FILE"],"w").write("yes")
  print(json.dumps({"result":{}}))
@@ -155,9 +155,9 @@ else: print(json.dumps({"result":{}}))
   self.assertEqual(result.stderr.strip(),'orch: could not resolve current pane; re-run orch register from the orch pane')
   self.assertEqual(path.read_bytes(),original)
  def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
-  self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle','completion_seq':4}; env=self.catalog(agent)
+  self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle','state_change_seq':255}; env=self.catalog(agent)
   self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']
-  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created'],row['completion_seq']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[],4))
+  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created'],row['completion_seq'],row['notice_completion_seq'],row['sequence_capable']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[],None,None,True))
   self.assertIn(['agent','get','p7'],self.calls()); self.assertEqual(self.runcli('list').stdout,'build\torch-builder\tidle\tadopted\n')
   self.runcli('adopt','fictional-builder','--role','build','--name','orch-builder',env=env); self.assertEqual(self.state()['agents']['session-a/orch-builder'],row)
  def test_adopt_rejects_unknown_foreign_and_unregistered(self):
@@ -261,10 +261,10 @@ else: print(json.dumps({"result":{}}))
   self.assertIn(['agent','start','tabber','--kind','codex','--pane','tabpane','--','-m','fake-codex','-c','model_reasoning_effort=low'],c)
  def test_spawn_prompts_absolute_brief_pointer_and_does_not_send_enter_when_started(self):
   self.reg(); brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
-  self.runcli('spawn','pointer-worker','--role','build','--kind','claude','--where','pane','--brief',str(brief))
+  self.runcli('spawn','pointer-worker','--role','build','--kind','claude','--where','pane','--brief',str(brief),env=self.env|{'NO_COMPLETION_SEQ':'1'})
   self.assertIn(['agent','prompt','pointer-worker',f'The user asked for this: {brief.resolve()}'],self.calls())
   self.assertFalse(any(call[:2]==['agent','send-keys'] and call[-1:]==['Enter'] for call in self.calls()))
-  row=self.state()['agents']['session-a/pointer-worker']; self.assertEqual(row['state'],'live'); self.assertEqual(row['completion_seq'],0)
+  row=self.state()['agents']['session-a/pointer-worker']; self.assertEqual(row['state'],'live'); self.assertIsNone(row['completion_seq']); self.assertTrue(row['sequence_capable'])
  def test_spawn_sends_enter_once_when_worker_starts_only_after_enter(self):
   self.reg(); brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
   self.runcli('spawn','enter-worker','--role','build','--kind','claude','--where','pane','--brief',str(brief),env=self.env|{'START_AFTER_ENTER':'1'})
@@ -277,6 +277,36 @@ else: print(json.dumps({"result":{}}))
   row=self.state()['agents']['session-a/stalled-worker']; self.assertEqual((row['state'],row['status'],row['created']),('not-started','not-started',['pane:newpane']))
   self.assertIn('newpane',json.loads(self.resources.read_text())['panes'])
   self.assertEqual(self.calls().count(['agent','send-keys','stalled-worker','Enter']),1)
+ def test_not_started_writer_keeps_tree_reservation(self):
+  self.reg(); brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
+  self.runcli('spawn','stalled-writer','--role','build','--kind','claude','--where','pane','--writes','--brief',str(brief),ok=False,env=self.env|{'START_NEVER':'1'})
+  result=self.runcli('spawn','second-writer','--role','build','--kind','claude','--where','pane','--writes','--brief',str(brief),ok=False)
+  self.assertIn('writer already active in tree',result.stderr)
+  self.assertNotIn('session-a/second-writer',self.state()['agents'])
+ def test_not_started_name_remains_reserved(self):
+  self.reg(); brief=self.root/'brief.txt'; brief.write_text('Build fictional widget')
+  self.runcli('spawn','stalled-named','--role','build','--kind','claude','--where','pane','--brief',str(brief),ok=False,env=self.env|{'START_NEVER':'1'})
+  result=self.runcli('spawn','stalled-named','--role','build','--kind','claude','--where','pane','--brief',str(brief),ok=False,env=self.env|{'FORCE_PANE_ID':'replacement-pane'})
+  self.assertEqual(result.stderr.strip(),'orch: agent already exists: stalled-named')
+  self.assertEqual(self.state()['agents']['session-a/stalled-named']['pane'],'newpane')
+ def test_close_old_row_leaves_reused_live_pane_open(self):
+  self.reg(); self.spawn('old-worker'); data=self.state(); old=data['agents']['session-a/old-worker']; old['since']=10
+  data['agents']['session-a/live-worker']={'name':'live-worker','pane':old['pane'],'orch':'session-a/p1','state':'live','status':'working','since':20,'created':[f"pane:{old['pane']}"]}
+  self.save_state(data)
+  result=self.runcli('close','old-worker')
+  self.assertEqual(result.stdout.strip(),f"orch: leaving reused pane {old['pane']} open")
+  saved=self.state()['agents']; self.assertEqual(saved['session-a/old-worker']['state'],'closed'); self.assertEqual(saved['session-a/old-worker']['created'],[])
+  self.assertEqual(saved['session-a/live-worker']['state'],'live')
+  self.assertIn(old['pane'],json.loads(self.resources.read_text())['panes'])
+ def test_close_old_worktree_preserves_workspace_owned_by_newer_row(self):
+  self.reg(); self.spawn('old-worktree','worktree'); data=self.state(); old=data['agents']['session-a/old-worktree']; checkout=pathlib.Path(old['worktree'])
+  data['agents']['session-a/new-worktree']={'name':'new-worktree','pane':'wtws:p2','orch':'session-a/p1','state':'live','status':'working','since':old['since']+1,'created':[]}
+  self.save_state(data)
+  result=self.runcli('close','old-worktree','--discard')
+  saved=self.state()['agents']; self.assertEqual(saved['session-a/old-worktree']['state'],'closed'); self.assertEqual(saved['session-a/new-worktree']['state'],'live')
+  self.assertEqual(saved['session-a/old-worktree']['created'],[]); self.assertTrue(checkout.exists())
+  self.assertNotIn(['worktree','remove','--workspace','wtws'],self.calls())
+  self.assertIn('leaving reused worktree wtws open',result.stdout)
  def test_spawn_refuses_missing_brief_before_creating_resources(self):
   self.reg(); result=self.runcli('spawn','missing-brief','--role','build','--kind','claude','--where','pane','--brief',str(self.root/'absent.txt'),ok=False)
   self.assertEqual(result.stderr.strip(),f'orch: brief does not exist: {self.root}/absent.txt')

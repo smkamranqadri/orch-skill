@@ -22,7 +22,7 @@ BOARD_VERSION = "1.0.0"
 REFRESH_SECONDS = 1
 STATUS_ORDER = {"blocked": 0, "closing": 1, "cleanup": 1, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
 STATUS_GLYPHS = {"blocked": "!", "closing": "◷", "cleanup": "…", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}
-STATUS_COLORS = {"blocked": "blocked", "closing": "amber", "cleanup": "amber", "working": "working", "idle": "dim", "done": "done", "unknown": "amber", "closed": "dim"}
+STATUS_COLORS = {"blocked": "blocked", "closing": "amber", "cleanup": "amber", "not-started": "amber", "working": "working", "idle": "dim", "done": "done", "unknown": "amber", "closed": "dim"}
 STATE_WIDTH = 18
 MIN_PATH_WIDTH = 14
 MIN_OWNER_WIDTH = 6
@@ -204,7 +204,7 @@ def status_cell(row: dict, enabled: bool) -> str:
         held = int(row["node"]["paused"].get("count", 0))
         return color(f"PAUSED {held}", "amber", enabled, terminal_color_mode())
     status = str(row["node"].get("status", "unknown")).lower()
-    if row["kind"] == "AGENT" and row["node"].get("state") in ("closing", "cleanup"):
+    if row["kind"] == "AGENT" and row["node"].get("state") in ("closing", "cleanup", "not-started"):
         status = row["node"]["state"]
     display_status = status if status in STATUS_COLORS else "unknown"
     role = STATUS_COLORS[display_status]

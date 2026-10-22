@@ -176,6 +176,21 @@ def active_agent(data, pane, session):
             and entry.get("state")!="closed" and not entry.get("agent_closed")]
     return max(active,key=lambda item:item[1].get("since",0),default=(None,None))
 
+def newer_agent_holds_resource(data, key, kind, ident):
+    rows=list(data["agents"].items())
+    old_index=next((index for index,(row_key,_) in enumerate(rows) if row_key==key),-1)
+    old_since=data["agents"].get(key,{}).get("since",0)
+    for index,(row_key,row) in enumerate(rows):
+        if row_key==key or row.get("state")=="closed" or row.get("agent_closed"): continue
+        if row.get("since",0)<old_since or (row.get("since",0)==old_since and index<old_index): continue
+        if kind=="pane" and row.get("pane")==ident: return True
+        if kind=="workspace" and (row.get("workspace")==ident or (row.get("pane") or "").startswith(f"{ident}:") or f"workspace:{ident}" in row.get("created",[]) or f"worktree:{ident}" in row.get("created",[])): return True
+    return False
+
+def drop_reused_resource(agent, kind, ident):
+    print(f"orch: leaving reused {kind} {ident} open")
+    agent["created"].remove(f"{kind}:{ident}")
+
 def agent_info(target):
     response=herdr("agent","get",target,check=False)
     return result(response,"result","agent")
@@ -322,11 +337,11 @@ def spawn(a):
     project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
     with locked() as d:
         require_registered(d)
-        if key in d["agents"] and d["agents"][key].get("state") in ("starting","live","cleanup","closing"): fail(f"agent already exists: {a.name}")
+        if key in d["agents"] and d["agents"][key].get("state") in ("not-started","starting","live","cleanup","closing"): fail(f"agent already exists: {a.name}")
         live=herdr("agent","list",check=False) or {}
         if a.name in agent_names(live): fail(f"agent already exists in Herdr: {a.name}")
         destination=tree if a.where!="worktree" else str((Path(project)/f"../{Path(project).name}.wt/{a.name}").resolve())
-        if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
+        if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("not-started","starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
         d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False}
         save_registry(registry_path(),d)
         try:
@@ -361,6 +376,8 @@ def spawn(a):
             baseline_info=agent_info(pane)
             baseline={field:sequence_value(baseline_info,field) for field in ("state_change_seq","completion_seq")}
             d["agents"][key]["completion_seq"]=baseline["completion_seq"]
+            d["agents"][key]["notice_completion_seq"]=baseline["completion_seq"]
+            d["agents"][key]["sequence_capable"] = any(field in baseline_info for field in ("state_change_seq", "completion_seq"))
             save_registry(registry_path(),d)
             herdr("agent","prompt",a.name,f"The user asked for this: {a.brief}")
             started=wait_for_spawn(pane,baseline)
@@ -377,6 +394,8 @@ def spawn(a):
             if d["agents"].get(key,{}).get("state")=="not-started": raise
             for item in [x for x in reversed(created) if not x.startswith("branch:")]+[x for x in reversed(created) if x.startswith("branch:")]:
                 kind,ident=item.split(":",1)
+                if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident):
+                    drop_reused_resource(d["agents"][key],kind,ident); save_registry(registry_path(),d); continue
                 ok=True
                 if kind=="worktree": ok=herdr("worktree","remove","--workspace",ident,check=False) is not None
                 elif kind in ("pane","tab","workspace"): ok=herdr(kind,"close",ident,check=False) is not None
@@ -421,12 +440,14 @@ def adopt(a):
                 d["agents"].pop(old_key,None)
             entry=idempotent[1]
             entry.pop("closed_at",None)
-            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False,completion_seq=sequence_value(info,"completion_seq"))
+            baseline=sequence_value(info,"completion_seq")
+            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False,completion_seq=baseline,notice_completion_seq=baseline,sequence_capable=any(field in info for field in ("state_change_seq", "completion_seq")))
             deliver(d)
             return
         for old_key in tombstones:
             d["agents"].pop(old_key,None)
-        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"completion_seq":sequence_value(info,"completion_seq"),"adopted":True}
+        baseline=sequence_value(info,"completion_seq")
+        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"completion_seq":baseline,"notice_completion_seq":baseline,"sequence_capable":any(field in info for field in ("state_change_seq", "completion_seq")),"adopted":True}
         deliver(d)
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
@@ -485,12 +506,20 @@ def close_agent(a):
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
             if kind not in ("pane","tab","workspace"): continue
+            if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident):
+                drop_reused_resource(agent,kind,ident); save_registry(registry_path(),d); continue
             if herdr(kind,"close",ident,check=False) is None: fail(f"failed step: close {kind} {ident}")
             agent["created"].remove(item); save_registry(registry_path(),d)
         if any(item.startswith(("pane:","tab:","workspace:")) for item in agent.get("created",[])):
             fail(f"failed step: cleanup remains for {a.name}: {', '.join(agent['created'])}")
         if wt and not a.keep_checkout:
             ws=next((x.split(":",1)[1] for x in agent.get("created",[]) if x.startswith("worktree:")),None)
+            preserved_workspace=False
+            if ws:
+                if newer_agent_holds_resource(d,key,"workspace",ws):
+                    drop_reused_resource(agent,"worktree",ws); save_registry(registry_path(),d)
+                    preserved_workspace=True
+                    ws=None
             if ws:
                 missing = False
                 if wt and Path(wt).exists():
@@ -514,6 +543,8 @@ def close_agent(a):
                         pruned = subprocess.run(["git","worktree","prune"],cwd=os.getcwd(),text=True,capture_output=True)
                         if pruned.returncode: fail(f"failed step: prune missing worktree: {pruned.stderr.strip()}")
                 agent["created"].remove(f"worktree:{ws}"); save_registry(registry_path(),d)
+            if preserved_workspace and f"branch:{agent['branch']}" in agent.get("created",[]):
+                agent["created"].remove(f"branch:{agent['branch']}"); save_registry(registry_path(),d)
             if f"branch:{agent['branch']}" in agent.get("created",[]):
                 ref=f"refs/heads/{agent['branch']}"
                 exists=subprocess.run(["git","show-ref","--verify","--quiet",ref],cwd=os.getcwd(),capture_output=True)
