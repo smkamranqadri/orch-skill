@@ -176,11 +176,12 @@ def active_agent(data, pane, session):
             and entry.get("state")!="closed" and not entry.get("agent_closed")]
     return max(active,key=lambda item:item[1].get("since",0),default=(None,None))
 
-def newer_agent_holds_resource(data, key, kind, ident):
+def newer_agent_holds_resource(data, key, kind, ident, session):
     rows=list(data["agents"].items())
     old_index=next((index for index,(row_key,_) in enumerate(rows) if row_key==key),-1)
     old_since=data["agents"].get(key,{}).get("since",0)
     for index,(row_key,row) in enumerate(rows):
+        if not row_key.startswith(session + "/"): continue
         if row_key==key or row.get("state")=="closed" or row.get("agent_closed"): continue
         if row.get("since",0)<old_since or (row.get("since",0)==old_since and index<old_index): continue
         if kind=="pane" and row.get("pane")==ident: return True
@@ -376,7 +377,9 @@ def spawn(a):
             baseline_info=agent_info(pane)
             baseline={field:sequence_value(baseline_info,field) for field in ("state_change_seq","completion_seq")}
             d["agents"][key]["completion_seq"]=baseline["completion_seq"]
-            d["agents"][key]["notice_completion_seq"]=baseline["completion_seq"]
+            d["agents"][key]["turn_open"]=True
+            d["agents"][key]["seen_state_seq"]=baseline["state_change_seq"]
+            d["agents"][key]["seen_completion_seq"]=baseline["completion_seq"]
             d["agents"][key]["sequence_capable"] = any(field in baseline_info for field in ("state_change_seq", "completion_seq"))
             save_registry(registry_path(),d)
             herdr("agent","prompt",a.name,f"The user asked for this: {a.brief}")
@@ -394,7 +397,7 @@ def spawn(a):
             if d["agents"].get(key,{}).get("state")=="not-started": raise
             for item in [x for x in reversed(created) if not x.startswith("branch:")]+[x for x in reversed(created) if x.startswith("branch:")]:
                 kind,ident=item.split(":",1)
-                if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident):
+                if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident,os.environ["HERDR_SESSION"]):
                     drop_reused_resource(d["agents"][key],kind,ident); save_registry(registry_path(),d); continue
                 ok=True
                 if kind=="worktree": ok=herdr("worktree","remove","--workspace",ident,check=False) is not None
@@ -441,13 +444,15 @@ def adopt(a):
             entry=idempotent[1]
             entry.pop("closed_at",None)
             baseline=sequence_value(info,"completion_seq")
-            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False,completion_seq=baseline,notice_completion_seq=baseline,sequence_capable=any(field in info for field in ("state_change_seq", "completion_seq")))
+            state_baseline=sequence_value(info,"state_change_seq")
+            entry.update(project=project,tree=tree,kind=kind,model=info.get("model") or "",role=a.role or entry.get("role","explore"),where="adopted",state="live",status=status,created=[],started=False,stopped=False,agent_closed=False,pane_closed=False,completion_seq=baseline,turn_open=True,seen_state_seq=state_baseline,seen_completion_seq=baseline,sequence_capable=any(field in info for field in ("state_change_seq", "completion_seq")))
             deliver(d)
             return
         for old_key in tombstones:
             d["agents"].pop(old_key,None)
         baseline=sequence_value(info,"completion_seq")
-        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"completion_seq":baseline,"notice_completion_seq":baseline,"sequence_capable":any(field in info for field in ("state_change_seq", "completion_seq")),"adopted":True}
+        state_baseline=sequence_value(info,"state_change_seq")
+        d["agents"][key]={"name":adopted_name,"pane":pane,"orch":owner,"project":project,"kind":kind,"model":info.get("model") or "","effort":None,"where":"adopted","writes":False,"tree":tree,"branch":None,"worktree":None,"role":a.role or "explore","created":[],"state":"live","status":status,"since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False,"completion_seq":baseline,"turn_open":True,"seen_state_seq":state_baseline,"seen_completion_seq":baseline,"sequence_capable":any(field in info for field in ("state_change_seq", "completion_seq")),"adopted":True}
         deliver(d)
 def list_agents(a):
     require_runtime(); who=session_key(os.environ["HERDR_PANE_ID"])
@@ -506,7 +511,7 @@ def close_agent(a):
         for item in reversed(agent.get("created",[])):
             kind,ident=item.split(":",1)
             if kind not in ("pane","tab","workspace"): continue
-            if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident):
+            if kind in ("pane","workspace") and newer_agent_holds_resource(d,key,kind,ident,os.environ["HERDR_SESSION"]):
                 drop_reused_resource(agent,kind,ident); save_registry(registry_path(),d); continue
             if herdr(kind,"close",ident,check=False) is None: fail(f"failed step: close {kind} {ident}")
             agent["created"].remove(item); save_registry(registry_path(),d)
@@ -516,7 +521,7 @@ def close_agent(a):
             ws=next((x.split(":",1)[1] for x in agent.get("created",[]) if x.startswith("worktree:")),None)
             preserved_workspace=False
             if ws:
-                if newer_agent_holds_resource(d,key,"workspace",ws):
+                if newer_agent_holds_resource(d,key,"workspace",ws,os.environ["HERDR_SESSION"]):
                     drop_reused_resource(agent,"worktree",ws); save_registry(registry_path(),d)
                     preserved_workspace=True
                     ws=None

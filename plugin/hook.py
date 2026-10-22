@@ -73,23 +73,15 @@ def sequence_value(info, key):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def queue_terminal_notice(registry, agent, status, pane, state_change_seq, completion_seq):
-    if agent.get("notice_without_state_seq"):
-        return False
-    last_state_seq = agent.get("notice_state_change_seq")
-    if last_state_seq is not None and (state_change_seq is None or state_change_seq <= last_state_seq):
+def queue_terminal_notice(registry, agent, status, pane):
+    if not agent.get("turn_open"):
         return False
     queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
-    if state_change_seq is None:
-        agent["notice_without_state_seq"] = True
-    else:
-        agent["notice_state_change_seq"] = state_change_seq
-    if completion_seq is not None:
-        agent["notice_completion_seq"] = completion_seq
+    agent["turn_open"] = False
     return True
 
 
-def debounce_terminal_notice(agent_key, pane):
+def debounce_terminal_notice(agent_key, pane, snapshot_state_seq):
     time.sleep(DEBOUNCE_SECONDS)
     info = live_agent(pane)
     status = None if info is None else info.get("agent_status") or info.get("status")
@@ -103,11 +95,22 @@ def debounce_terminal_notice(agent_key, pane):
             return
         if not agent.get("sequence_capable"):
             return
-        previous_completion = agent.get("completion_seq")
-        if completion_seq is not None and (previous_completion is None or completion_seq > previous_completion):
-            agent["completion_seq"] = completion_seq
+        seen_state_seq = agent.get("seen_state_seq")
+        if snapshot_state_seq is not None and seen_state_seq is not None and seen_state_seq > snapshot_state_seq:
+            return
+        observed_state = sequence_value(info, "state_change_seq")
+        observed_completion = sequence_value(info, "completion_seq")
+        if observed_state is not None and seen_state_seq is not None and observed_state < seen_state_seq:
+            agent["seen_state_seq"] = observed_state
+            agent["seen_completion_seq"] = observed_completion
+        if observed_completion is not None and agent.get("seen_completion_seq") is not None and observed_completion < agent["seen_completion_seq"]:
+            agent["seen_completion_seq"] = observed_completion
+        elif observed_completion is not None and (agent.get("seen_completion_seq") is None or observed_completion > agent["seen_completion_seq"]):
+            agent["seen_completion_seq"] = observed_completion
+        if observed_state is not None:
+            agent["seen_state_seq"] = observed_state
         agent["status"] = status
-        queue_terminal_notice(registry, agent, status, pane, state_change_seq, completion_seq)
+        queue_terminal_notice(registry, agent, status, pane)
         orchlib.deliver(registry)
 
 
@@ -138,6 +141,7 @@ def process_event(event, payload):
     prefix = session + "/"
     orch_key = prefix + pane
     debounce_key = None
+    debounce_state_seq = None
     with orchlib.locked() as registry:
         if event not in ("pane.agent_status_changed", "pane.closed"):
             return
@@ -170,39 +174,55 @@ def process_event(event, payload):
 
         if agent:
             previous = agent.get("status", "unknown")
-            previous_state_seq = agent.get("state_change_seq")
             if info and any(field in info for field in ("state_change_seq", "completion_seq")):
                 agent["sequence_capable"] = True
-                agent.setdefault("notice_completion_seq", agent.get("completion_seq"))
             completion_seq = sequence_value(info or {}, "completion_seq")
             state_change_seq = sequence_value(info or {}, "state_change_seq")
+            if agent.get("sequence_capable"):
+                agent.setdefault("turn_open", previous == "working")
+                agent.setdefault("seen_state_seq", agent.get("state_change_seq"))
+                agent.setdefault("seen_completion_seq", agent.get("completion_seq"))
+                seen_state = agent.get("seen_state_seq")
+                seen_completion = agent.get("seen_completion_seq")
+                restarted = ((state_change_seq is not None and seen_state is not None and state_change_seq < seen_state)
+                             or (completion_seq is not None and seen_completion is not None and completion_seq < seen_completion))
+                rising_completion = completion_seq is not None and (seen_completion is None or completion_seq > seen_completion)
+                if restarted:
+                    agent["seen_state_seq"] = state_change_seq
+                    agent["seen_completion_seq"] = completion_seq
+                    rising_completion = False
+                else:
+                    if state_change_seq is not None:
+                        agent["seen_state_seq"] = state_change_seq
+                    if completion_seq is not None:
+                        agent["seen_completion_seq"] = completion_seq
+                if status == "working":
+                    agent["turn_open"] = True
             if status in NOTIFY_STATUSES:
                 if status == "blocked":
                     if status != previous:
                         queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
                 elif agent.get("sequence_capable"):
-                    last_notified = agent.get("notice_completion_seq")
-                    if completion_seq is not None and (last_notified is None or completion_seq > last_notified):
-                        queue_terminal_notice(registry, agent, status, pane, state_change_seq, completion_seq)
-                    elif state_change_seq is None or previous_state_seq is None or state_change_seq > previous_state_seq:
+                    if agent.get("turn_open") and rising_completion:
+                        queue_terminal_notice(registry, agent, status, pane)
+                    elif agent.get("turn_open"):
                         debounce_key = agent_key
+                        debounce_state_seq = state_change_seq
                 elif status != previous:
                     # Older Herdr and adopted agents without a sequence baseline keep the legacy status-change behavior.
                     if not ({previous, status} <= QUIET_FLIP):
                         queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
-            if completion_seq is not None and (agent.get("completion_seq") is None or completion_seq > agent["completion_seq"]):
+            if completion_seq is not None and (agent.get("completion_seq") is None or completion_seq < agent["completion_seq"] or completion_seq > agent["completion_seq"]):
                 agent["completion_seq"] = completion_seq
-            if state_change_seq is not None:
+            if state_change_seq is not None and (agent.get("state_change_seq") is None or state_change_seq < agent["state_change_seq"] or state_change_seq > agent["state_change_seq"]):
                 agent["state_change_seq"] = state_change_seq
-            if status == "working":
-                agent.pop("notice_without_state_seq", None)
             agent["status"] = status
         elif orch:
             orch["status"] = status
 
         orchlib.deliver(registry)
     if debounce_key:
-        debounce_terminal_notice(debounce_key, pane)
+        debounce_terminal_notice(debounce_key, pane, debounce_state_seq)
 
 
 def main():

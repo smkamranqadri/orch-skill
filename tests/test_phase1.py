@@ -157,7 +157,7 @@ else: print(json.dumps({"result":{}}))
  def test_adopt_reads_agent_and_pane_then_lists_and_is_idempotent(self):
   self.reg(); agent={'name':'fictional-builder','pane_id':'p7','workspace_id':'ws1','agent':'codex','model':'fake-model','agent_status':'idle','state_change_seq':255}; env=self.catalog(agent)
   self.runcli('adopt','p7','--role','build','--name','orch-builder',env=env); before=self.state(); row=before['agents']['session-a/orch-builder']
-  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created'],row['completion_seq'],row['notice_completion_seq'],row['sequence_capable']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[],None,None,True))
+  self.assertEqual((row['orch'],row['state'],row['status'],row['kind'],row['model'],row['where'],row['role'],row['created'],row['completion_seq'],row['turn_open'],row['seen_state_seq'],row['seen_completion_seq'],row['sequence_capable']),('session-a/p1','live','idle','codex','fake-model','adopted','build',[],None,True,255,None,True))
   self.assertIn(['agent','get','p7'],self.calls()); self.assertEqual(self.runcli('list').stdout,'build\torch-builder\tidle\tadopted\n')
   self.runcli('adopt','fictional-builder','--role','build','--name','orch-builder',env=env); self.assertEqual(self.state()['agents']['session-a/orch-builder'],row)
  def test_adopt_rejects_unknown_foreign_and_unregistered(self):
@@ -298,6 +298,15 @@ else: print(json.dumps({"result":{}}))
   saved=self.state()['agents']; self.assertEqual(saved['session-a/old-worker']['state'],'closed'); self.assertEqual(saved['session-a/old-worker']['created'],[])
   self.assertEqual(saved['session-a/live-worker']['state'],'live')
   self.assertIn(old['pane'],json.loads(self.resources.read_text())['panes'])
+ def test_foreign_session_does_not_block_local_resource_cleanup(self):
+  self.reg(); self.spawn('old-worker'); data=self.state(); old=data['agents']['session-a/old-worker']; old['since']=10
+  data['agents']['session-foreign/other']={'name':'other','pane':old['pane'],'orch':'session-foreign/p9','state':'live','status':'working','since':20,'created':[f"pane:{old['pane']}"]}
+  self.save_state(data)
+  self.runcli('close','old-worker')
+  saved=self.state()['agents']; self.assertEqual(saved['session-a/old-worker']['state'],'closed')
+  self.assertEqual(saved['session-a/old-worker']['created'],[])
+  self.assertEqual(saved['session-foreign/other']['state'],'live')
+  self.assertNotIn(old['pane'],json.loads(self.resources.read_text())['panes'])
  def test_close_old_worktree_preserves_workspace_owned_by_newer_row(self):
   self.reg(); self.spawn('old-worktree','worktree'); data=self.state(); old=data['agents']['session-a/old-worktree']; checkout=pathlib.Path(old['worktree'])
   data['agents']['session-a/new-worktree']={'name':'new-worktree','pane':'wtws:p2','orch':'session-a/p1','state':'live','status':'working','since':old['since']+1,'created':[]}
