@@ -1,6 +1,6 @@
 # Current
 
-Stamp: main f0ebe6a 06f41246fed6
+Stamp: main 5ae1a74 06f41246fed6
 
 - Branch: `main`, pushed to `origin/main` 2026-10-20 (plain push after the 2026-10-19 force-push).
   Version 1.0.0 (CHANGELOG, plugin manifest, board header); the owner tags `v1.0.0`. No other branches or worktrees; all build and review agents are closed.
@@ -32,7 +32,11 @@ Stamp: main f0ebe6a 06f41246fed6
   the skill copy and `check` passes. The plugin and the `orch` CLI link still point at this
   checkout: `update` refuses to replace a local plugin link with a GitHub install. Reviewers:
   Codex gpt-6.1-sol medium; builder GPT-6-Luna.
-- Not verified live: `orch:*` commands in a fresh Claude Code and Codex session, the cap on a real
+- Live 2026-10-22 (fresh Claude Code session, unregistered): `orch:model` researched, asked,
+  and wrote `~/.config/orch/matrix.md` after approval; `orch:close` reached `orch list`, which
+  answers "caller is not a registered orch".
+- Not verified live: the other `orch:*` commands in a fresh Claude Code session, all of them in
+  Codex, the cap on a real
   clock (`orch resume`, `[cap] prompts_per_hour`), `prefix+b` overlay closing on `q`, a worktree
   spawn after the flag fix, a GitHub plugin install (needs `herdr plugin unlink orch` first),
   GitHub Actions, macOS and Bash 3.2. Duplicate notices are coalesced by a guard; the root cause
