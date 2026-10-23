@@ -1,4 +1,4 @@
-  orch board v1.0.0
+  orch board v1.0.1
   refresh: 1s · last: 12:34:56
   Status: All · 1 orch · 1 agent
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1 (2026-10-23)
+
+- `orch spawn` sends a one-line pointer to the brief (`The user asked for this: <absolute path>`)
+  instead of the brief's text, confirms the turn started, presses Enter once if it did not, and
+  marks the agent `not-started` (exit 1, resources kept) if it still never starts. A missing brief
+  file is refused.
+- Worktree workers get their finish notice again: the hook resolves a reused pane to the newest
+  open agent instead of an old closed one.
+- No more early `idle`/`done` notices: one notice per turn. A rising `completion_seq` notifies at
+  once; a stop without it is rechecked after 15 s (`ORCH_DEBOUNCE_SECONDS`), so Herdr's brief false
+  `done` blips are ignored. Sequences reset safely after a Herdr restart. `blocked` still notifies
+  immediately.
+- `orch close` leaves a pane or workspace open when a newer agent in the same session reuses it.
+
 ## 1.0.0 (2026-10-20)
 
 - Board redesigned in the herdrctx style: version header, a ticking `refresh: 1s · last:` line,
