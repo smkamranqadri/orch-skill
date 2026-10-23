@@ -28,7 +28,12 @@ orch that started it.
 - Herdr API facts the design rests on: plugin actions take no arguments (so orch's API is a CLI);
   `herdr worktree create --branch --base --path` makes a worktree workspace; `herdr agent start
   --kind --pane` needs a pane at a shell prompt; `herdr agent prompt` refuses a `blocked` agent;
-  statuses are idle, working, blocked, done, unknown; `herdr plugin pane open --plugin
+  statuses are idle, working, blocked, done, unknown (`idle` and `done` both mean stopped);
+  `herdr agent get` has `state_change_seq` and, only after a completed turn, `completion_seq`
+  (equal to it then); a real turn can end without `completion_seq` (seen after Codex `/new`);
+  Herdr sends 1-8 s false `done` blips mid-turn; all seqs reset on a Herdr restart; Herdr reuses
+  workspace IDs and a worktree's root pane is always `:p1`, so pane IDs repeat across agents;
+  `herdr plugin log list --plugin ID` shows recent hook runs (exit, stderr), not payloads; `herdr plugin pane open --plugin
   --entrypoint --placement` opens a plugin pane. Agent names are unique per Herdr server.
 - Report back is push only: the plugin delivers to orch, orch never polls.
 - Keep it small. 0.12.2 grew too heavy (ledger, watcher process, gate, usage reader, handoff).

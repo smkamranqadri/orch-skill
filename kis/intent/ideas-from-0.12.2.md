@@ -8,7 +8,7 @@ Effort S/M/L includes tests.
 
 ## Hardening candidates (verified gaps in v1)
 
-1. **Completion sequence.** `hook.py` ignores `completion_seq`, so a short turn between two events
+1. **Completion sequence.** Done 2026-10-23 (`plan-2026-10-23-notice-fixes.md`). `hook.py` ignores `completion_seq`, so a short turn between two events
    can be missed. Old: `skills/orch/scripts/orch-watch.py` `Watcher.poll`; tests in
    `tests/orch-watch-tests.py` (`test_short_turn_is_caught_by_completion_seq`). M, plugin/tests.
 2. **Timeout on Herdr calls.** `orchlib.herdr` has no timeout and runs under the registry lock; one
@@ -22,7 +22,7 @@ Effort S/M/L includes tests.
    never atomic. M, plugin.
 5. **Literal-mutation runner.** Reusable runner that demands the named test fails and verifies
    restore with `cmp`: `tests/mutate-orch-plugin.py` (120 lines). S, tests.
-15. **Spawn never submits.** (Found in v1 on 2026-10-22, not from 0.12.2; numbered last so the
+15. **Spawn never submits.** Done 2026-10-23 (`plan-2026-10-23-notice-fixes.md`). (Found in v1 on 2026-10-22, not from 0.12.2; numbered last so the
     others keep their numbers.) `orch spawn --brief FILE` pastes the whole brief into a Claude
     worker's input box ("[Pasted text #1 +65 lines]") and never sends Enter, so the worker sits
     idle while the spawn looks done; seen 3 of 3 times (lore-plan-review, lore-p1-reads,
