@@ -73,10 +73,16 @@ def sequence_value(info, key):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def terminal_notification(agent, status, pane):
+    if orchlib.proof_row(agent) and not orchlib.proof_present(agent):
+        return f"[orch] {agent['name']} stopped, no proof · pane {pane} · read: herdr agent read {agent['name']}"
+    return notification(agent["name"], status, pane)
+
+
 def queue_terminal_notice(registry, agent, status, pane):
     if not agent.get("turn_open"):
         return False
-    queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
+    queue_notice(registry, agent.get("orch"), terminal_notification(agent, status, pane))
     agent["turn_open"] = False
     return True
 
@@ -211,7 +217,7 @@ def process_event(event, payload):
                 elif status != previous:
                     # Older Herdr and adopted agents without a sequence baseline keep the legacy status-change behavior.
                     if not ({previous, status} <= QUIET_FLIP):
-                        queue_notice(registry, agent.get("orch"), notification(agent["name"], status, pane))
+                        queue_notice(registry, agent.get("orch"), terminal_notification(agent, status, pane))
             if completion_seq is not None and (agent.get("completion_seq") is None or completion_seq < agent["completion_seq"] or completion_seq > agent["completion_seq"]):
                 agent["completion_seq"] = completion_seq
             if state_change_seq is not None and (agent.get("state_change_seq") is None or state_change_seq < agent["state_change_seq"] or state_change_seq > agent["state_change_seq"]):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core orch registry and Herdr helpers (Python 3.11+)."""
 from __future__ import annotations
-import fcntl, json, os, subprocess, sys, tempfile, time, tomllib
+import fcntl, hashlib, json, os, re, shlex, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, uuid
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -332,9 +332,411 @@ def register(name=None):
             opened=herdr("plugin","pane","open","--plugin","orch","--entrypoint","board","--placement","split","--target-pane",pane,"--direction",direction,check=False)
             if opened is None: fail("failed step: open board pane")
         deliver(d)
+PROOF_ROLES = ("build", "review")
+PROOF_FIELDS = ("run_log", "run_sha256", "tree_fingerprint", "mutations_log", "guards")
+PROOF_READ_LIMIT = 64 * 1024
+DIGEST_READ_LIMIT = 1024 * 1024
+REPRO_TIMEOUT = float(os.environ.get("ORCH_REPRO_TIMEOUT", "120"))
+EXCLUDE_LINE = b"/.orch/"
+PROOF_MARK = "<!-- orch:proof -->"
+PROOF_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+MUTATION_RECORD = re.compile(r"([^|\s](?:[^|]*[^|\s])?) \| ([^|\s](?:[^|]*[^|\s])?) \| tripped=(True|False) \| restored byte-identical=(True|False)")
+FINDING_ID = re.compile(r"F[0-9]+")
+REPRO_VERDICT = re.compile(r"(F[0-9]+) (REPRODUCED|NOT-REPRODUCED|MANUAL)")
+REPRO_EVIDENCE = re.compile(r"(F[0-9]+) expected=.* observed=.*")
+REPRO_SHAPED = re.compile(r"F[0-9]")  # any line like this must be a well-formed evidence or result line
+LIVE_FP_TTL = 10.0
+LIVE_FP_TIMEOUT = 2.0
+LIVE_FP_CACHE = {}
+DIGEST_FILE_LIMIT = 256 * 1024 * 1024
+
+def proof_row(agent):
+    return bool(agent.get("proof")) and agent.get("role") in PROOF_ROLES
+def proof_dir(agent):
+    return Path(agent["tree"])/".orch"/agent["name"]
+def checked_proof_dir(agent):
+    """The proof dir, or fail when .orch or .orch/<name> is a symlink (it would resolve outside the row tree)."""
+    base=proof_dir(agent)
+    for part in (Path(agent["tree"])/".orch", base):
+        if os.path.islink(part): fail(f"proof dir refused; {part} is a symlink")
+    return base
+def read_regular(path, limit):
+    """Bytes of a regular, non-symlink file of at most limit bytes; None when missing, unreadable, special or larger."""
+    try:
+        fd=os.open(path,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+    except OSError: return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode): return None
+        with os.fdopen(fd,"rb",closefd=False) as stream: raw=stream.read(limit+1)
+    except OSError: return None
+    finally: os.close(fd)
+    return raw if len(raw)<=limit else None
+def read_proof_text(path):
+    raw=read_regular(path,PROOF_READ_LIMIT)
+    if raw is None: return None
+    try: return raw.decode("utf-8")
+    except UnicodeDecodeError: return None
+def proof_fields(text, names):
+    found={}
+    for line in text.splitlines():
+        name,sep,value=line.partition(":")
+        if sep and name in names: found[name]=value.strip()
+    return found
+def executable_script(path):
+    try: info=os.lstat(path)
+    except OSError: return False
+    return stat.S_ISREG(info.st_mode) and bool(info.st_mode & stat.S_IXUSR)
+def proof_present(agent):
+    """Bounded presence check used by the hook and the board: no hashing, git or subprocess."""
+    try: base=proof_dir(agent)
+    except (KeyError, TypeError): return False
+    if agent.get("role")=="build":
+        text=read_proof_text(base/"handoff.md")
+        if text is None: return False
+        found=proof_fields(text,PROOF_FIELDS)
+        return all(found.get(name) for name in PROOF_FIELDS)
+    text=read_proof_text(base/"review.md")
+    if text is None or parse_findings(text) is None: return False
+    return executable_script(base/"repro.sh")
+def resolve_proof_path(agent, value):
+    path=Path(value)
+    return Path(os.path.realpath(path if path.is_absolute() else Path(agent["tree"])/path))
+def inside_proof_dir(agent, path):
+    return str(path).startswith(os.path.realpath(proof_dir(agent))+os.sep)
+def file_digest(path):
+    """sha256 of a regular file's bytes (streamed, bounded), or a marker when it is absent or unreadable."""
+    try: fd=os.open(path,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+    except OSError: return "absent"
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode): return "special"
+        digest=hashlib.sha256(); total=0
+        while True:
+            chunk=os.read(fd,1<<20)
+            if not chunk: return digest.hexdigest()
+            total+=len(chunk)
+            if total>DIGEST_FILE_LIMIT: return "oversized"
+            digest.update(chunk)
+    except OSError: return "unreadable"
+    finally: os.close(fd)
+def proof_digest(agent):
+    """Digest of the bytes of every proof file a verdict binds to: the handoff, the run log and the mutations log it names, or review.md and repro.sh."""
+    base=proof_dir(agent); parts=[]
+    if agent.get("role")=="build":
+        parts.append(("handoff.md",file_digest(base/"handoff.md")))
+        text=read_proof_text(base/"handoff.md"); fields=proof_fields(text,PROOF_FIELDS) if text else {}
+        for name in ("run_log","mutations_log"):
+            path=resolve_proof_path(agent,fields[name]) if fields.get(name) else None
+            parts.append((name,path.as_posix() if path else "")); parts.append((name+" bytes",file_digest(path) if path else "absent"))
+    else:
+        for name in ("review.md","repro.sh"): parts.append((name,file_digest(base/name)))
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+def live_fingerprint(tree):
+    """Fingerprint of the live tree for the board: cached for LIVE_FP_TTL and bounded by LIVE_FP_TIMEOUT; None when unknown."""
+    now=time.monotonic(); cached=LIVE_FP_CACHE.get(str(tree))
+    if cached and now-cached[0]<LIVE_FP_TTL: return cached[1]
+    try: value=fingerprint(tree,timeout=LIVE_FP_TIMEOUT)
+    except RuntimeError: value=None
+    LIVE_FP_CACHE[str(tree)]=(now,value)
+    return value
+def live_fingerprint_once(tree):
+    try: return fingerprint(tree)
+    except RuntimeError: return None
+def verdict_binding(agent):
+    return {"digest":proof_digest(agent),"test_cmd":agent.get("test_cmd")}
+def proof_state(agent):
+    """Board cell for an agent row: missing, present, failing, passing, or blank for rows without the proof protocol."""
+    if not proof_row(agent): return ""
+    verdict=agent.get("verdict") if isinstance(agent.get("verdict"),dict) else {}
+    outcome=verdict.get("result") if verdict.get("result") in ("passing","failing") else ""
+    if agent.get("state") in ("closing","cleanup","closed") or str(agent.get("status","")).lower()=="closed": return outcome
+    if not proof_present(agent): return "missing"
+    binding=verdict.get("binding") if isinstance(verdict.get("binding"),dict) else {}
+    bound=all(binding.get(field)==value for field,value in verdict_binding(agent).items())
+    if agent.get("role")=="review": bound=bound and "against" in binding and "want" in binding
+    elif outcome and bound: bound=binding.get("fingerprint") is not None and binding.get("fingerprint")==live_fingerprint(agent["tree"])
+    return outcome if outcome and bound else "present"
+def git_output(tree, *args, timeout=None):
+    try: done=subprocess.run(["git","-C",str(tree),*args],capture_output=True,timeout=timeout)
+    except subprocess.TimeoutExpired as exc: raise RuntimeError(f"git {' '.join(args)} timed out") from exc
+    if done.returncode: raise RuntimeError(f"git {' '.join(args)} failed: {done.stderr.decode(errors='replace').strip()}")
+    return done.stdout
+def fingerprint(tree, timeout=None):
+    """Hash of HEAD, the binary diff against HEAD and every non-ignored untracked path with type, mode and content; a timeout (seconds) bounds the whole run."""
+    deadline=None if timeout is None else time.monotonic()+timeout
+    def left():
+        if deadline is None: return None
+        if time.monotonic()>=deadline: raise RuntimeError("fingerprint timed out")
+        return deadline-time.monotonic()
+    head=git_output(tree,"rev-parse","HEAD",timeout=left()).strip()
+    diff=git_output(tree,"diff","HEAD","--binary","--no-ext-diff","--no-textconv","--no-color",timeout=left())
+    paths=sorted(path for path in git_output(tree,"ls-files","--others","--exclude-standard","-z",timeout=left()).split(b"\0") if path)
+    digest=hashlib.sha256()
+    digest.update(b"HEAD\0"+head+b"\0"+b"DIFF\0"+str(len(diff)).encode()+b"\0"+diff)
+    root=os.fsencode(str(tree))
+    for rel in paths:
+        left(); full=os.path.join(root,rel)
+        try:
+            info=os.lstat(full)
+            if stat.S_ISLNK(info.st_mode): kind=b"link"; content=hashlib.sha256(os.readlink(full)).hexdigest()
+            elif stat.S_ISREG(info.st_mode):
+                kind=b"file"; hashed=hashlib.sha256()
+                with open(full,"rb") as stream:
+                    for chunk in iter(lambda: stream.read(1<<20),b""): hashed.update(chunk)
+                content=hashed.hexdigest()
+            else: raise RuntimeError(f"unsupported untracked entry: {os.fsdecode(rel)}")
+        except OSError as exc: raise RuntimeError(f"cannot read {os.fsdecode(rel)}: {exc}") from exc
+        digest.update(b"U\0"+rel+b"\0"+kind+b"\0"+(b"x" if info.st_mode & stat.S_IXUSR else b"-")+b"\0"+content.encode()+b"\0")
+    return digest.hexdigest()
+def fingerprint_command():
+    top=subprocess.run(["git","rev-parse","--show-toplevel"],text=True,capture_output=True)
+    if top.returncode: fail("current directory is not in a git repository")
+    try: print(fingerprint(top.stdout.strip()))
+    except RuntimeError as exc: fail(f"fingerprint failed: {exc}")
+def ensure_excluded(tree):
+    """Append /.orch/ to the checkout's info/exclude once, keeping every existing byte."""
+    found=subprocess.run(["git","-C",str(tree),"rev-parse","--git-path","info/exclude"],text=True,capture_output=True)
+    if found.returncode or not found.stdout.strip(): fail(f"cannot locate info/exclude for {tree}: {found.stderr.strip()}")
+    path=Path(found.stdout.strip()); path=path if path.is_absolute() else Path(tree)/path
+    path.parent.mkdir(parents=True,exist_ok=True)
+    try: current=path.read_bytes()
+    except FileNotFoundError: current=b""
+    if EXCLUDE_LINE in current.split(b"\n"): return
+    with open(path,"ab") as stream:
+        if current and not current.endswith(b"\n"): stream.write(b"\n")
+        stream.write(EXCLUDE_LINE+b"\n")
+def proof_rules(role):
+    here=Path(__file__).resolve().parent
+    for base in (here.parent/"skills"/"orch",Path.home()/".agents"/"skills"/"orch"):
+        path=base/"references"/"proof.md"
+        if path.is_file():
+            parts=re.split(r"^<!-- role:(build|review) -->\n",path.read_text(encoding="utf-8"),flags=re.M)
+            sections=dict(zip(parts[1::2],parts[2::2]))
+            if role in sections: return parts[0]+sections[role]
+    fail("proof rules not found: skills/orch/references/proof.md")
+def prepare_proof(agent, brief, rules):
+    checked_proof_dir(agent); ensure_excluded(agent["tree"]); base=proof_dir(agent); base.mkdir(parents=True,exist_ok=True); checked_proof_dir(agent)
+    text=rules.replace("{test_cmd}",agent.get("test_cmd") or "(none given)").replace("{proof_dir_q}",shlex.quote(str(base))).replace("{proof_dir}",str(base))
+    current=brief.read_text(encoding="utf-8"); at=current.find(PROOF_MARK)
+    head=(current[:at] if at>=0 else current).rstrip("\n")
+    brief.write_text(head+"\n\n"+PROOF_MARK+"\n"+text,encoding="utf-8")
+def proof_archive_path(agent):
+    return registry_path().parent/"proof"/os.environ["HERDR_SESSION"]/agent["name"]
+def archive_proof(agent):
+    """Copy the proof dir to the archive before close removes anything; fail closed on any copy error."""
+    source=checked_proof_dir(agent); target=proof_archive_path(agent)
+    if not source.is_dir():
+        print(f"orch: no proof directory to archive at {source}"); return
+    staging=target.with_name(f"{target.name}.tmp-{os.getpid()}")
+    try:
+        target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.rmtree(staging,ignore_errors=True)
+        shutil.copytree(source,staging,symlinks=True)
+        retired=target.with_name(f"{target.name}.old-{time.time_ns()}")
+        if target.exists(): os.rename(target,retired)
+        os.rename(staging,target)
+        shutil.rmtree(retired,ignore_errors=True)
+    except (OSError,shutil.Error) as exc:
+        shutil.rmtree(staging,ignore_errors=True)
+        fail(f"close refused; cannot archive proof {source} to {target}: {exc}")
+    agent["proof_archive"]=str(target)
+def parse_findings(text):
+    value=proof_fields(text,("findings",)).get("findings")
+    if value is None: return None
+    if value=="none": return []
+    ids=[token.strip() for token in value.split(",")]
+    return ids if ids and all(FINDING_ID.fullmatch(token) for token in ids) else None
+def git_env(index):
+    return os.environ|{"GIT_INDEX_FILE":str(index),"GIT_AUTHOR_NAME":"orch verify","GIT_AUTHOR_EMAIL":"verify@orch.invalid","GIT_COMMITTER_NAME":"orch verify","GIT_COMMITTER_EMAIL":"verify@orch.invalid"}
+def snapshot_commit(tree, scratch):
+    """Commit of the worker's current tree built in a private index; the worker's index, branch and files stay untouched."""
+    env=git_env(Path(scratch)/"index")
+    def run(*args):
+        done=subprocess.run(["git","-C",str(tree),*args],env=env,text=True,capture_output=True)
+        if done.returncode: raise RuntimeError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
+        return done.stdout.strip()
+    found=subprocess.run(["git","-C",str(tree),"rev-parse","--git-path","index"],env={k:v for k,v in env.items() if k!="GIT_INDEX_FILE"},text=True,capture_output=True)
+    if found.returncode: raise RuntimeError(f"git rev-parse --git-path index failed: {found.stderr.strip()}")
+    index=Path(found.stdout.strip()); index=index if index.is_absolute() else Path(tree)/index
+    # Seed from the worker's real index so staged (even ignored) paths are kept; the copy is private.
+    if index.is_file(): shutil.copyfile(index,env["GIT_INDEX_FILE"])
+    else: run("read-tree","HEAD")
+    run("add","-A")
+    return run("-c","commit.gpgsign=false","commit-tree",run("write-tree"),"-p","HEAD","-m","orch verify snapshot")
+def kill_group(process):
+    """Kill the child's whole process group, also when the child itself already exited but left descendants."""
+    if process is None: return
+    try: os.killpg(process.pid,signal.SIGKILL)
+    except OSError: pass
+    if process.poll() is None: process.wait()
+def clean_run(row, base):
+    """Run the stored test command on a snapshot of the dirty tree; returns (exit code, log path)."""
+    tree=row["tree"]; scratch=tempfile.mkdtemp(prefix="orch-verify-"); checkout=Path(scratch)/"tree"; process=None; added=False
+    number=len(list(base.glob("verify-clean-*.log")))+1; log=base/f"verify-clean-{number}.log"
+    def interrupted(signum,frame): raise KeyboardInterrupt
+    previous=signal.signal(signal.SIGTERM,interrupted)
+    try:
+        commit=snapshot_commit(tree,scratch)
+        git_output(tree,"worktree","add","--detach",str(checkout),commit); added=True
+        with open(log,"wb") as stream:
+            process=subprocess.Popen(["/bin/sh","-c",row["test_cmd"]],cwd=checkout,stdout=stream,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL,start_new_session=True)
+            code=process.wait()
+        return code,log
+    finally:
+        kill_group(process)
+        if added: subprocess.run(["git","-C",str(tree),"worktree","remove","--force",str(checkout)],capture_output=True)
+        subprocess.run(["git","-C",str(tree),"worktree","prune"],capture_output=True)
+        shutil.rmtree(scratch,ignore_errors=True)
+        signal.signal(signal.SIGTERM,previous)
+def verify_build(row, emit):
+    base=proof_dir(row); text=read_proof_text(base/"handoff.md")
+    if text is None:
+        emit("FAIL",f"handoff missing or unreadable: {base/'handoff.md'}"); return
+    fields=proof_fields(text,PROOF_FIELDS); missing=[name for name in PROOF_FIELDS if not fields.get(name)]
+    for name in missing: emit("FAIL",f"handoff missing field {name}")
+    if missing: return
+    emit("PASS","handoff has every field")
+    log=resolve_proof_path(row,fields["run_log"]); data=read_regular(log,1<<30)
+    if data is None: emit("FAIL",f"run_log missing: {log}")
+    elif not inside_proof_dir(row,log): emit("FAIL",f"run_log outside the proof dir: {log}")
+    else:
+        if hashlib.sha256(data).hexdigest()==fields["run_sha256"]: emit("PASS","run_sha256 matches the run log")
+        else: emit("FAIL","run_sha256 does not match the run log")
+        if data.rstrip(b"\n").split(b"\n")[-1]==b"exit=0": emit("PASS","run log ends with exit=0")
+        else: emit("FAIL","run log does not end with exit=0")
+    try: current=fingerprint(row["tree"])
+    except RuntimeError as exc: emit("FAIL",f"fingerprint error: {exc}")
+    else:
+        if current==fields["tree_fingerprint"]: emit("PASS","tree_fingerprint unchanged")
+        else: emit("FAIL","tree_fingerprint changed since the final run")
+    verify_mutations(row,fields,emit)
+def verify_mutations(row, fields, emit):
+    path=resolve_proof_path(row,fields["mutations_log"]); declared=[] if fields["guards"]=="none" else [name.strip() for name in fields["guards"].split(",")]
+    if not all(declared): emit("FAIL","guards has an empty name"); return
+    if not inside_proof_dir(row,path): emit("FAIL",f"mutations_log outside the proof dir: {path}"); return
+    raw=read_regular(path,DIGEST_READ_LIMIT)
+    if raw is None and os.path.lexists(path): emit("FAIL",f"mutations_log unreadable: {path}"); return
+    try: text="" if raw is None else raw.decode("utf-8")
+    except UnicodeDecodeError: emit("FAIL","mutations.log is not UTF-8"); return
+    latest={}; bad=0
+    for number,line in enumerate(text.split("\n"),1):
+        if not line.strip(): continue
+        match=MUTATION_RECORD.fullmatch(line)
+        if not match: emit("FAIL",f"mutations.log line {number} is malformed"); bad+=1; continue
+        latest[match[1]]=(match[3]=="True",match[4]=="True")
+    for name in sorted(set(latest)-set(declared)): emit("FAIL",f"guard {name} has a record but is not declared in guards")
+    for name in declared:
+        if name not in latest: emit("FAIL",f"guard {name} has no mutation record")
+        elif not latest[name][0]: emit("FAIL",f"guard {name} latest record has tripped=False")
+        elif not latest[name][1]: emit("FAIL",f"guard {name} latest record has restored byte-identical=False")
+        else: emit("PASS",f"guard {name} tripped and restored byte-identical")
+    if not declared and not latest and not bad: emit("PASS","no guards declared")
+def verify_review(row, against, want, emit):
+    base=proof_dir(row); text=read_proof_text(base/"review.md")
+    if text is None: emit("FAIL",f"review.md missing or unreadable: {base/'review.md'}"); return
+    declared=parse_findings(text)
+    if declared is None: emit("FAIL","review.md has no valid findings: line"); return
+    if not executable_script(base/"repro.sh"): emit("FAIL",f"repro.sh missing or not an executable file: {base/'repro.sh'}"); return
+    process=None
+    def interrupted(signum,frame): raise KeyboardInterrupt
+    previous=signal.signal(signal.SIGTERM,interrupted)
+    try:
+        process=subprocess.Popen([str(base/"repro.sh"),str(against)],cwd=against,stdout=subprocess.PIPE,stderr=subprocess.PIPE,stdin=subprocess.DEVNULL,text=True,errors="replace",start_new_session=True)
+        try: output,_=process.communicate(timeout=REPRO_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            kill_group(process); emit("FAIL",f"repro.sh timed out after {REPRO_TIMEOUT:g}s"); return
+    except OSError as exc: emit("FAIL",f"repro.sh could not run: {exc}"); return
+    finally:
+        kill_group(process); signal.signal(signal.SIGTERM,previous)
+    if process.returncode: emit("FAIL",f"repro.sh exited {process.returncode}")
+    verdicts={}; evidence=set()
+    for line in output.splitlines():
+        if not REPRO_SHAPED.match(line): continue
+        if REPRO_EVIDENCE.fullmatch(line): evidence.add(line.split(" ",1)[0])
+        elif REPRO_VERDICT.fullmatch(line): verdicts.setdefault(line.split(" ",1)[0],[]).append(line.split(" ",1)[1])
+        else: emit("FAIL",f"malformed repro line: {line}")
+    for ident in sorted(set(verdicts)|evidence,key=lambda item:int(item[1:])):
+        if ident not in declared: emit("FAIL",f"{ident} is not declared in findings")
+    reasons=proof_fields_by_finding(text)
+    for ident in declared:
+        results=verdicts.get(ident,[])
+        if not results: emit("FAIL",f"{ident} has no result line")
+        elif len(results)>1: emit("FAIL",f"{ident} has {len(results)} result lines")
+        elif ident not in evidence: emit("FAIL",f"{ident} has no expected/observed evidence line")
+        elif results[0]=="MANUAL":
+            if reasons.get(ident): emit("MANUAL",f"{ident} needs a person: {reasons[ident]}")
+            else: emit("FAIL",f"{ident} is MANUAL without a reason in review.md")
+        elif results[0]==want: emit("PASS",f"{ident} {results[0]}")
+        else: emit("FAIL",f"{ident} is {results[0]}, wanted {want}")
+    if not declared and not verdicts and process.returncode==0: emit("PASS","no findings declared")
+def proof_fields_by_finding(text):
+    reasons={}
+    for line in text.splitlines():
+        match=re.fullmatch(r"(F[0-9]+) manual: (\S.*)",line)
+        if match: reasons[match[1]]=match[2].strip()
+    return reasons
+def verify(a):
+    require_runtime(); key=session_key(a.name)
+    with locked() as d:
+        require_registered(d)
+        found=d["agents"].get(key); row=json.loads(json.dumps(found)) if found else None
+    if not row: fail(f"unknown agent: {a.name}")
+    failures=[]
+    def emit(kind,message):
+        if kind=="FAIL": failures.append(message)
+        print(f"{kind} {message}",flush=True)
+    def finish():
+        print("RESULT: PASS" if not failures else f"RESULT: FAIL ({len(failures)})",flush=True)
+        raise SystemExit(1 if failures else 0)
+    if not proof_row(row):
+        emit("FAIL","no proof protocol on this row"); finish()
+    if row.get("state") in ("closed","cleanup","closing") or row.get("agent_closed"):
+        emit("FAIL","agent is closed"); finish()
+    if row["role"]=="review":
+        if a.against is None:
+            print("orch verify: --against is required for a review row",file=sys.stderr); raise SystemExit(2)
+        against=Path(os.path.realpath(a.against))
+        if not against.is_dir(): fail(f"--against is not a directory: {a.against}")
+    elif a.against is not None:
+        emit("FAIL","--against applies to review rows only"); finish()
+    for part in (Path(row["tree"])/".orch", proof_dir(row)):
+        if os.path.islink(part): emit("FAIL",f"proof dir refused; {part} is a symlink"); finish()
+    try: start=verdict_binding(row)
+    except OSError as exc:
+        emit("FAIL",f"cannot read proof: {exc}"); finish()
+    if row["role"]=="build":
+        start["fingerprint"]=live_fingerprint_once(row["tree"])
+        verify_build(row,emit)
+        if not failures:
+            try: code,log=clean_run(row,proof_dir(row))
+            except (RuntimeError,OSError) as exc: emit("FAIL",f"clean run could not start: {exc}")
+            else:
+                if code==0: emit("PASS",f"clean run exit=0 (log {log})")
+                else: emit("FAIL",f"clean run exit={code} (log {log})")
+    else:
+        verify_review(row,against,a.want,emit)
+        start["against"]=str(against); start["want"]=a.want
+    outcome="failing" if failures else "passing"
+    try: end=verdict_binding(row)
+    except OSError: end=None
+    if end is not None and row["role"]=="build": end["fingerprint"]=live_fingerprint_once(row["tree"])
+    with locked() as d:
+        current=d["agents"].get(key)
+        same=bool(current) and current.get("name")==row.get("name") and current.get("proof_id")==row.get("proof_id") and current.get("since")==row.get("since") and current.get("state") not in ("closed","cleanup","closing") and not current.get("agent_closed")
+        if same and end is not None and end["digest"]==start["digest"] and end.get("fingerprint")==start.get("fingerprint"):
+            current["verdict"]={"result":outcome,"time":time.time(),"binding":start}
+        else:
+            emit("FAIL","row changed during verify")
+    finish()
 def spawn(a):
     require_runtime(); a.brief=Path(a.brief).expanduser().resolve()
     if not a.brief.is_file(): fail(f"brief does not exist: {a.brief}")
+    proof=a.role in PROOF_ROLES; rules=None
+    if a.role=="build" and not (a.test_cmd or "").strip():
+        print("orch spawn: --test-cmd is required with --role build",file=sys.stderr); raise SystemExit(2)
+    if proof:
+        if not PROOF_NAME.fullmatch(a.name):
+            print(f"orch spawn: a {a.role} worker name must match [A-Za-z0-9][A-Za-z0-9._-]*: {a.name}",file=sys.stderr); raise SystemExit(2)
+        rules=proof_rules(a.role)
     project,tree=project_and_tree(); a.writes |= a.where=="worktree"; key=session_key(a.name); orch=session_key(os.environ["HERDR_PANE_ID"]); created=[]
     with locked() as d:
         require_registered(d)
@@ -344,6 +746,7 @@ def spawn(a):
         destination=tree if a.where!="worktree" else str((Path(project)/f"../{Path(project).name}.wt/{a.name}").resolve())
         if a.writes and any(x.get("tree")==destination and x.get("writes") and x.get("state") in ("not-started","starting","live","cleanup","closing") for x in d["agents"].values()): fail(f"writer already active in tree: {destination}")
         d["agents"][key]={"name":a.name,"pane":None,"orch":orch,"project":project,"kind":a.kind,"model":a.model,"effort":a.effort,"where":a.where,"writes":bool(a.writes),"tree":destination,"branch":f"orch/{a.name}" if a.where=="worktree" else None,"worktree":None,"role":a.role,"created":created,"state":"starting","status":"starting","since":int(time.time()),"started":False,"stopped":False,"agent_closed":False,"pane_closed":False}
+        if proof: d["agents"][key].update(proof=1,proof_id=uuid.uuid4().hex,test_cmd=(a.test_cmd or "").strip() or None)
         save_registry(registry_path(),d)
         try:
             if a.where=="pane":
@@ -366,6 +769,7 @@ def spawn(a):
                 fail(f"pane already held by non-closed agent: {occupied.get('name',occupied_key)} ({pane})")
             d["agents"][key]["pane"]=pane
             save_registry(registry_path(),d)
+            if proof: prepare_proof(d["agents"][key],a.brief,rules)
             argv=["agent","start",a.name,"--kind",a.kind,"--pane",pane,"--"]
             if a.kind=="claude":
                 if a.model: argv += ["--model",a.model]
@@ -463,7 +867,7 @@ def list_agents(a):
         if current.get("paused"):
             current["paused"]["count"] = len(unique_messages(current.get("queue", [])))
             print(f"PAUSED: {current['paused'].get('count', 0)} notice(s) held since {current['paused'].get('time')}")
-        rows=[x for x in d["agents"].values() if (a.all or x.get("orch")==who) and (not a.idle or x.get("status")=="idle") and (not a.role or x.get("role")==a.role)]
+        rows=[x for x in d["agents"].values() if (a.all or x.get("orch")==who) and (not a.idle or (x.get("status")=="idle" and not x.get("proof"))) and (not a.role or x.get("role")==a.role)]
         for x in sorted(rows,key=lambda x:(x.get("role",""),x.get("name",""))): print(f"{x.get('role','?')}\t{x.get('name','?')}\t{x.get('status','unknown')}\t{x.get('where','?')}")
         deliver(d)
 def verify_worktree_close(agent, wt=None):
@@ -483,9 +887,16 @@ def verify_worktree_close(agent, wt=None):
         if merged.returncode:
             commits = subprocess.run(["git","log","--oneline",f"{target}..{ref}"],cwd=os.getcwd(),text=True,capture_output=True)
             unmerged.append(f"{label}: {commits.stdout.strip() or ref}")
-    status = subprocess.run(["git","-C",wt,"status","--porcelain","--ignored"],text=True,capture_output=True) if wt else None
-    if unmerged or (status and (status.returncode or status.stdout)):
-        dirty_paths = status.stdout.strip() if status else ""
+    owned = proof_row(agent)
+    status = subprocess.run(["git","-C",wt,"status","--porcelain","-z","--ignored",*(["-uall"] if owned else [])],capture_output=True) if wt else None
+    dirty = ""
+    if status:
+        lines = [entry for entry in status.stdout.decode(errors="surrogateescape").split("\0") if entry]
+        # The row's own proof dir is archived by close, so it is not dirt; every other path still is.
+        prefix = f".orch/{agent['name']}/"
+        dirty = "".join(line + "\n" for line in lines if not (owned and line.startswith("!! ") and line[3:].startswith(prefix)))
+    if unmerged or (status and (status.returncode or dirty)):
+        dirty_paths = dirty.strip() if status else ""
         fail(f"close refused; unmerged commits: {'; '.join(unmerged) or '(none)'}; dirty paths: {dirty_paths or '(none)'}")
 def close_agent(a):
     require_runtime()
@@ -498,6 +909,8 @@ def close_agent(a):
             agent.setdefault("closed_at", time.time()); agent.update(state="closed",status="closed"); deliver(d); return
         if agent.get("state")=="closed" and not agent.get("created"):
             deliver(d); return
+        if proof_row(agent):
+            archive_proof(agent); save_registry(registry_path(),d)
         if agent.get("state")=="closed":
             agent["state"]="cleanup"; agent["agent_closed"]=True
         wt=agent.get("worktree")
@@ -560,6 +973,8 @@ def close_agent(a):
                         exists=subprocess.run(["git","show-ref","--verify","--quiet",ref],cwd=os.getcwd(),capture_output=True)
                         if exists.returncode != 1: fail(f"failed step: remove branch {agent['branch']}: {p.stderr.strip()}")
                 agent["created"].remove(f"branch:{agent['branch']}"); save_registry(registry_path(),d)
+        if proof_row(agent) and not wt and PROOF_NAME.fullmatch(agent["name"]):
+            shutil.rmtree(checked_proof_dir(agent),ignore_errors=True)
         agent.setdefault("closed_at", time.time()); agent.update(state="closed",status="closed"); deliver(d)
 def deregister():
     require_runtime(); key=session_key(os.environ["HERDR_PANE_ID"])
@@ -571,10 +986,12 @@ def parser():
     p=argparse.ArgumentParser(prog="orch"); sub=p.add_subparsers(dest="command",required=True)
     b=sub.add_parser("board",help="show the orch board"); b.add_argument("--once",action="store_true"); b.add_argument("--width",type=int)
     r=sub.add_parser("register"); r.add_argument("--name")
-    s=sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("--role",required=True,choices=["plan","build","review","explore"]); s.add_argument("--kind",required=True,choices=["claude","codex"]); s.add_argument("--model"); s.add_argument("--effort"); s.add_argument("--where",required=True,choices=["pane","tab","worktree"]); s.add_argument("--writes",action="store_true"); s.add_argument("--base"); s.add_argument("--brief",required=True,type=Path)
+    s=sub.add_parser("spawn"); s.add_argument("name"); s.add_argument("--role",required=True,choices=["plan","build","review","explore"]); s.add_argument("--kind",required=True,choices=["claude","codex"]); s.add_argument("--model"); s.add_argument("--effort"); s.add_argument("--where",required=True,choices=["pane","tab","worktree"]); s.add_argument("--writes",action="store_true"); s.add_argument("--base"); s.add_argument("--brief",required=True,type=Path); s.add_argument("--test-cmd")
     ad=sub.add_parser("adopt"); ad.add_argument("target"); ad.add_argument("--role",choices=["plan","build","review","explore"]); ad.add_argument("--name")
     l=sub.add_parser("list"); l.add_argument("--all",action="store_true"); l.add_argument("--idle",action="store_true"); l.add_argument("--role",choices=["plan","build","review","explore"])
     c=sub.add_parser("close"); c.add_argument("name"); c.add_argument("--keep-checkout",action="store_true"); c.add_argument("--discard",action="store_true")
+    v=sub.add_parser("verify",help="check a worker's proof"); v.add_argument("name"); v.add_argument("--against",type=Path); v.add_argument("--want",choices=["REPRODUCED","NOT-REPRODUCED"],default="REPRODUCED")
+    sub.add_parser("fingerprint",help="print the hash of this checkout's current state")
     sub.add_parser("deregister"); rs=sub.add_parser("resume"); rs.add_argument("--name"); return p
 def main(argv=None):
     a=parser().parse_args(argv)
@@ -584,6 +1001,8 @@ def main(argv=None):
     elif a.command=="adopt": adopt(a)
     elif a.command=="list": list_agents(a)
     elif a.command=="close": close_agent(a)
+    elif a.command=="verify": verify(a)
+    elif a.command=="fingerprint": fingerprint_command()
     elif a.command=="deregister": deregister()
     elif a.command=="resume": resume(a.name)
 if __name__=="__main__": main()

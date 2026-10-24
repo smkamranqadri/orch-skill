@@ -66,6 +66,7 @@ root = Path(sys.argv[1])
 required = [root / "skills/orch/SKILL.md"]
 required.extend(root / "skills/orch/commands" / f"{name}.md" for name in ("start", "plan", "act", "close", "model"))
 required.append(root / "skills/orch/references/matrix.md")
+required.append(root / "skills/orch/references/proof.md")
 missing = [str(path.relative_to(root)) for path in required if not path.is_file()]
 if missing:
     print("incomplete orch skill source: missing " + ", ".join(missing), file=sys.stderr)

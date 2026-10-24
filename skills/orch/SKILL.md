@@ -23,9 +23,11 @@ Run these commands from the registered orch pane inside Herdr:
 ```text
 orch board [--once] [--width COLUMNS]
 orch register [--name NAME]
-orch spawn NAME --role plan|build|review|explore --kind claude|codex [--model MODEL] [--effort EFFORT] --where pane|tab|worktree [--writes] [--base REF] --brief FILE
+orch spawn NAME --role plan|build|review|explore --kind claude|codex [--model MODEL] [--effort EFFORT] --where pane|tab|worktree [--writes] [--base REF] [--test-cmd CMD] --brief FILE
 orch adopt TARGET [--role plan|build|review|explore] [--name NAME]
 orch list [--all] [--idle] [--role ROLE]
+orch verify NAME [--against PATH] [--want REPRODUCED|NOT-REPRODUCED]
+orch fingerprint
 orch close NAME [--keep-checkout] [--discard]
 orch deregister
 orch resume [--name ORCH]
@@ -41,6 +43,30 @@ is explicit. Close removes only resources created by orch. `orch deregister` mar
 and leaves its queue available for adoption. `orch resume` clears the caller's pause and prompt
 window; `--name` selects exactly one current-session orch by name or pane ID and errors on an
 ambiguous match.
+
+## Proof
+
+Build and review workers hand off with proof. `orch spawn --role build` requires
+`--test-cmd CMD`: take it from the Command line in KIS State. Spawn appends the proof rules
+(`references/proof.md`) to the brief and marks the row; plan and explore workers are unchanged.
+A build or review worker whose turn ends without its proof files gets the notice
+`[orch] NAME stopped, no proof`, not `done`; the notice checks only that the files exist.
+
+- Builder proof: a final test run log, its sha256, `orch fingerprint` of the finished tree, and a
+  `mutations.log` for every new guard, listed in `handoff.md`.
+- Reviewer proof: `review.md` with a `findings:` line and an executable `repro.sh`.
+- `orch verify NAME` prints `PASS`, `FAIL` or `MANUAL` lines and `RESULT: PASS|FAIL (n)`; it exits 1
+  on any FAIL. For a build row it checks the handoff, the log, the hash, the fingerprint and the
+  mutation records, then runs the stored test command itself on a snapshot of the worker's current
+  tree (a subprocess with a log under the proof dir, not a pane). This is the one exception to
+  "test runs belong in a plain pane". Run it as one background job.
+- For a review row, `orch verify NAME --against CHECKOUT` runs `repro.sh` against the builder's
+  checkout; `--want NOT-REPRODUCED` re-checks a fix. `MANUAL` findings are reported, not failed.
+- The verdict is stored on the row and shown in the board's Proof column (`missing`, `present`,
+  `failing`, `passing`). It is dropped from `passing`/`failing` when the proof files change.
+- Proof workers are never reused: `orch list --idle` omits them. After merge, close the worker
+  and spawn a fresh one for the next task. `orch close` archives the proof directory to
+  `${XDG_STATE_HOME:-~/.local/state}/orch/proof/SESSION/NAME/` before it removes anything.
 
 ## Placement and proposals
 
@@ -61,8 +87,9 @@ it is based on your judgment. See [matrix format](references/matrix.md).
 
 ## Reuse, notices, and results
 
-Before every prompt, check the agent's context and current status. Re-prompt an idle worker of the
-needed role via `orch list --idle --role ROLE`; spawn only when none is available. Replace an
+Before every prompt, check the agent's context and current status. Re-prompt an idle plan or explore worker of the
+needed role via `orch list --idle --role ROLE`; spawn only when none is available. Build and
+review workers are not reused (see Proof). Replace an
 agent approaching 150–200k context. Use `/clear` between unrelated tasks. Test runs and repetitive
 commands belong in a plain pane using `herdr pane run`, never an agent.
 

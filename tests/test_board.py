@@ -91,15 +91,15 @@ class BoardTests(unittest.TestCase):
             "orch board v1.0.1", "refresh: 1s · last: 12:34:56",
             "Status: All · 2 orchs · 3 agents",
         ])
-        self.assertEqual(plain[4], "Name                            Status         Project           Title")
+        self.assertEqual(plain[4], "Name                            Status         Proof    Project           Title")
         self.assertTrue(plain[5].startswith("─"))
         self.assertIn("orch-skill · 2 queued", plain)
         first_orch = next(i for i, line in enumerate(lines) if "▾ orch-claude" in line)
-        second_orch = next(i for i, line in enumerate(lines) if "▾ orch-codex" in line)
+        second_orch = next(i for i, line in enumerate(lines) if "▾ orch-co" in line)
         self.assertLess(plain.index("orch-skill · 2 queued"), first_orch)
         orch_row = lines[first_orch][2:-2]
-        self.assertEqual((orch_row[:30].strip(), orch_row[32:44].strip(), orch_row[46:62].strip(), orch_row[64:].strip()),
-                         ("▾ orch-claude", "idle  Q:2", "orch-skill", "Fictional task title"))
+        self.assertEqual((orch_row[:30].strip(), orch_row[32:44].strip(), orch_row[46:53].strip(), orch_row[55:71].strip(), orch_row[73:].strip()),
+                         ("▾ orch-claude", "idle  Q:2", "", "orch-skill", "Fictional task title"))
         self.assertEqual([line.strip().split()[0:2] for line in lines[first_orch + 1:first_orch + 3]],
                          [["├", "closedrows"], ["└", "rel-reviewer"]])
         self.assertIn("PAUSED 1", lines[second_orch])
@@ -112,32 +112,31 @@ class BoardTests(unittest.TestCase):
     def test_header_cells_start_at_data_columns_at_supported_widths(self):
         titles = {"session-a/p1": "Fictional task title"}
         expected = {
-            160: ((2, 34, 49, 67), (30, 13, 16, 92), "▾ orch-claude", "Fictional task title"),
-            100: ((2, 34, 49, 67), (30, 13, 16, 32), "▾ orch-claude", "Fictional task title"),
-            67: ((2, 26, 41, 59), (22, 13, 16, 6), "▾ orch-claude", "Ficti…"),
-            55: ((2, 16, 31, 43), (12, 13, 10, 10), "▾ orch-clau…", "Fictional…"),
+            160: ((2, 34, 49, 58, 76), (30, 13, 7, 16, 82), "▾ orch-claude", "orch-skill", "Fictional task title"),
+            100: ((2, 34, 49, 58, 76), (30, 13, 7, 16, 22), "▾ orch-claude", "orch-skill", "Fictional task title"),
+            67: ((2, 25, 40, 49, 59), (21, 13, 7, 8, 6), "▾ orch-claude", "orch-sk…", "Ficti…"),
+            55: ((2, 14, 29, 38, 48), (10, 13, 7, 8, 5), "▾ orch-cl…", "orch-sk…", "Fict…"),
         }
         for width in (160, 100, 67, 55):
             with self.subTest(width=width):
                 lines = self.render(width=width, titles=titles).splitlines()
                 header = lines[4]
-                offsets, cell_widths, expected_name, expected_title = expected[width]
-                name, status, project, title = cell_widths
-                self.assertEqual(tuple(header.find(cell) for cell in ("Name", "Status", "Project", "Title")), offsets)
-                row = next(line for line in lines if line[offsets[1]:offsets[1] + status].strip() == "idle  Q:2")
-                self.assertEqual(tuple(row[offset:offset + cell_width].strip() for offset, cell_width in zip(offsets, (name, status, project, title))),
-                                 (expected_name, "idle  Q:2", "orch-skill", expected_title))
+                offsets, cell_widths, expected_name, expected_project, expected_title = expected[width]
+                self.assertEqual(tuple(header.find(cell) for cell in ("Name", "Status", "Proof", "Project", "Title")), offsets)
+                row = next(line for line in lines if line[offsets[1]:offsets[1] + cell_widths[1]].strip() == "idle  Q:2")
+                self.assertEqual(tuple(row[offset:offset + cell_width].strip() for offset, cell_width in zip(offsets, cell_widths)),
+                                 (expected_name, "idle  Q:2", "", expected_project, expected_title))
 
     def test_narrow_status_column_keeps_status_and_queue_count(self):
         lines = self.render(width=55).splitlines()
-        row = next(line for line in lines if "▾ orch-codex" in line)
-        status_start, status_width = 16, 13
+        row = next(line for line in lines if "▾ orch-co" in line)
+        status_start, status_width = 14, 13
         self.assertEqual(row[status_start:status_start + status_width].strip(), "PAUSED 1  Q:0")
 
         data = sample_registry()
         data["orchs"]["session-b/p1"].pop("paused")
         lines = self.render(width=55, data=data).splitlines()
-        row = next(line for line in lines if "▾ orch-codex" in line)
+        row = next(line for line in lines if "▾ orch-co" in line)
         self.assertEqual(row[status_start:status_start + status_width].strip(), "working  Q:0")
 
     def test_status_column_keeps_large_queue_counts_and_paused_counts_at_all_widths(self):
@@ -457,7 +456,7 @@ class BoardTests(unittest.TestCase):
                 self.assertTrue(all(line.startswith("  ") for line in lines if line))
                 self.assertTrue(all(board.display_width(line) == width for line in lines if line))
                 if width == 55:
-                    self.assertIn("* orphan-wo…", "\n".join(lines))
+                    self.assertIn("* orphan-…", "\n".join(lines))
 
     def test_color_modes_and_no_color(self):
         cases = (("16", "\033[1;34m"), ("256", "\033[1;38;5;111m"), ("truecolor", "\033[1;38;2;130;156;255m"))
