@@ -1,5 +1,6 @@
 # Plan: proof-carrying handoffs and `orch verify` (idea 16)
 
+Status: done, merged to `main` as `7d4508b` 2026-10-24; live check passed (see State).
 Mode: Standard. Scope approved by the owner 2026-10-23. Source: idea 16 in
 `ideas-from-0.12.2.md`; prototype in lore-skill `.orch/lore-2.0/{p1-common.md,review-common.md,verify.sh}`
 (read it for intent only; it is lore-specific and its gaps are listed in the Review below).

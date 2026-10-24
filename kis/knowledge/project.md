@@ -31,10 +31,15 @@ orch that started it.
   statuses are idle, working, blocked, done, unknown (`idle` and `done` both mean stopped);
   `herdr agent get` has `state_change_seq` and, only after a completed turn, `completion_seq`
   (equal to it then); a real turn can end without `completion_seq` (seen after Codex `/new`);
-  Herdr sends 1-8 s false `done` blips mid-turn; all seqs reset on a Herdr restart; Herdr reuses
+  Herdr sends 1-8 s false `done` blips mid-turn, and a Claude worker can show stopped for over 15 s
+  mid-turn (seen 2026-10-23 just after a `/clear`); all seqs reset on a Herdr restart, which also
+  marks registered orchs gone (`orch register` again from the same pane); Herdr reuses
   workspace IDs and a worktree's root pane is always `:p1`, so pane IDs repeat across agents;
-  `herdr plugin log list --plugin ID` shows recent hook runs (exit, stderr), not payloads; `herdr plugin pane open --plugin
+  `herdr plugin log list --plugin ID` shows recent hook runs (exit, stderr), not payloads;
+  `herdr agent send-keys` refuses `/clear`, `herdr agent prompt NAME /clear` works; `herdr plugin pane open --plugin
   --entrypoint --placement` opens a plugin pane. Agent names are unique per Herdr server.
+- Codex's cybersecurity filter can stop a review mid-run (2026-10-23, on a symlink path-escape
+  probe); the reviewer's repro script survives, so the orch can still verify from it.
 - Report back is push only: the plugin delivers to orch, orch never polls.
 - Keep it small. 0.12.2 grew too heavy (ledger, watcher process, gate, usage reader, handoff).
 

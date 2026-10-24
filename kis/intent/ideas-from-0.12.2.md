@@ -30,7 +30,7 @@ Effort S/M/L includes tests.
     skill's own rule to send only `The user asked for this: <brief path>`. Fix: send the pointer
     line, wait for `agent_status` working or `completion_seq` to move, send Enter once if still
     idle, and report a spawn that never starts. Tartib #524. S, plugin/tests.
-16. **Proof-carrying handoffs and `orch verify`.** (From lore 2.0 P1, 2026-10-22.) Worker reports
+16. **Proof-carrying handoffs and `orch verify`.** Done 2026-10-24 (`plan-2026-10-23-proof-handoffs.md`). (From lore 2.0 P1, 2026-10-22.) Worker reports
     were wrong in ways only checking caught: a cited final test log that did not exist, a guard
     that survived its mutation left out of the handoff, swapped counts, a reviewer's wrong sum.
     The orch re-verified by hand each time. Proposal, prototyped in lore-skill
