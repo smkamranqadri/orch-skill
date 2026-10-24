@@ -15,6 +15,9 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import orchlib
+
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 CONTROL_SEQUENCE_RE = re.compile(r"\033(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\033\\))")
@@ -31,6 +34,11 @@ MIN_WORKER_PATH_WIDTH = MIN_OWNER_WIDTH + 3 + MIN_WORKER_WIDTH
 MIN_RUNTIME_WIDTH = len("HOST / MODEL")
 MAX_RUNTIME_WIDTH = 26
 CLOSED_ROW_SECONDS = 600
+PROOF_WIDTH = len("missing")
+PROOF_COLORS = {"missing": "amber", "present": "dim", "failing": "blocked", "passing": "done"}
+TITLE_FLOOR = 6
+PROJECT_FLOOR = 8
+NAME_FLOOR = 10
 
 
 COLOR_16 = {
@@ -340,15 +348,20 @@ def visible_rows(projects: list[dict], now: float) -> list[dict]:
     return [row for row in rows if retained(row)]
 
 
+def proof_cell(row: dict, enabled: bool) -> str:
+    state = orchlib.proof_state(row["node"]) if row["kind"] == "AGENT" else ""
+    return color(state, PROOF_COLORS[state], enabled, terminal_color_mode()) if state in PROOF_COLORS else ""
+
+
 def agent_lines(row: dict, width: int, enabled: bool, last: bool, status_width: int | None = None) -> list[str]:
     name = str(row["node"].get("name") or row["path"][-1])
     connector = "└ " if last else "├ "
     if row.get("orphan"):
         connector = "* "
-    return [format_row(connector + name, status_cell(row, enabled), "", row.get("title", ""), width, status_width)]
+    return [format_row(connector + name, status_cell(row, enabled), "", row.get("title", ""), width, status_width, proof_cell(row, enabled))]
 
 
-def column_widths(width: int, required_status_width: int = 12) -> tuple[int, int, int, int]:
+def column_widths(width: int, required_status_width: int = 12) -> tuple[int, int, int, int, int]:
     available = max(1, width - 4 - 6)
     status = min(max(12, required_status_width), max(1, available - 3))
     if available < 50:
@@ -358,13 +371,18 @@ def column_widths(width: int, required_status_width: int = 12) -> tuple[int, int
     else:
         name = min(30, max(22, available // 3))
         project = 16
-    title = max(1, available - name - status - project)
-    return name, status, project, title
+    # The Proof column and its gap come out of Title first, then Project, then Name.
+    title = available - name - status - project - PROOF_WIDTH - 2
+    deficit = TITLE_FLOOR - title
+    if deficit > 0:
+        taken = min(deficit, max(0, project - PROJECT_FLOOR)); project -= taken; title += taken; deficit -= taken
+        taken = min(deficit, max(0, name - NAME_FLOOR)); name -= taken; title += taken
+    return name, status, PROOF_WIDTH, project, max(1, title)
 
 
-def format_row(name: str, status: str, project: str, title: str, width: int, status_width: int | None = None) -> str:
+def format_row(name: str, status: str, project: str, title: str, width: int, status_width: int | None = None, proof: str = "") -> str:
     widths = column_widths(width, status_width or 12)
-    values = (name, status, project, title)
+    values = (name, status, proof, project, title)
     cells = [truncate(value, limit) for value, limit in zip(values, widths)]
     plain = "  ".join(f"{value}{' ' * max(0, limit - display_width(value))}" for value, limit in zip(cells, widths))
     return padded_line(plain, width)
@@ -404,7 +422,7 @@ def render(data: dict, width: int, enabled: bool, registry: str, refreshed_at: s
         padded_line(f"refresh: {REFRESH_SECONDS}s · last: {last}", width),
         padded_line(f"Status: All · {count_label(orch_count, 'orch', 'orchs')} · {count_label(agent_count, 'agent', 'agents')}", width),
         "",
-        format_row("Name", "Status", "Project", "Title", width, status_width),
+        format_row("Name", "Status", "Project", "Title", width, status_width, "Proof"),
         padded_line("─" * max(1, width - 4), width),
         "",
     ]

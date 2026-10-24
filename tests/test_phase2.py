@@ -920,7 +920,7 @@ else:
     def test_closed_worktree_worker_is_cleaned_up_by_orch_close(self):
         brief = self.root / "brief.txt"
         brief.write_text("Build a fictional widget\n")
-        self.run_cli("spawn", "closed-writer", "--role", "build", "--kind", "claude", "--where", "worktree", "--brief", str(brief))
+        self.run_cli("spawn", "closed-writer", "--role", "build", "--test-cmd", "true", "--kind", "claude", "--where", "worktree", "--brief", str(brief))
         agent = self.registry()["agents"][f"{SESSION}/closed-writer"]
         checkout = pathlib.Path(agent["worktree"])
         branch = f"orch/closed-writer"

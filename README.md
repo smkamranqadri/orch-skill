@@ -74,7 +74,8 @@ overlay. `--width COLUMNS` sets the board width when the board runs in place.
 - Spawns workers in panes, tabs, or dedicated Git worktrees.
 - Routes each worker's done, blocked, or closed notice to its owning orch.
 - Enforces one active writer per checkout and keeps failed worktree cleanup retryable.
-- Shows projects, coordinators, workers, and queued notices in the board pane.
+- Shows projects, coordinators, workers, queued notices and each build or review worker's proof state in the board pane.
+- Requires proof from build and review workers and checks it with `orch verify`: a final run log, a tree fingerprint, mutation records and a clean re-run of the test command, or a reproducible review script.
 - Provides the `orch:start`, `orch:plan`, `orch:act`, `orch:close`, and `orch:model` skill commands.
 
 Read the [orch skill](skills/orch/SKILL.md) for the workflow and command details.

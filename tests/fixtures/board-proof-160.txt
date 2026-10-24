@@ -1,0 +1,20 @@
+  orch board v1.0.1
+  refresh: 1s · last: 12:34:56
+  Status: All · 1 orch · 9 agents
+
+  Name                            Status        Proof    Project           Title
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  orch-skill
+  ▾ orch-main                     idle  Q:0              orch-skill
+  ├ a-empty                       working       missing                    Fictional task a-empty
+  ├ b-present                     working       present                    Fictional task b-present
+  ├ c-passing                     working       passing                    Fictional task c-passing
+  ├ d-failing                     working       failing                    Fictional task d-failing
+  ├ e-stale                       working       present                    Fictional task e-stale
+  ├ f-review                      working       passing                    Fictional task f-review
+  ├ g-explore                     working                                  Fictional task g-explore
+  ├ h-legacy                      working                                  Fictional task h-legacy
+  └ i-plan                        working                                  Fictional task i-plan
+
+  q quit
