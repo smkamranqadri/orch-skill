@@ -88,7 +88,7 @@ class BoardTests(unittest.TestCase):
         lines = rendered.splitlines()
         plain = [line.strip() for line in lines]
         self.assertEqual(plain[:3], [
-            "orch board v1.0.1", "refresh: 1s · last: 12:34:56",
+            "orch board v1.1.0", "refresh: 1s · last: 12:34:56",
             "Status: All · 2 orchs · 3 agents",
         ])
         self.assertEqual(plain[4], "Name                            Status         Proof    Project           Title")
@@ -566,7 +566,7 @@ class BoardTests(unittest.TestCase):
             os.close(master)
             os.close(slave)
         self.assertEqual(process.returncode, 0, error)
-        self.assertIn("orch board v1.0.1", output)
+        self.assertIn("orch board v1.1.0", output)
         self.assertTrue(all(board.display_width(line) == 55 for line in output.splitlines() if line.strip()))
         self.assertEqual(self.calls(env), [["pane", "current", "--current"], ["agent", "get", "fixture-pane"]])
 
@@ -633,7 +633,7 @@ class BoardTests(unittest.TestCase):
             os.close(master)
             os.close(slave)
         self.assertEqual(process.returncode, 0, error)
-        self.assertIn("orch board v1.0.1", output)
+        self.assertIn("orch board v1.1.0", output)
         self.assertNotIn("plugin", [call[0] for call in self.calls(env)[-1:]])
 
     def test_overlay_failure_prints_exact_command(self):
@@ -728,7 +728,7 @@ class BoardTests(unittest.TestCase):
         process, master = self.start_pty(100)
         try:
             initial = self.read_pty_until(master, "─" * 96)
-            self.assertIn("orch board v1.0.1", initial)
+            self.assertIn("orch board v1.1.0", initial)
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 60, 0, 0))
             resized = self.read_pty_until(master, "─" * 56)
             self.assertNotIn("─" * 96, resized)

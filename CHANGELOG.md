@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0 (2026-10-24)
+
+- Proof-carrying handoffs. `orch spawn` appends proof rules to every build and review brief;
+  `--test-cmd CMD` is required for builders. Builders hand off a final run log, its sha256, a tree
+  fingerprint (`orch fingerprint`) and a mutations log; reviewers hand off a `repro.sh` that prints
+  `F<n> REPRODUCED|NOT-REPRODUCED|MANUAL` per finding.
+- New `orch verify NAME`: checks a builder's proof, then re-runs the test command on a snapshot of
+  the uncommitted tree in a temporary worktree; `--against PATH [--want ...]` runs a reviewer's
+  repro script. PASS/FAIL lines only; the verdict is stored and bound to the proof it checked.
+- A build or review turn that ends without proof notifies `stopped, no proof` instead of `done`.
+- The board has a Proof column: missing, present, failing, passing.
+- `orch close` archives a worker's proof to `~/.local/state/orch/proof/<session>/<name>/` before
+  removing anything. Proof workers do one task each and are not offered for reuse.
+- The installer requires `skills/orch/references/proof.md`.
+
 ## 1.0.1 (2026-10-23)
 
 - `orch spawn` sends a one-line pointer to the brief (`The user asked for this: <absolute path>`)

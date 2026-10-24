@@ -21,7 +21,7 @@ import orchlib
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 CONTROL_SEQUENCE_RE = re.compile(r"\033(?:\[[0-?]*[ -/]*[@-~]|\][^\a]*(?:\a|\033\\))")
-BOARD_VERSION = "1.0.1"
+BOARD_VERSION = "1.1.0"
 REFRESH_SECONDS = 1
 STATUS_ORDER = {"blocked": 0, "closing": 1, "cleanup": 1, "working": 2, "idle": 3, "done": 3, "unknown": 3, "closed": 4}
 STATUS_GLYPHS = {"blocked": "!", "closing": "◷", "cleanup": "…", "working": "▶", "idle": "○", "done": "✓", "unknown": "?", "closed": "×"}

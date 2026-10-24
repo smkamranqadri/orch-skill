@@ -1,15 +1,15 @@
 # Current
 
-Stamp: main 7d4508b 18856edcdbd7
+Stamp: main 01cd7c0 2b5f87a2653f
 
-- Branch: `main` at `7d4508b` (local merge of `orch/proof-build`, 2026-10-24), not pushed;
-  `origin/main` is at `540f8b1` (1.0.1). Version 1.0.1 (CHANGELOG, plugin manifest, board header), released 2026-10-23 as tag `v1.0.1`
-  and a GitHub release; `v1.0.0` is a tag only. No other branches or worktrees, local or remote
+- Branch: `main`, pushed to `origin/main` 2026-10-24 (includes merge `7d4508b` of `orch/proof-build`).
+  Version 1.1.0 (CHANGELOG, plugin manifest, board header), released 2026-10-24 as tag `v1.1.0`
+  and a GitHub release (1.0.1 likewise 2026-10-23); `v1.0.0` is a tag only. No other branches or worktrees, local or remote
   (`orch-0.12.2` is gone); all build and review agents are closed
   (the orch `orch-fix`, pane `w1B:p1`, is still registered). The old 0.12.2 build is gone from the tree (history
   `613aa67`); ideas worth keeping are in `kis/intent/ideas-from-0.12.2.md`.
-- Task: plan `kis/intent/plan-2026-10-23-proof-handoffs.md` (idea 16), Mode Standard: done and merged
-  2026-10-24, not released (no CHANGELOG entry, version still 1.0.1). Proof rules appended by spawn,
+- Task: plan `kis/intent/plan-2026-10-23-proof-handoffs.md` (idea 16), Mode Standard: done, merged and
+  released in 1.1.0 2026-10-24. Proof rules appended by spawn,
   `--test-cmd`, `orch verify`, `orch fingerprint`, the no-proof notice, the board Proof column,
   archive-then-close, no reuse of proof workers. Plan review: 12 findings, fixed. Code review: 1
   round, 12 findings (Codex's safety filter stopped the reviewer, so the orch wrote the review from
@@ -26,9 +26,9 @@ Stamp: main 7d4508b 18856edcdbd7
   refuses a worktree holding only ignored `__pycache__` dirs unless `--discard` is passed.
 - Blocker: none.
 - Command: `env -u HERDR_ENV -u XDG_STATE_HOME HOME=$(mktemp -d) ./tests/run.sh` (314 tests,
-  passing on `main` `7d4508b`, 2026-10-24; the PTY tests flake under heavy load, rerun one alone first).
-- Proof: suites re-run by the orchestrator after every merge. 2026-10-23: 1.0.1 installed with
-  `./bootstrap.sh update --source .`, plugin reports 1.0.1, `check --source .` passes. Live (2026-10-19): hook, worker
+  passing on the 1.1.0 tree, 2026-10-24; the PTY tests flake under heavy load, rerun one alone first).
+- Proof: suites re-run by the orchestrator after every merge. 2026-10-24: 1.1.0 installed with
+  `./bootstrap.sh update --source .`, plugin reports 1.1.0, `check --source .` passes. Live (2026-10-19): hook, worker
   spawn and notice delivery; `orch adopt`; `./bootstrap.sh update --repo <github url>` refreshed
   the skill copy and `check` passes. The plugin and the `orch` CLI link still point at this
   checkout: `update` refuses to replace a local plugin link with a GitHub install. Reviewers:
@@ -58,14 +58,13 @@ Stamp: main 7d4508b 18856edcdbd7
   traced only to the stale pane ID (fixed).
 - Cosmetic: history shows two author identities (`T <t@example.invalid>` and the owner). The
   pre-rewrite commits were already public; GitHub Support can purge cached views.
-- Open 1.0.1 defects (seen live 2026-10-23, not fixed): a Claude spawn typed the pointer but the
+- Open defects (seen live 2026-10-23, still in 1.1.0): a Claude spawn typed the pointer but the
   retry Enter did not submit it (exit 1, `not-started`; a manual Enter worked); `orch list` shows
   `status`, so a `not-started` row reads `idle`; the 15 s debounce is too short for Claude mid-turn
   stops. New in idea 16: `orch spawn` writes the proof rules into the caller's brief file in place;
   `orch board` with redirected stdout opens the overlay instead of printing.
-- Next: (0) owner pushes `main` and decides the release of idea 16 (CHANGELOG, version bump).
-  (1) owner picks the next cycle (the open defects above, or the idea list). (2) owner live checks
-  above. (3)
+- Next: (0) owner picks the next cycle (the open defects above, or the idea list). (1) owner live
+  checks above. (2)
   Parked: the herdrctx-style board (its review found a missing title lookup timeout, a fixed
   8-column Project, titles ignoring the session prefix, flat agent rows), row select-and-enter,
   the idea list. Owner decision 2026-10-19: no more builder/reviewer loops for now.
